@@ -1,7 +1,7 @@
 use std::process::Command;
 use serde::Serialize;
 
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Debug, PartialEq, Serialize, Clone)]
 pub struct Device {
     pub name: String,
     pub transport_id: Option<String>,
@@ -24,6 +24,45 @@ impl Adb {
             connected: true,
             device,
         })
+    }
+
+    pub fn new_with_device(device_name: &str) -> Result<Self, String> {
+        // First, list devices
+        let mut devices = Self::list_devices();
+        if let Some(device) = devices.iter().find(|d| d.name == device_name) {
+            return Ok(Adb {
+                connected: true,
+                device: Some(device.clone()),
+            });
+        }
+        // Try to connect
+        let output = std::process::Command::new("adb")
+            .arg("connect")
+            .arg(device_name)
+            .output()
+            .map_err(|e| format!("Failed to run adb connect: {}", e))?;
+        let stdout_str = String::from_utf8_lossy(&output.stdout);
+        let stderr_str = String::from_utf8_lossy(&output.stderr);
+        if !output.status.success()
+            || stdout_str.contains("Connection refused")
+            || stderr_str.contains("Connection refused")
+        {
+            return Err(format!(
+                "adb connect failed: Out:{}\nErr:{}\n Try: 'adb tcpip 5555'",
+                stdout_str,
+                stderr_str
+            ));
+        }
+        print!("connect: {}", stdout_str);
+        // List devices again
+        devices = Self::list_devices();
+        if let Some(device) = devices.iter().find(|d| d.name == device_name) {
+            return Ok(Adb {
+                connected: true,
+                device: Some(device.clone()),
+            });
+        }
+        Err(format!("Device '{}' not found after connect", device_name))
     }
 
     pub fn parse_devices(output: &str) -> Vec<Device> {
