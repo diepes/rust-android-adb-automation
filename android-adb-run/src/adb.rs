@@ -98,6 +98,30 @@ impl Adb {
         let stdout = String::from_utf8_lossy(&output.stdout);
         Self::parse_devices(&stdout)
     }
+
+    pub fn screen_capture(&self, output_path: &str) -> Result<(), String> {
+        let mut cmd = Command::new("adb");
+        if let Some(device) = &self.device {
+            if let Some(ref transport_id) = device.transport_id {
+                cmd.arg("-t").arg(transport_id);
+            }
+        }
+        let output = cmd
+            .arg("exec-out")
+            .arg("screencap")
+            .arg("-p")
+            .output()
+            .map_err(|e| format!("Failed to run adb screencap: {}", e))?;
+        if !output.status.success() {
+            return Err(format!(
+                "adb screencap failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        std::fs::write(output_path, &output.stdout)
+            .map_err(|e| format!("Failed to write PNG file: {}", e))?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
