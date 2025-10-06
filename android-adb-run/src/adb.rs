@@ -9,11 +9,21 @@ pub struct Device {
 
 pub struct Adb {
     pub connected: bool,
+    pub device: Option<Device>,
 }
 
 impl Adb {
-    pub fn new() -> Self {
-        Adb { connected: false }
+    pub fn new() -> Result<Self, String> {
+        let devices = Self::list_devices();
+        if devices.is_empty() {
+            return Err("No devices available".to_string());
+        }
+        // Use the first device found
+        let device = devices.into_iter().next();
+        Ok(Adb {
+            connected: true,
+            device,
+        })
     }
 
     pub fn parse_devices(output: &str) -> Vec<Device> {

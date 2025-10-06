@@ -1,7 +1,15 @@
 [package]
 name = "android-adb-run"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
-serde = { version = "1.0.228", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+
+[lib]
+name = "android_adb_run"
+path = "src/lib.rs"
+
+[[bin]]
+name = "android-adb-run"
+path = "src/main.rs"
