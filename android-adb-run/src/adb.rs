@@ -8,32 +8,69 @@ pub struct Device {
 }
 
 pub struct Adb {
-    pub connected: bool,
-    pub device: Option<Device>,
+    pub device: Device,
+    pub transport_id: u32,
+    pub screen_x: u32,
+    pub screen_y: u32,
 }
 
 impl Adb {
-    pub fn new() -> Result<Self, String> {
+    pub fn new(transport_id: Option<&str>) -> Result<Self, String> {
         let devices = Self::list_devices();
         if devices.is_empty() {
             return Err("No devices available".to_string());
         }
-        // Use the first device found
-        let device = devices.into_iter().next();
+        let device = match transport_id {
+            Some(tid) => devices.into_iter().find(|d| d.transport_id.as_deref() == Some(tid)),
+            None => devices.into_iter().next(),
+        };
+        let device = match device {
+            Some(d) => d,
+            None => return Err("Device with specified transport_id not found".to_string()),
+        };
+        let transport_id = match &device.transport_id {
+            Some(tid_str) => tid_str.parse::<u32>().map_err(|_| "Invalid transport_id format".to_string())?,
+            None => return Err("Device missing transport_id".to_string()),
+        };
+        let (screen_x, screen_y) = Self::get_screen_size()?;
         Ok(Adb {
-            connected: true,
+            transport_id,
             device,
+            screen_x,
+            screen_y,
         })
+    }
+
+    fn get_screen_size() -> Result<(u32, u32), String> {
+        let output = Command::new("adb")
+            .arg("shell")
+            .arg("wm")
+            .arg("size")
+            .output()
+            .map_err(|e| format!("Failed to run adb shell wm size: {}", e))?;
+        if !output.status.success() {
+            return Err(format!("adb shell wm size failed: {}", String::from_utf8_lossy(&output.stderr)));
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // Example output: "Physical size: 1080x2400"
+        for line in stdout.lines() {
+            if let Some(size_str) = line.strip_prefix("Physical size: ") {
+                let parts: Vec<&str> = size_str.trim().split('x').collect();
+                if parts.len() == 2 {
+                    if let (Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                        return Ok((x, y));
+                    }
+                }
+            }
+        }
+        Err("Could not parse screen size".to_string())
     }
 
     pub fn new_with_device(device_name: &str) -> Result<Self, String> {
         // First, list devices
-        let mut devices = Self::list_devices();
+        let devices = Self::list_devices();
         if let Some(device) = devices.iter().find(|d| d.name == device_name) {
-            return Ok(Adb {
-                connected: true,
-                device: Some(device.clone()),
-            });
+            return Self::new(device.transport_id.as_deref());
         }
         // Try to connect
         let output = std::process::Command::new("adb")
@@ -55,12 +92,9 @@ impl Adb {
         }
         print!("connect: {}", stdout_str);
         // List devices again
-        devices = Self::list_devices();
+        let devices = Self::list_devices();
         if let Some(device) = devices.iter().find(|d| d.name == device_name) {
-            return Ok(Adb {
-                connected: true,
-                device: Some(device.clone()),
-            });
+            return Self::new(device.transport_id.as_deref());
         }
         Err(format!("Device '{}' not found after connect", device_name))
     }
@@ -101,11 +135,7 @@ impl Adb {
 
     pub fn screen_capture(&self, output_path: &str) -> Result<(), String> {
         let mut cmd = Command::new("adb");
-        if let Some(device) = &self.device {
-            if let Some(ref transport_id) = device.transport_id {
-                cmd.arg("-t").arg(transport_id);
-            }
-        }
+        cmd.arg("-t").arg(self.transport_id.to_string());
         let output = cmd
             .arg("exec-out")
             .arg("screencap")
