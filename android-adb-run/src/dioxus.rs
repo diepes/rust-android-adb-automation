@@ -46,6 +46,8 @@ fn App() -> Element {
     let mut device_info = use_signal(|| None::<(String, u32, u32, u32)>);
     let mut screenshot_data = use_signal(|| None::<String>);
     let mut screenshot_status = use_signal(|| "".to_string());
+    let mut mouse_coords = use_signal(|| None::<(i32, i32)>);
+    let mut device_coords = use_signal(|| None::<(u32, u32)>);
     
     // Initialize ADB connection on first render
     use_effect(move || {
@@ -223,10 +225,107 @@ fn App() -> Element {
                         style: "flex: 0 0 400px; background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 15px; border-radius: 15px; border: 1px solid rgba(255,255,255,0.2); height: fit-content;",
                         if let Some(image_data) = screenshot_data.read().as_ref() {
                             div {
-                                style: "text-align: center;",
+                                style: "text-align: center; position: relative;",
                                 img {
                                     src: "data:image/png;base64,{image_data}",
-                                    style: "max-width: 100%; max-height: 600px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.3);"
+                                    style: "max-width: 100%; max-height: 600px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); cursor: crosshair;",
+                                    onmousemove: move |evt| {
+                                        // Get mouse position relative to the element
+                                        let element_rect = evt.element_coordinates();
+                                        mouse_coords.set(Some((element_rect.x as i32, element_rect.y as i32)));
+                                        
+                                        // Calculate device coordinates based on image scaling
+                                        if let Some((_, _, screen_x, screen_y)) = device_info.read().as_ref() {
+                                            // The image is displayed with max-width: 100% and max-height: 600px
+                                            // We need to calculate the actual scaling factor
+                                            let max_display_width = 400.0; // The container is 400px wide
+                                            let max_display_height = 600.0;
+                                            
+                                            // Calculate the scale to fit the image within the container while maintaining aspect ratio
+                                            let image_aspect = *screen_x as f32 / *screen_y as f32;
+                                            let container_aspect = max_display_width / max_display_height;
+                                            
+                                            let (actual_width, actual_height) = if image_aspect > container_aspect {
+                                                // Image is wider than container aspect ratio, so width is constrained
+                                                (max_display_width, max_display_width / image_aspect)
+                                            } else {
+                                                // Image is taller than container aspect ratio, so height is constrained
+                                                (max_display_height * image_aspect, max_display_height)
+                                            };
+                                            
+                                            // Calculate scale factors
+                                            let scale_x = *screen_x as f32 / actual_width;
+                                            let scale_y = *screen_y as f32 / actual_height;
+                                            
+                                            // Convert mouse coordinates to device coordinates
+                                            let device_x = (element_rect.x as f32 * scale_x) as u32;
+                                            let device_y = (element_rect.y as f32 * scale_y) as u32;
+                                            
+                                            // Clamp to device bounds
+                                            let clamped_x = device_x.min(*screen_x - 1);
+                                            let clamped_y = device_y.min(*screen_y - 1);
+                                            
+                                            device_coords.set(Some((clamped_x, clamped_y)));
+                                        }
+                                    },
+                                    onmouseleave: move |_| {
+                                        mouse_coords.set(None);
+                                        device_coords.set(None);
+                                    },
+                                    onclick: move |evt| {
+                                        // Calculate click coordinates and send tap command
+                                        if let Some((name, _, screen_x, screen_y)) = device_info.read().as_ref() {
+                                            let element_rect = evt.element_coordinates();
+                                            
+                                            // Calculate device coordinates (same logic as in onmousemove)
+                                            let max_display_width = 400.0;
+                                            let max_display_height = 600.0;
+                                            
+                                            let image_aspect = *screen_x as f32 / *screen_y as f32;
+                                            let container_aspect = max_display_width / max_display_height;
+                                            
+                                            let (actual_width, actual_height) = if image_aspect > container_aspect {
+                                                (max_display_width, max_display_width / image_aspect)
+                                            } else {
+                                                (max_display_height * image_aspect, max_display_height)
+                                            };
+                                            
+                                            let scale_x = *screen_x as f32 / actual_width;
+                                            let scale_y = *screen_y as f32 / actual_height;
+                                            
+                                            let device_x = (element_rect.x as f32 * scale_x) as u32;
+                                            let device_y = (element_rect.y as f32 * scale_y) as u32;
+                                            
+                                            let clamped_x = device_x.min(*screen_x - 1);
+                                            let clamped_y = device_y.min(*screen_y - 1);
+                                            
+                                            // Send tap command to device
+                                            let name_clone = name.clone();
+                                            match Adb::new_with_device(&name_clone) {
+                                                Ok(adb) => {
+                                                    match adb.tap(clamped_x, clamped_y) {
+                                                        Ok(_) => {
+                                                            screenshot_status.set(format!("✅ Tapped at ({}, {})", clamped_x, clamped_y));
+                                                        }
+                                                        Err(e) => {
+                                                            screenshot_status.set(format!("❌ Tap failed: {}", e));
+                                                        }
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    screenshot_status.set(format!("❌ ADB connection failed: {}", e));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // Coordinate display
+                                if let Some((device_x, device_y)) = device_coords.read().as_ref() {
+                                    div {
+                                        style: "position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.8); color: white; padding: 8px 12px; border-radius: 6px; font-size: 0.9em; font-family: monospace;",
+                                        "Device: {device_x}, {device_y}"
+                                    }
                                 }
                             }
                         }
