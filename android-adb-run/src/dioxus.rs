@@ -24,7 +24,20 @@ fn base64_encode(data: &[u8]) -> String {
 }
 
 pub fn run_gui() {
-    dioxus::launch(App);
+    use dioxus::desktop::{Config, WindowBuilder};
+    
+    let config = Config::new()
+        .with_window(
+            WindowBuilder::new()
+                .with_title("Android ADB Automation")
+                .with_decorations(false)
+                .with_resizable(true)
+                .with_inner_size(dioxus::desktop::LogicalSize::new(1000, 700))
+        );
+    
+    dioxus::LaunchBuilder::desktop()
+        .with_cfg(config)
+        .launch(App);
 }
 
 #[component]
@@ -54,18 +67,14 @@ fn App() -> Element {
 
     rsx! {
         div {
-            style: "padding: 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: white;",
+            style: "padding: 15px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: white;",
             
             // Header
             div {
-                style: "text-align: center; margin-bottom: 30px;",
+                style: "text-align: center; margin-bottom: 20px;",
                 h1 { 
-                    style: "font-size: 2.5em; margin-bottom: 10px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3);",
+                    style: "font-size: 1.8em; margin: 0; text-shadow: 2px 2px 4px rgba(0,0,0,0.3);",
                     "🤖 Android ADB Automation" 
-                }
-                p {
-                    style: "font-size: 1.2em; opacity: 0.9;",
-                    "Remote control and automation for Android devices"
                 }
             }
             
@@ -211,19 +220,10 @@ fn App() -> Element {
                 // Right side - screenshot area
                 if !screenshot_status.read().is_empty() {
                     div {
-                        style: "flex: 0 0 400px; background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 20px; border-radius: 15px; border: 1px solid rgba(255,255,255,0.2); height: fit-content;",
-                        h2 { 
-                            style: "margin-top: 0; color: #87ceeb; text-align: center;",
-                            "📱 Screenshot" 
-                        }
-                        p {
-                            style: "font-size: 1.1em; margin: 10px 0; text-align: center;",
-                            "{screenshot_status.read()}"
-                        }
-                        
+                        style: "flex: 0 0 400px; background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 15px; border-radius: 15px; border: 1px solid rgba(255,255,255,0.2); height: fit-content;",
                         if let Some(image_data) = screenshot_data.read().as_ref() {
                             div {
-                                style: "text-align: center; margin-top: 15px;",
+                                style: "text-align: center;",
                                 img {
                                     src: "data:image/png;base64,{image_data}",
                                     style: "max-width: 100%; max-height: 600px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.3);"
