@@ -152,6 +152,58 @@ impl Adb {
             .map_err(|e| format!("Failed to write PNG file: {}", e))?;
         Ok(())
     }
+
+    pub fn tap(&self, x: u32, y: u32) -> Result<(), String> {
+        if x > self.screen_x || y > self.screen_y {
+            return Err(format!(
+                "Coordinates out of bounds: x={}, y={}, screen_x={}, screen_y={}",
+                x, y, self.screen_x, self.screen_y
+            ));
+        }
+        let output = Command::new("adb")
+            .arg("shell")
+            .arg("input")
+            .arg("tap")
+            .arg(x.to_string())
+            .arg(y.to_string())
+            .output()
+            .map_err(|e| format!("Failed to run adb shell input tap: {}", e))?;
+        if !output.status.success() {
+            return Err(format!(
+                "adb tap failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn swipe(&self, x1: u32, y1: u32, x2: u32, y2: u32, duration: Option<u32>) -> Result<(), String> {
+        if x1 > self.screen_x || y1 > self.screen_y || x2 > self.screen_x || y2 > self.screen_y {
+            return Err(format!(
+                "Swipe coordinates out of bounds: x1={}, y1={}, x2={}, y2={}, screen_x={}, screen_y={}",
+                x1, y1, x2, y2, self.screen_x, self.screen_y
+            ));
+        }
+        let mut cmd = Command::new("adb");
+        cmd.arg("shell")
+            .arg("input")
+            .arg("swipe")
+            .arg(x1.to_string())
+            .arg(y1.to_string())
+            .arg(x2.to_string())
+            .arg(y2.to_string());
+        if let Some(d) = duration {
+            cmd.arg(d.to_string());
+        }
+        let output = cmd.output().map_err(|e| format!("Failed to run adb shell input swipe: {}", e))?;
+        if !output.status.success() {
+            return Err(format!(
+                "adb swipe failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
