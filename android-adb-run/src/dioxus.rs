@@ -45,6 +45,7 @@ fn App() -> Element {
     let mut status = use_signal(|| "Initializing...".to_string());
     let mut device_info = use_signal(|| None::<(String, u32, u32, u32)>);
     let mut screenshot_data = use_signal(|| None::<String>);
+    let mut screenshot_bytes = use_signal(|| None::<Vec<u8>>);
     let mut screenshot_status = use_signal(|| "".to_string());
     let mut mouse_coords = use_signal(|| None::<(i32, i32)>);
     let mut device_coords = use_signal(|| None::<(u32, u32)>);
@@ -154,22 +155,15 @@ fn App() -> Element {
                                 
                                 screenshot_status.set("📸 Taking screenshot...".to_string());
                                 
-                                // Use a blocking approach instead of spawning a thread
+                                // Take screenshot in memory without saving to disk
                                 match Adb::new_with_device(&name_clone) {
                                     Ok(adb) => {
-                                        match adb.screen_capture("gui-screenshot.png") {
-                                            Ok(_) => {
-                                                // Read the PNG file and convert to base64
-                                                match std::fs::read("gui-screenshot.png") {
-                                                    Ok(image_bytes) => {
-                                                        let base64_string = base64_encode(&image_bytes);
-                                                        screenshot_data.set(Some(base64_string));
-                                                        screenshot_status.set("✅ Screenshot captured!".to_string());
-                                                    }
-                                                    Err(e) => {
-                                                        screenshot_status.set(format!("❌ Failed to read image: {}", e));
-                                                    }
-                                                }
+                                        match adb.screen_capture_bytes() {
+                                            Ok(image_bytes) => {
+                                                let base64_string = base64_encode(&image_bytes);
+                                                screenshot_data.set(Some(base64_string));
+                                                screenshot_bytes.set(Some(image_bytes));
+                                                screenshot_status.set("✅ Screenshot captured in memory!".to_string());
                                             }
                                             Err(e) => {
                                                 screenshot_status.set(format!("❌ Screenshot failed: {}", e));
@@ -182,6 +176,33 @@ fn App() -> Element {
                                 }
                             },
                             "📸 Take Screenshot"
+                        }
+                        
+                        // Save to Disk button - only show if we have screenshot data
+                        if screenshot_bytes.read().is_some() {
+                            button {
+                                style: "background: linear-gradient(45deg, #6f42c1, #563d7c); color: white; padding: 15px 25px; border: none; border-radius: 10px; cursor: pointer; font-size: 1.1em; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: all 0.3s ease; min-width: 150px;",
+                                onclick: move |_| {
+                                    if let Some(image_bytes) = screenshot_bytes.read().as_ref() {
+                                        // Generate filename with simple timestamp
+                                        let timestamp = std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap()
+                                            .as_secs();
+                                        let filename = format!("screenshot_{}.png", timestamp);
+                                        
+                                        match std::fs::write(&filename, image_bytes) {
+                                            Ok(_) => {
+                                                screenshot_status.set(format!("✅ Screenshot saved to {}", filename));
+                                            }
+                                            Err(e) => {
+                                                screenshot_status.set(format!("❌ Failed to save: {}", e));
+                                            }
+                                        }
+                                    }
+                                },
+                                "💾 Save to Disk"
+                            }
                         }
                         
                         button {

@@ -134,6 +134,13 @@ impl Adb {
     }
 
     pub fn screen_capture(&self, output_path: &str) -> Result<(), String> {
+        let png_data = self.screen_capture_bytes()?;
+        std::fs::write(output_path, &png_data)
+            .map_err(|e| format!("Failed to write PNG file: {}", e))?;
+        Ok(())
+    }
+
+    pub fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
         let mut cmd = Command::new("adb");
         cmd.arg("-t").arg(self.transport_id.to_string());
         let output = cmd
@@ -148,9 +155,7 @@ impl Adb {
                 String::from_utf8_lossy(&output.stderr)
             ));
         }
-        std::fs::write(output_path, &output.stdout)
-            .map_err(|e| format!("Failed to write PNG file: {}", e))?;
-        Ok(())
+        Ok(output.stdout)
     }
 
     pub fn tap(&self, x: u32, y: u32) -> Result<(), String> {
