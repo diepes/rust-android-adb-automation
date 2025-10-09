@@ -50,6 +50,7 @@ fn App() -> Element {
     let mut mouse_coords = use_signal(|| None::<(i32, i32)>);
     let mut device_coords = use_signal(|| None::<(u32, u32)>);
     let mut auto_update_on_touch = use_signal(|| true);
+    let mut is_loading_screenshot = use_signal(|| false);
     
     // Initialize ADB connection on first render
     use_effect(move || {
@@ -64,16 +65,19 @@ fn App() -> Element {
                 status.set("Connected".to_string());
                 
                 // Automatically take first screenshot on launch
+                is_loading_screenshot.set(true);
                 screenshot_status.set("📸 Taking initial screenshot...".to_string());
                 match adb.screen_capture_bytes() {
                     Ok(image_bytes) => {
                         let base64_string = base64_encode(&image_bytes);
                         screenshot_data.set(Some(base64_string));
-                        screenshot_bytes.set(Some(image_bytes));
+                        screenshot_bytes.set(Some(image_bytes.to_vec()));
                         screenshot_status.set("✅ Initial screenshot captured!".to_string());
+                        is_loading_screenshot.set(false);
                     }
                     Err(e) => {
                         screenshot_status.set(format!("❌ Initial screenshot failed: {}", e));
+                        is_loading_screenshot.set(false);
                     }
                 }
             }
@@ -164,33 +168,60 @@ fn App() -> Element {
                             div {
                         style: "display: flex; gap: 15px; flex-wrap: wrap; justify-content: center;",
                         button {
-                            style: "background: linear-gradient(45deg, #28a745, #20c997); color: white; padding: 15px 25px; border: none; border-radius: 10px; cursor: pointer; font-size: 1.1em; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: all 0.3s ease; min-width: 150px;",
+                            style: if *is_loading_screenshot.read() {
+                                "background: linear-gradient(45deg, #ff6b35, #f7931e); color: white; padding: 15px 25px; border: none; border-radius: 10px; cursor: wait; font-size: 1.1em; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: all 0.3s ease; min-width: 150px; animation: pulse 1.5s infinite;"
+                            } else {
+                                "background: linear-gradient(45deg, #28a745, #20c997); color: white; padding: 15px 25px; border: none; border-radius: 10px; cursor: pointer; font-size: 1.1em; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: all 0.3s ease; min-width: 150px;"
+                            },
                             onclick: move |_| {
+                                if *is_loading_screenshot.read() {
+                                    return; // Prevent multiple clicks while loading
+                                }
+                                
                                 let name_clone = name.clone();
                                 
+                                // Set loading state immediately
+                                is_loading_screenshot.set(true);
                                 screenshot_status.set("📸 Taking screenshot...".to_string());
                                 
-                                // Take screenshot in memory without saving to disk
-                                match Adb::new_with_device(&name_clone) {
-                                    Ok(adb) => {
-                                        match adb.screen_capture_bytes() {
-                                            Ok(image_bytes) => {
-                                                let base64_string = base64_encode(&image_bytes);
-                                                screenshot_data.set(Some(base64_string));
-                                                screenshot_bytes.set(Some(image_bytes));
-                                                screenshot_status.set("✅ Screenshot captured in memory!".to_string());
+                                // Use spawn with a proper delay to allow UI to update
+                                spawn(async move {
+                                    // Small delay to ensure UI updates before starting blocking operation
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                                    
+                                    // Run ADB command in a blocking task using spawn_local with timeout
+                                    let result = async move {
+                                        match Adb::new_with_device(&name_clone) {
+                                            Ok(adb) => {
+                                                match adb.screen_capture_bytes() {
+                                                    Ok(image_bytes) => Ok(image_bytes.to_vec()),
+                                                    Err(e) => Err(format!("Screenshot failed: {}", e)),
+                                                }
                                             }
-                                            Err(e) => {
-                                                screenshot_status.set(format!("❌ Screenshot failed: {}", e));
-                                            }
+                                            Err(e) => Err(format!("ADB connection failed: {}", e)),
+                                        }
+                                    }.await;
+                                    
+                                    // Update UI based on result
+                                    match result {
+                                        Ok(image_bytes) => {
+                                            let base64_string = base64_encode(&image_bytes);
+                                            screenshot_data.set(Some(base64_string));
+                                            screenshot_bytes.set(Some(image_bytes));
+                                            screenshot_status.set("✅ Screenshot captured in memory!".to_string());
+                                        }
+                                        Err(e) => {
+                                            screenshot_status.set(format!("❌ {}", e));
                                         }
                                     }
-                                    Err(e) => {
-                                        screenshot_status.set(format!("❌ ADB connection failed: {}", e));
-                                    }
-                                }
+                                    is_loading_screenshot.set(false);
+                                });
                             },
-                            "📸 Take Screenshot"
+                            if *is_loading_screenshot.read() {
+                                "📸 Taking..."
+                            } else {
+                                "📸 Take Screenshot"
+                            }
                         }
                         
                         // Auto-update checkbox
@@ -281,9 +312,14 @@ fn App() -> Element {
                         if let Some(image_data) = screenshot_data.read().as_ref() {
                             div {
                                 style: "text-align: center; position: relative;",
+                                
                                 img {
                                     src: "data:image/png;base64,{image_data}",
-                                    style: "max-width: 100%; max-height: 600px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); cursor: crosshair;",
+                                    style: if *is_loading_screenshot.read() {
+                                        "max-width: 100%; max-height: 600px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); cursor: crosshair; border: 16px solid #ff4444; box-shadow: 0 0 40px rgba(255, 68, 68, 0.8);"
+                                    } else {
+                                        "max-width: 100%; max-height: 600px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); cursor: crosshair; border: 4px solid rgba(255,255,255,0.2);"
+                                    },
                                     onmousemove: move |evt| {
                                         // Get mouse position relative to the element
                                         let element_rect = evt.element_coordinates();
@@ -356,40 +392,66 @@ fn App() -> Element {
                                             
                                             // Send tap command to device
                                             let name_clone = name.clone();
-                                            match Adb::new_with_device(&name_clone) {
-                                                Ok(adb) => {
-                                                    match adb.tap(clamped_x, clamped_y) {
-                                                        Ok(_) => {
-                                                            screenshot_status.set(format!("✅ Tapped at ({}, {})", clamped_x, clamped_y));
-                                                            
-                                                            // Auto-update screenshot if checkbox is enabled
-                                                            if *auto_update_on_touch.read() {
-                                                                // Add a small delay to let the screen update
-                                                                std::thread::sleep(std::time::Duration::from_millis(500));
-                                                                
-                                                                match adb.screen_capture_bytes() {
-                                                                    Ok(image_bytes) => {
-                                                                        let base64_string = base64_encode(&image_bytes);
-                                                                        screenshot_data.set(Some(base64_string));
-                                                                        screenshot_bytes.set(Some(image_bytes));
-                                                                        screenshot_status.set(format!("✅ Tapped at ({}, {}) - Screenshot updated", clamped_x, clamped_y));
-                                                                    }
-                                                                    Err(e) => {
-                                                                        screenshot_status.set(format!("✅ Tapped at ({}, {}) - Update failed: {}", clamped_x, clamped_y, e));
+                                            let should_auto_update = *auto_update_on_touch.read();
+                                            
+                                            if should_auto_update {
+                                                is_loading_screenshot.set(true);
+                                            }
+                                            
+                                            spawn(async move {
+                                                // Small delay to ensure UI updates
+                                                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                                                
+                                                let result = async move {
+                                                    match Adb::new_with_device(&name_clone) {
+                                                        Ok(adb) => {
+                                                            match adb.tap(clamped_x, clamped_y) {
+                                                                Ok(_) => {
+                                                                    if should_auto_update {
+                                                                        // Add a delay to let the screen update
+                                                                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                                                        match adb.screen_capture_bytes() {
+                                                                            Ok(image_bytes) => Ok((true, image_bytes.to_vec())),
+                                                                            Err(e) => Err(format!("Screenshot failed: {}", e)),
+                                                                        }
+                                                                    } else {
+                                                                        Ok((false, Vec::new()))
                                                                     }
                                                                 }
+                                                                Err(e) => Err(format!("Tap failed: {}", e)),
                                                             }
                                                         }
-                                                        Err(e) => {
-                                                            screenshot_status.set(format!("❌ Tap failed: {}", e));
+                                                        Err(e) => Err(format!("ADB connection failed: {}", e)),
+                                                    }
+                                                }.await;
+                                                
+                                                match result {
+                                                    Ok((updated_screenshot, image_bytes)) => {
+                                                        if updated_screenshot {
+                                                            let base64_string = base64_encode(&image_bytes);
+                                                            screenshot_data.set(Some(base64_string));
+                                                            screenshot_bytes.set(Some(image_bytes));
+                                                            screenshot_status.set(format!("✅ Tapped at ({}, {}) - Screenshot updated", clamped_x, clamped_y));
+                                                            is_loading_screenshot.set(false);
+                                                        } else {
+                                                            screenshot_status.set(format!("✅ Tapped at ({}, {})", clamped_x, clamped_y));
                                                         }
                                                     }
+                                                    Err(e) => {
+                                                        screenshot_status.set(format!("❌ {}", e));
+                                                        is_loading_screenshot.set(false);
+                                                    }
                                                 }
-                                                Err(e) => {
-                                                    screenshot_status.set(format!("❌ ADB connection failed: {}", e));
-                                                }
-                                            }
+                                            });
                                         }
+                                    }
+                                }
+                                
+                                // Loading indicator
+                                if *is_loading_screenshot.read() {
+                                    div {
+                                        style: "position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255, 68, 68, 0.95); color: white; padding: 15px 25px; border-radius: 25px; font-size: 1.2em; font-weight: bold; border: 2px solid white; box-shadow: 0 4px 20px rgba(0,0,0,0.5); z-index: 20;",
+                                        "📸 LOADING..."
                                     }
                                 }
                                 
