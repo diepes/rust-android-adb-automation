@@ -49,6 +49,7 @@ fn App() -> Element {
     let mut screenshot_status = use_signal(|| "".to_string());
     let mut mouse_coords = use_signal(|| None::<(i32, i32)>);
     let mut device_coords = use_signal(|| None::<(u32, u32)>);
+    let mut auto_update_on_touch = use_signal(|| true);
     
     // Initialize ADB connection on first render
     use_effect(move || {
@@ -61,6 +62,20 @@ fn App() -> Element {
                     adb.screen_y,
                 )));
                 status.set("Connected".to_string());
+                
+                // Automatically take first screenshot on launch
+                screenshot_status.set("📸 Taking initial screenshot...".to_string());
+                match adb.screen_capture_bytes() {
+                    Ok(image_bytes) => {
+                        let base64_string = base64_encode(&image_bytes);
+                        screenshot_data.set(Some(base64_string));
+                        screenshot_bytes.set(Some(image_bytes));
+                        screenshot_status.set("✅ Initial screenshot captured!".to_string());
+                    }
+                    Err(e) => {
+                        screenshot_status.set(format!("❌ Initial screenshot failed: {}", e));
+                    }
+                }
             }
             Err(e) => {
                 status.set(format!("Error: {}", e));
@@ -176,6 +191,25 @@ fn App() -> Element {
                                 }
                             },
                             "📸 Take Screenshot"
+                        }
+                        
+                        // Auto-update checkbox
+                        div {
+                            style: "display: flex; align-items: center; justify-content: center; margin: 10px 0; gap: 8px;",
+                            input {
+                                r#type: "checkbox",
+                                id: "auto-update-checkbox",
+                                checked: *auto_update_on_touch.read(),
+                                onchange: move |evt| {
+                                    auto_update_on_touch.set(evt.value().parse().unwrap_or(false));
+                                },
+                                style: "width: 18px; height: 18px; cursor: pointer;"
+                            }
+                            label {
+                                r#for: "auto-update-checkbox",
+                                style: "font-size: 1em; cursor: pointer; user-select: none;",
+                                "📱 Update on touch"
+                            }
                         }
                         
                         // Save to Disk button - only show if we have screenshot data
@@ -327,6 +361,24 @@ fn App() -> Element {
                                                     match adb.tap(clamped_x, clamped_y) {
                                                         Ok(_) => {
                                                             screenshot_status.set(format!("✅ Tapped at ({}, {})", clamped_x, clamped_y));
+                                                            
+                                                            // Auto-update screenshot if checkbox is enabled
+                                                            if *auto_update_on_touch.read() {
+                                                                // Add a small delay to let the screen update
+                                                                std::thread::sleep(std::time::Duration::from_millis(500));
+                                                                
+                                                                match adb.screen_capture_bytes() {
+                                                                    Ok(image_bytes) => {
+                                                                        let base64_string = base64_encode(&image_bytes);
+                                                                        screenshot_data.set(Some(base64_string));
+                                                                        screenshot_bytes.set(Some(image_bytes));
+                                                                        screenshot_status.set(format!("✅ Tapped at ({}, {}) - Screenshot updated", clamped_x, clamped_y));
+                                                                    }
+                                                                    Err(e) => {
+                                                                        screenshot_status.set(format!("✅ Tapped at ({}, {}) - Update failed: {}", clamped_x, clamped_y, e));
+                                                                    }
+                                                                }
+                                                            }
                                                         }
                                                         Err(e) => {
                                                             screenshot_status.set(format!("❌ Tap failed: {}", e));
