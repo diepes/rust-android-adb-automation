@@ -54,37 +54,39 @@ fn App() -> Element {
     
     // Initialize ADB connection on first render
     use_effect(move || {
-        match Adb::new(None) {
-            Ok(adb) => {
-                device_info.set(Some((
-                    adb.device.name.clone(),
-                    adb.transport_id,
-                    adb.screen_x,
-                    adb.screen_y,
-                )));
-                status.set("Connected".to_string());
-                
-                // Automatically take first screenshot on launch
-                is_loading_screenshot.set(true);
-                screenshot_status.set("📸 Taking initial screenshot...".to_string());
-                match adb.screen_capture_bytes() {
-                    Ok(image_bytes) => {
-                        let base64_string = base64_encode(&image_bytes);
-                        screenshot_data.set(Some(base64_string));
-                        screenshot_bytes.set(Some(image_bytes.to_vec()));
-                        screenshot_status.set("✅ Initial screenshot captured!".to_string());
-                        is_loading_screenshot.set(false);
-                    }
-                    Err(e) => {
-                        screenshot_status.set(format!("❌ Initial screenshot failed: {}", e));
-                        is_loading_screenshot.set(false);
+        spawn(async move {
+            match Adb::new(None).await {
+                Ok(adb) => {
+                    device_info.set(Some((
+                        adb.device.name.clone(),
+                        adb.transport_id,
+                        adb.screen_x,
+                        adb.screen_y,
+                    )));
+                    status.set("Connected".to_string());
+                    
+                    // Automatically take first screenshot on launch
+                    is_loading_screenshot.set(true);
+                    screenshot_status.set("📸 Taking initial screenshot...".to_string());
+                    match adb.screen_capture_bytes().await {
+                        Ok(image_bytes) => {
+                            let base64_string = base64_encode(&image_bytes);
+                            screenshot_data.set(Some(base64_string));
+                            screenshot_bytes.set(Some(image_bytes.to_vec()));
+                            screenshot_status.set("✅ Initial screenshot captured!".to_string());
+                            is_loading_screenshot.set(false);
+                        }
+                        Err(e) => {
+                            screenshot_status.set(format!("❌ Initial screenshot failed: {}", e));
+                            is_loading_screenshot.set(false);
+                        }
                     }
                 }
+                Err(e) => {
+                    status.set(format!("Error: {}", e));
+                }
             }
-            Err(e) => {
-                status.set(format!("Error: {}", e));
-            }
-        }
+        });
     });
 
     rsx! {
@@ -184,16 +186,13 @@ fn App() -> Element {
                                 is_loading_screenshot.set(true);
                                 screenshot_status.set("📸 Taking screenshot...".to_string());
                                 
-                                // Use spawn with a proper delay to allow UI to update
+                                // Run ADB command asynchronously
                                 spawn(async move {
-                                    // Small delay to ensure UI updates before starting blocking operation
-                                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-                                    
-                                    // Run ADB command in a blocking task using spawn_local with timeout
+                                    // Run ADB command asynchronously 
                                     let result = async move {
-                                        match Adb::new_with_device(&name_clone) {
+                                        match Adb::new_with_device(&name_clone).await {
                                             Ok(adb) => {
-                                                match adb.screen_capture_bytes() {
+                                                match adb.screen_capture_bytes().await {
                                                     Ok(image_bytes) => Ok(image_bytes.to_vec()),
                                                     Err(e) => Err(format!("Screenshot failed: {}", e)),
                                                 }
@@ -248,22 +247,24 @@ fn App() -> Element {
                             button {
                                 style: "background: linear-gradient(45deg, #6f42c1, #563d7c); color: white; padding: 15px 25px; border: none; border-radius: 10px; cursor: pointer; font-size: 1.1em; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: all 0.3s ease; min-width: 150px;",
                                 onclick: move |_| {
-                                    if let Some(image_bytes) = screenshot_bytes.read().as_ref() {
-                                        // Generate filename with simple timestamp
-                                        let timestamp = std::time::SystemTime::now()
-                                            .duration_since(std::time::UNIX_EPOCH)
-                                            .unwrap()
-                                            .as_secs();
-                                        let filename = format!("screenshot_{}.png", timestamp);
-                                        
-                                        match std::fs::write(&filename, image_bytes) {
-                                            Ok(_) => {
-                                                screenshot_status.set(format!("✅ Screenshot saved to {}", filename));
+                                    if let Some(image_bytes) = screenshot_bytes.read().clone() {
+                                        spawn(async move {
+                                            // Generate filename with simple timestamp
+                                            let timestamp = std::time::SystemTime::now()
+                                                .duration_since(std::time::UNIX_EPOCH)
+                                                .unwrap()
+                                                .as_secs();
+                                            let filename = format!("screenshot_{}.png", timestamp);
+                                            
+                                            match tokio::fs::write(&filename, &image_bytes).await {
+                                                Ok(_) => {
+                                                    screenshot_status.set(format!("✅ Screenshot saved to {}", filename));
+                                                }
+                                                Err(e) => {
+                                                    screenshot_status.set(format!("❌ Failed to save: {}", e));
+                                                }
                                             }
-                                            Err(e) => {
-                                                screenshot_status.set(format!("❌ Failed to save: {}", e));
-                                            }
-                                        }
+                                        });
                                     }
                                 },
                                 "💾 Save to Disk"
@@ -316,9 +317,9 @@ fn App() -> Element {
                                 img {
                                     src: "data:image/png;base64,{image_data}",
                                     style: if *is_loading_screenshot.read() {
-                                        "max-width: 100%; max-height: 600px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); cursor: crosshair; border: 16px solid #ff4444; box-shadow: 0 0 40px rgba(255, 68, 68, 0.8);"
+                                        "max-width: 100%; max-height: 600px; border-radius: 10px; cursor: crosshair; border: 8px solid #ff4444; box-shadow: 0 0 40px rgba(255, 68, 68, 0.8), 0 0 20px rgba(255, 68, 68, 0.6), 0 0 10px rgba(255, 68, 68, 0.4);"
                                     } else {
-                                        "max-width: 100%; max-height: 600px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); cursor: crosshair; border: 4px solid rgba(255,255,255,0.2);"
+                                        "max-width: 100%; max-height: 600px; border-radius: 10px; cursor: crosshair; border: 8px solid rgba(255,255,255,0.2); box-shadow: 0 4px 15px rgba(0,0,0,0.3);"
                                     },
                                     onmousemove: move |evt| {
                                         // Get mouse position relative to the element
@@ -399,18 +400,15 @@ fn App() -> Element {
                                             }
                                             
                                             spawn(async move {
-                                                // Small delay to ensure UI updates
-                                                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-                                                
                                                 let result = async move {
-                                                    match Adb::new_with_device(&name_clone) {
+                                                    match Adb::new_with_device(&name_clone).await {
                                                         Ok(adb) => {
-                                                            match adb.tap(clamped_x, clamped_y) {
+                                                            match adb.tap(clamped_x, clamped_y).await {
                                                                 Ok(_) => {
                                                                     if should_auto_update {
                                                                         // Add a delay to let the screen update
                                                                         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                                                                        match adb.screen_capture_bytes() {
+                                                                        match adb.screen_capture_bytes().await {
                                                                             Ok(image_bytes) => Ok((true, image_bytes.to_vec())),
                                                                             Err(e) => Err(format!("Screenshot failed: {}", e)),
                                                                         }

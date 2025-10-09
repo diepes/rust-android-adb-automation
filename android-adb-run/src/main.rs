@@ -29,7 +29,9 @@ fn main() {
                 return;
             }
             "--screenshot" | "-s" => {
-                take_screenshot();
+                // Use tokio runtime for CLI commands only
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(take_screenshot());
                 return;
             }
             _ => {
@@ -60,8 +62,8 @@ fn print_help() {
     println!("    android-adb-run --screenshot # Take screenshot via CLI");
 }
 
-fn take_screenshot() {
-    match Adb::new(None) {
+async fn take_screenshot() {
+    match Adb::new(None).await {
         Ok(adb) => {
             println!(
                 "📱 Connected to device: {} (transport_id: {}) screen size: {}x{}",
@@ -70,7 +72,7 @@ fn take_screenshot() {
                 adb.screen_x,
                 adb.screen_y
             );
-            match adb.screen_capture("cli-screenshot.png") {
+            match adb.screen_capture("cli-screenshot.png").await {
                 Ok(_) => println!("✅ Screenshot saved to cli-screenshot.png"),
                 Err(e) => println!("❌ Screenshot failed: {}", e),
             }

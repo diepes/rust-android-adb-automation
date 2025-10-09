@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 dioxus = { version = "0.6.3", features = ["desktop"] }
 serde = { version = "1.0", features = ["derive"] }
-tokio = { version = "1.0", features = ["time"] }
+tokio = { version = "1.0", features = ["time", "process", "fs", "rt", "rt-multi-thread", "macros"] }
 
 [lib]
 name = "android_adb_run"

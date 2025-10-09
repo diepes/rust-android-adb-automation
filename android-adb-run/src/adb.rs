@@ -1,4 +1,4 @@
-use std::process::Command;
+use tokio::process::Command;
 use serde::Serialize;
 
 #[derive(Debug, PartialEq, Serialize, Clone)]
@@ -15,8 +15,8 @@ pub struct Adb {
 }
 
 impl Adb {
-    pub fn new(transport_id: Option<&str>) -> Result<Self, String> {
-        let devices = Self::list_devices();
+    pub async fn new(transport_id: Option<&str>) -> Result<Self, String> {
+        let devices = Self::list_devices().await?;
         if devices.is_empty() {
             return Err("No devices available".to_string());
         }
@@ -32,7 +32,7 @@ impl Adb {
             Some(tid_str) => tid_str.parse::<u32>().map_err(|_| "Invalid transport_id format".to_string())?,
             None => return Err("Device missing transport_id".to_string()),
         };
-        let (screen_x, screen_y) = Self::get_screen_size()?;
+        let (screen_x, screen_y) = Self::get_screen_size().await?;
         Ok(Adb {
             transport_id,
             device,
@@ -41,12 +41,13 @@ impl Adb {
         })
     }
 
-    fn get_screen_size() -> Result<(u32, u32), String> {
+    async fn get_screen_size() -> Result<(u32, u32), String> {
         let output = Command::new("adb")
             .arg("shell")
             .arg("wm")
             .arg("size")
             .output()
+            .await
             .map_err(|e| format!("Failed to run adb shell wm size: {}", e))?;
         if !output.status.success() {
             return Err(format!("adb shell wm size failed: {}", String::from_utf8_lossy(&output.stderr)));
@@ -66,17 +67,18 @@ impl Adb {
         Err("Could not parse screen size".to_string())
     }
 
-    pub fn new_with_device(device_name: &str) -> Result<Self, String> {
+    pub async fn new_with_device(device_name: &str) -> Result<Self, String> {
         // First, list devices
-        let devices = Self::list_devices();
+        let devices = Self::list_devices().await?;
         if let Some(device) = devices.iter().find(|d| d.name == device_name) {
-            return Self::new(device.transport_id.as_deref());
+            return Self::new(device.transport_id.as_deref()).await;
         }
         // Try to connect
-        let output = std::process::Command::new("adb")
+        let output = Command::new("adb")
             .arg("connect")
             .arg(device_name)
             .output()
+            .await
             .map_err(|e| format!("Failed to run adb connect: {}", e))?;
         let stdout_str = String::from_utf8_lossy(&output.stdout);
         let stderr_str = String::from_utf8_lossy(&output.stderr);
@@ -92,9 +94,9 @@ impl Adb {
         }
         print!("connect: {}", stdout_str);
         // List devices again
-        let devices = Self::list_devices();
+        let devices = Self::list_devices().await?;
         if let Some(device) = devices.iter().find(|d| d.name == device_name) {
-            return Self::new(device.transport_id.as_deref());
+            return Self::new(device.transport_id.as_deref()).await;
         }
         Err(format!("Device '{}' not found after connect", device_name))
     }
@@ -123,24 +125,29 @@ impl Adb {
             .collect()
     }
 
-    pub fn list_devices() -> Vec<Device> {
+    pub async fn list_devices() -> Result<Vec<Device>, String> {
         let output = Command::new("adb")
             .arg("devices")
             .arg("-l")
             .output()
-            .expect("Failed to execute adb");
+            .await
+            .map_err(|e| format!("Failed to execute adb: {}", e))?;
+        if !output.status.success() {
+            return Err(format!("adb devices failed: {}", String::from_utf8_lossy(&output.stderr)));
+        }
         let stdout = String::from_utf8_lossy(&output.stdout);
-        Self::parse_devices(&stdout)
+        Ok(Self::parse_devices(&stdout))
     }
 
-    pub fn screen_capture(&self, output_path: &str) -> Result<(), String> {
-        let png_data = self.screen_capture_bytes()?;
-        std::fs::write(output_path, &png_data)
+    pub async fn screen_capture(&self, output_path: &str) -> Result<(), String> {
+        let png_data = self.screen_capture_bytes().await?;
+        tokio::fs::write(output_path, &png_data)
+            .await
             .map_err(|e| format!("Failed to write PNG file: {}", e))?;
         Ok(())
     }
 
-    pub fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
+    pub async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
         let mut cmd = Command::new("adb");
         cmd.arg("-t").arg(self.transport_id.to_string());
         let output = cmd
@@ -148,6 +155,7 @@ impl Adb {
             .arg("screencap")
             .arg("-p")
             .output()
+            .await
             .map_err(|e| format!("Failed to run adb screencap: {}", e))?;
         if !output.status.success() {
             return Err(format!(
@@ -158,7 +166,7 @@ impl Adb {
         Ok(output.stdout)
     }
 
-    pub fn tap(&self, x: u32, y: u32) -> Result<(), String> {
+    pub async fn tap(&self, x: u32, y: u32) -> Result<(), String> {
         if x > self.screen_x || y > self.screen_y {
             return Err(format!(
                 "Coordinates out of bounds: x={}, y={}, screen_x={}, screen_y={}",
@@ -172,6 +180,7 @@ impl Adb {
             .arg(x.to_string())
             .arg(y.to_string())
             .output()
+            .await
             .map_err(|e| format!("Failed to run adb shell input tap: {}", e))?;
         if !output.status.success() {
             return Err(format!(
@@ -182,7 +191,7 @@ impl Adb {
         Ok(())
     }
 
-    pub fn swipe(&self, x1: u32, y1: u32, x2: u32, y2: u32, duration: Option<u32>) -> Result<(), String> {
+    pub async fn swipe(&self, x1: u32, y1: u32, x2: u32, y2: u32, duration: Option<u32>) -> Result<(), String> {
         if x1 > self.screen_x || y1 > self.screen_y || x2 > self.screen_x || y2 > self.screen_y {
             return Err(format!(
                 "Swipe coordinates out of bounds: x1={}, y1={}, x2={}, y2={}, screen_x={}, screen_y={}",
@@ -200,7 +209,7 @@ impl Adb {
         if let Some(d) = duration {
             cmd.arg(d.to_string());
         }
-        let output = cmd.output().map_err(|e| format!("Failed to run adb shell input swipe: {}", e))?;
+        let output = cmd.output().await.map_err(|e| format!("Failed to run adb shell input swipe: {}", e))?;
         if !output.status.success() {
             return Err(format!(
                 "adb swipe failed: {}",
