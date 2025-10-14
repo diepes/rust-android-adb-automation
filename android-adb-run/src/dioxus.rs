@@ -273,7 +273,7 @@ fn App() -> Element {
                         
                         button {
                             style: "background: linear-gradient(45deg, #dc3545, #e74c3c); color: white; padding: 15px 25px; border: none; border-radius: 10px; cursor: pointer; font-size: 1.1em; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: all 0.3s ease; min-width: 150px;",
-                            onclick: move |_| {
+                            onclick: move |_| -> () {
                                 std::process::exit(0);
                             },
                             "🚪 Exit Application"
@@ -296,7 +296,7 @@ fn App() -> Element {
                                 style: "display: flex; justify-content: center; margin-top: 20px;",
                                 button {
                                     style: "background: linear-gradient(45deg, #dc3545, #e74c3c); color: white; padding: 15px 25px; border: none; border-radius: 10px; cursor: pointer; font-size: 1.1em; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: all 0.3s ease; min-width: 150px;",
-                                    onclick: move |_| {
+                                    onclick: move |_| -> () {
                                         std::process::exit(0);
                                     },
                                     "🚪 Exit Application"

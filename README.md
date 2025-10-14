@@ -17,7 +17,19 @@ Rust library and CLI tool for automating Android device control through the ADB 
 - Automatic device connection via network
 - Transport ID-based device selection
 
+## Developement and using AI
+
+- Try to keep the rust code modular
+- Use async(tokio) to keep gui responsive
+- Try to follow dioxus best practices
+- Use dioxuis-cli for interactive gui developement and fast reload
+
+      cargo install dioxus-cli
+      
+
 ## Building and Running
+
+- ```cargo install dioxus-cli```
 
 ### Command-Line Tool
 
