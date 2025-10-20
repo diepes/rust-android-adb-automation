@@ -14,8 +14,10 @@ Rust library and CLI tool for automating Android device control through the ADB 
 - Screen size detection
 - Screen capture (PNG format)
 - Touch input simulation (tap, swipe)
+- **GUI with interactive touch**: Click to tap, drag to swipe on live screenshots
 - Automatic device connection via network
 - Transport ID-based device selection
+- Async/non-blocking operations for responsive GUI
 
 ## Developement and using AI
 
@@ -25,7 +27,7 @@ Rust library and CLI tool for automating Android device control through the ADB 
 - Use dioxuis-cli for interactive gui developement and fast reload
 
       cargo install dioxus-cli
-      
+
 
 ## Building and Running
 
@@ -40,6 +42,21 @@ cargo build
 ```
 
 ### GUI Tool (Optional)
+
+```bash
+cd android-adb-run
+./target/debug/android-adb-run --gui
+# or simply
+./target/debug/android-adb-run
+```
+
+#### GUI Features:
+- **Real-time screenshot display** with live coordinate tracking
+- **Click-to-tap**: Click anywhere on the screenshot to tap that location on the device
+- **Drag-to-swipe**: Click and drag to perform swipe gestures
+- **Visual feedback**: Red border and loading indicators during operations
+- **Auto-update**: Optional automatic screenshot after tap/swipe operations
+- **Async operations**: Non-blocking UI with truly async ADB commands
 
 See `DIOXUS_SETUP.md` for GUI setup instructions.
 
@@ -86,7 +103,7 @@ let adb = Adb::new_with_device("oneplus6:5555")?;
 adb.screen_capture("screenshot.png")?;
 ```
 
-### Touch Input
+### Touch Input (CLI)
 ```rust
 // Tap at coordinates (540, 1000)
 adb.tap(540, 1000)?;
@@ -94,6 +111,13 @@ adb.tap(540, 1000)?;
 // Swipe from top to bottom
 adb.swipe(540, 500, 540, 1500, Some(300))?;
 ```
+
+### Touch Input (GUI)
+- **Tap**: Click on the screenshot image to tap that location
+- **Swipe**: Click and drag to create swipe gestures
+- **Gesture Detection**: Short movements (< 10px) = tap, longer movements = swipe
+- **Visual Feedback**: Orange indicator shows swipe start position during gesture
+- **Auto-Screenshot**: Optional refresh after each gesture (checkbox control)
 
 ## adb notes
 

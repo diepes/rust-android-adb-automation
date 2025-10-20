@@ -52,6 +52,37 @@ fn App() -> Element {
     let mut auto_update_on_touch = use_signal(|| true);
     let mut is_loading_screenshot = use_signal(|| false);
     
+    // Swipe gesture state
+    let mut is_swiping = use_signal(|| false);
+    let mut swipe_start = use_signal(|| None::<(u32, u32)>);
+    let mut swipe_end = use_signal(|| None::<(u32, u32)>);
+    
+    // Helper function to calculate device coordinates from mouse coordinates
+    let calculate_device_coords = |element_rect: dioxus::html::geometry::ElementPoint, screen_x: u32, screen_y: u32| -> (u32, u32) {
+        let max_display_width = 400.0;
+        let max_display_height = 600.0;
+        
+        let image_aspect = screen_x as f32 / screen_y as f32;
+        let container_aspect = max_display_width / max_display_height;
+        
+        let (actual_width, actual_height) = if image_aspect > container_aspect {
+            (max_display_width, max_display_width / image_aspect)
+        } else {
+            (max_display_height * image_aspect, max_display_height)
+        };
+        
+        let scale_x = screen_x as f32 / actual_width;
+        let scale_y = screen_y as f32 / actual_height;
+        
+        let device_x = (element_rect.x as f32 * scale_x) as u32;
+        let device_y = (element_rect.y as f32 * scale_y) as u32;
+        
+        let clamped_x = device_x.min(screen_x - 1);
+        let clamped_y = device_y.min(screen_y - 1);
+        
+        (clamped_x, clamped_y)
+    };
+
     // Initialize ADB connection on first render
     use_effect(move || {
         spawn(async move {
@@ -238,7 +269,7 @@ fn App() -> Element {
                             label {
                                 r#for: "auto-update-checkbox",
                                 style: "font-size: 1em; cursor: pointer; user-select: none;",
-                                "📱 Update on touch"
+                                "📱 Update on tap/swipe"
                             }
                         }
                         
@@ -317,130 +348,150 @@ fn App() -> Element {
                                 img {
                                     src: "data:image/png;base64,{image_data}",
                                     style: if *is_loading_screenshot.read() {
-                                        "max-width: 100%; max-height: 600px; border-radius: 10px; cursor: crosshair; border: 8px solid #ff4444; box-shadow: 0 0 40px rgba(255, 68, 68, 0.8), 0 0 20px rgba(255, 68, 68, 0.6), 0 0 10px rgba(255, 68, 68, 0.4);"
+                                        "max-width: 100%; max-height: 600px; border-radius: 10px; cursor: crosshair; border: 8px solid #ff4444; box-shadow: 0 0 40px rgba(255, 68, 68, 0.8), 0 0 20px rgba(255, 68, 68, 0.6), 0 0 10px rgba(255, 68, 68, 0.4); user-select: none;"
                                     } else {
-                                        "max-width: 100%; max-height: 600px; border-radius: 10px; cursor: crosshair; border: 8px solid rgba(255,255,255,0.2); box-shadow: 0 4px 15px rgba(0,0,0,0.3);"
+                                        "max-width: 100%; max-height: 600px; border-radius: 10px; cursor: crosshair; border: 8px solid rgba(255,255,255,0.2); box-shadow: 0 4px 15px rgba(0,0,0,0.3); user-select: none;"
                                     },
                                     onmousemove: move |evt| {
-                                        // Get mouse position relative to the element
                                         let element_rect = evt.element_coordinates();
                                         mouse_coords.set(Some((element_rect.x as i32, element_rect.y as i32)));
                                         
-                                        // Calculate device coordinates based on image scaling
                                         if let Some((_, _, screen_x, screen_y)) = device_info.read().as_ref() {
-                                            // The image is displayed with max-width: 100% and max-height: 600px
-                                            // We need to calculate the actual scaling factor
-                                            let max_display_width = 400.0; // The container is 400px wide
-                                            let max_display_height = 600.0;
-                                            
-                                            // Calculate the scale to fit the image within the container while maintaining aspect ratio
-                                            let image_aspect = *screen_x as f32 / *screen_y as f32;
-                                            let container_aspect = max_display_width / max_display_height;
-                                            
-                                            let (actual_width, actual_height) = if image_aspect > container_aspect {
-                                                // Image is wider than container aspect ratio, so width is constrained
-                                                (max_display_width, max_display_width / image_aspect)
-                                            } else {
-                                                // Image is taller than container aspect ratio, so height is constrained
-                                                (max_display_height * image_aspect, max_display_height)
-                                            };
-                                            
-                                            // Calculate scale factors
-                                            let scale_x = *screen_x as f32 / actual_width;
-                                            let scale_y = *screen_y as f32 / actual_height;
-                                            
-                                            // Convert mouse coordinates to device coordinates
-                                            let device_x = (element_rect.x as f32 * scale_x) as u32;
-                                            let device_y = (element_rect.y as f32 * scale_y) as u32;
-                                            
-                                            // Clamp to device bounds
-                                            let clamped_x = device_x.min(*screen_x - 1);
-                                            let clamped_y = device_y.min(*screen_y - 1);
-                                            
+                                            let (clamped_x, clamped_y) = calculate_device_coords(element_rect, *screen_x, *screen_y);
                                             device_coords.set(Some((clamped_x, clamped_y)));
                                         }
                                     },
                                     onmouseleave: move |_| {
                                         mouse_coords.set(None);
                                         device_coords.set(None);
+                                        // Reset swipe state if mouse leaves
+                                        is_swiping.set(false);
+                                        swipe_start.set(None);
+                                        swipe_end.set(None);
                                     },
-                                    onclick: move |evt| {
-                                        // Calculate click coordinates and send tap command
-                                        if let Some((name, _, screen_x, screen_y)) = device_info.read().as_ref() {
+                                    onmousedown: move |evt| {
+                                        if let Some((_, _, screen_x, screen_y)) = device_info.read().as_ref() {
                                             let element_rect = evt.element_coordinates();
+                                            let (start_x, start_y) = calculate_device_coords(element_rect, *screen_x, *screen_y);
                                             
-                                            // Calculate device coordinates (same logic as in onmousemove)
-                                            let max_display_width = 400.0;
-                                            let max_display_height = 600.0;
-                                            
-                                            let image_aspect = *screen_x as f32 / *screen_y as f32;
-                                            let container_aspect = max_display_width / max_display_height;
-                                            
-                                            let (actual_width, actual_height) = if image_aspect > container_aspect {
-                                                (max_display_width, max_display_width / image_aspect)
-                                            } else {
-                                                (max_display_height * image_aspect, max_display_height)
-                                            };
-                                            
-                                            let scale_x = *screen_x as f32 / actual_width;
-                                            let scale_y = *screen_y as f32 / actual_height;
-                                            
-                                            let device_x = (element_rect.x as f32 * scale_x) as u32;
-                                            let device_y = (element_rect.y as f32 * scale_y) as u32;
-                                            
-                                            let clamped_x = device_x.min(*screen_x - 1);
-                                            let clamped_y = device_y.min(*screen_y - 1);
-                                            
-                                            // Send tap command to device
-                                            let name_clone = name.clone();
-                                            let should_auto_update = *auto_update_on_touch.read();
-                                            
-                                            if should_auto_update {
-                                                is_loading_screenshot.set(true);
-                                            }
-                                            
-                                            spawn(async move {
-                                                let result = async move {
-                                                    match Adb::new_with_device(&name_clone).await {
-                                                        Ok(adb) => {
-                                                            match adb.tap(clamped_x, clamped_y).await {
-                                                                Ok(_) => {
-                                                                    if should_auto_update {
-                                                                        // Add a delay to let the screen update
-                                                                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                                                                        match adb.screen_capture_bytes().await {
-                                                                            Ok(image_bytes) => Ok((true, image_bytes.to_vec())),
-                                                                            Err(e) => Err(format!("Screenshot failed: {}", e)),
+                                            is_swiping.set(true);
+                                            swipe_start.set(Some((start_x, start_y)));
+                                            swipe_end.set(None);
+                                        }
+                                    },
+                                    onmouseup: move |evt| {
+                                        if *is_swiping.read() {
+                                            if let Some((name, _, screen_x, screen_y)) = device_info.read().as_ref() {
+                                                let element_rect = evt.element_coordinates();
+                                                let (end_x, end_y) = calculate_device_coords(element_rect, *screen_x, *screen_y);
+                                                
+                                                if let Some((start_x, start_y)) = *swipe_start.read() {
+                                                    // Calculate distance to determine if it's a tap or swipe
+                                                    let dx = (end_x as i32 - start_x as i32).abs();
+                                                    let dy = (end_y as i32 - start_y as i32).abs();
+                                                    let distance = ((dx * dx + dy * dy) as f32).sqrt();
+                                                    
+                                                    let name_clone = name.clone();
+                                                    let should_auto_update = *auto_update_on_touch.read();
+                                                    
+                                                    if should_auto_update {
+                                                        is_loading_screenshot.set(true);
+                                                    }
+                                                    
+                                                    if distance < 10.0 {
+                                                        // Tap gesture (small movement)
+                                                        spawn(async move {
+                                                            let result = async move {
+                                                                match Adb::new_with_device(&name_clone).await {
+                                                                    Ok(adb) => {
+                                                                        match adb.tap(start_x, start_y).await {
+                                                                            Ok(_) => {
+                                                                                if should_auto_update {
+                                                                                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                                                                    match adb.screen_capture_bytes().await {
+                                                                                        Ok(image_bytes) => Ok((true, image_bytes.to_vec(), format!("tap at ({}, {})", start_x, start_y))),
+                                                                                        Err(e) => Err(format!("Screenshot failed: {}", e)),
+                                                                                    }
+                                                                                } else {
+                                                                                    Ok((false, Vec::new(), format!("tap at ({}, {})", start_x, start_y)))
+                                                                                }
+                                                                            }
+                                                                            Err(e) => Err(format!("Tap failed: {}", e)),
                                                                         }
+                                                                    }
+                                                                    Err(e) => Err(format!("ADB connection failed: {}", e)),
+                                                                }
+                                                            }.await;
+                                                            
+                                                            match result {
+                                                                Ok((updated_screenshot, image_bytes, action)) => {
+                                                                    if updated_screenshot {
+                                                                        let base64_string = base64_encode(&image_bytes);
+                                                                        screenshot_data.set(Some(base64_string));
+                                                                        screenshot_bytes.set(Some(image_bytes));
+                                                                        screenshot_status.set(format!("✅ Tapped at ({}, {}) - Screenshot updated", start_x, start_y));
+                                                                        is_loading_screenshot.set(false);
                                                                     } else {
-                                                                        Ok((false, Vec::new()))
+                                                                        screenshot_status.set(format!("✅ Tapped at ({}, {})", start_x, start_y));
                                                                     }
                                                                 }
-                                                                Err(e) => Err(format!("Tap failed: {}", e)),
+                                                                Err(e) => {
+                                                                    screenshot_status.set(format!("❌ {}", e));
+                                                                    is_loading_screenshot.set(false);
+                                                                }
                                                             }
-                                                        }
-                                                        Err(e) => Err(format!("ADB connection failed: {}", e)),
-                                                    }
-                                                }.await;
-                                                
-                                                match result {
-                                                    Ok((updated_screenshot, image_bytes)) => {
-                                                        if updated_screenshot {
-                                                            let base64_string = base64_encode(&image_bytes);
-                                                            screenshot_data.set(Some(base64_string));
-                                                            screenshot_bytes.set(Some(image_bytes));
-                                                            screenshot_status.set(format!("✅ Tapped at ({}, {}) - Screenshot updated", clamped_x, clamped_y));
-                                                            is_loading_screenshot.set(false);
-                                                        } else {
-                                                            screenshot_status.set(format!("✅ Tapped at ({}, {})", clamped_x, clamped_y));
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        screenshot_status.set(format!("❌ {}", e));
-                                                        is_loading_screenshot.set(false);
+                                                        });
+                                                    } else {
+                                                        // Swipe gesture (significant movement)
+                                                        spawn(async move {
+                                                            let result = async move {
+                                                                match Adb::new_with_device(&name_clone).await {
+                                                                    Ok(adb) => {
+                                                                        match adb.swipe(start_x, start_y, end_x, end_y, Some(300)).await {
+                                                                            Ok(_) => {
+                                                                                if should_auto_update {
+                                                                                    tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
+                                                                                    match adb.screen_capture_bytes().await {
+                                                                                        Ok(image_bytes) => Ok((true, image_bytes.to_vec(), format!("swipe from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y))),
+                                                                                        Err(e) => Err(format!("Screenshot failed: {}", e)),
+                                                                                    }
+                                                                                } else {
+                                                                                    Ok((false, Vec::new(), format!("swipe from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y)))
+                                                                                }
+                                                                            }
+                                                                            Err(e) => Err(format!("Swipe failed: {}", e)),
+                                                                        }
+                                                                    }
+                                                                    Err(e) => Err(format!("ADB connection failed: {}", e)),
+                                                                }
+                                                            }.await;
+                                                            
+                                                            match result {
+                                                                Ok((updated_screenshot, image_bytes, action)) => {
+                                                                    if updated_screenshot {
+                                                                        let base64_string = base64_encode(&image_bytes);
+                                                                        screenshot_data.set(Some(base64_string));
+                                                                        screenshot_bytes.set(Some(image_bytes));
+                                                                        screenshot_status.set(format!("✅ Swiped from ({}, {}) to ({}, {}) - Screenshot updated", start_x, start_y, end_x, end_y));
+                                                                        is_loading_screenshot.set(false);
+                                                                    } else {
+                                                                        screenshot_status.set(format!("✅ Swiped from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y));
+                                                                    }
+                                                                }
+                                                                Err(e) => {
+                                                                    screenshot_status.set(format!("❌ {}", e));
+                                                                    is_loading_screenshot.set(false);
+                                                                }
+                                                            }
+                                                        });
                                                     }
                                                 }
-                                            });
+                                            }
+                                            
+                                            // Reset swipe state
+                                            is_swiping.set(false);
+                                            swipe_start.set(None);
+                                            swipe_end.set(None);
                                         }
                                     }
                                 }
@@ -458,6 +509,16 @@ fn App() -> Element {
                                     div {
                                         style: "position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.8); color: white; padding: 8px 12px; border-radius: 6px; font-size: 0.9em; font-family: monospace;",
                                         "Device: {device_x}, {device_y}"
+                                    }
+                                }
+                                
+                                // Swipe indicator
+                                if *is_swiping.read() {
+                                    if let Some((start_x, start_y)) = *swipe_start.read() {
+                                        div {
+                                            style: "position: absolute; top: 10px; left: 10px; background: rgba(255, 165, 0, 0.9); color: white; padding: 8px 12px; border-radius: 6px; font-size: 0.9em; font-family: monospace; border: 2px solid orange;",
+                                            "🔄 Swipe from: ({start_x}, {start_y})"
+                                        }
                                     }
                                 }
                             }
