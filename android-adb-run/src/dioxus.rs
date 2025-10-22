@@ -120,40 +120,44 @@ fn App() -> Element {
         });
     });
 
+    // Prepare compact status display variables
+    let current_status = status.read().clone();
+    let status_label = if current_status.contains("Connected") {
+        "Connected"
+    } else if current_status.contains("Error") {
+        "Error"
+    } else {
+        current_status.as_str()
+    };
+    let status_style = if current_status.contains("Connected") {
+        "background: #1f5130; color: #48ff9b; border: 1px solid #48ff9b; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; letter-spacing: 0.5px; font-weight: 600;"
+    } else if current_status.contains("Error") {
+        "background: #5a1f1f; color: #ff6262; border: 1px solid #ff6262; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; letter-spacing: 0.5px; font-weight: 600;"
+    } else {
+        "background: #5a4b1f; color: #ffd857; border: 1px solid #ffd857; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; letter-spacing: 0.5px; font-weight: 600;"
+    };
+
     rsx! {
         div {
-            style: "padding: 15px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: white;",
-            
-            // Header
+            // Reduced padding and removed full-viewport min-height
+            style: "padding: 10px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;",
+            // Compact top bar with heading on left and one-line status indicator
             div {
-                style: "text-align: center; margin-bottom: 20px;",
-                h1 { 
-                    style: "font-size: 1.8em; margin: 0; text-shadow: 2px 2px 4px rgba(0,0,0,0.3);",
-                    "🤖 Android ADB Automation" 
+                style: "display: flex; align-items: center; gap: 14px; margin-bottom: 8px;",
+                h1 {
+                    style: "font-size: 1.25em; margin: 0; font-weight: 600; text-shadow: 1px 1px 2px rgba(0,0,0,0.35);",
+                    "🤖 Android ADB Automation"
+                }
+                span {
+                    style: "{status_style}",
+                    "{status_label}"
                 }
             }
-            
-            // Main content area with sidebar layout
             div {
-                style: "display: flex; gap: 20px; align-items: flex-start;",
-                
-                // Left side - main content
+                style: "display: flex; gap: 16px; align-items: flex-start;",
                 div {
                     style: "flex: 1; min-width: 0;",
-                    
-                    // Status section
-                    div {
-                        style: "background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 20px; border-radius: 15px; margin-bottom: 20px; border: 1px solid rgba(255,255,255,0.2);",
-                        h2 { 
-                            style: "margin-top: 0; color: #ffd700;",
-                            "📱 Connection Status" 
-                        }
-                        p { 
-                            style: "font-size: 1.1em; margin: 10px 0;",
-                            "Status: {status.read()}" 
-                        }
-                    }
-            
+                    // Removed old multi-line status card
                     // Device info and actions section
                     if let Some((name, transport_id, screen_x, screen_y)) = device_info.read().clone() {
                         div {
