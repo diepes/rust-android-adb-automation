@@ -58,30 +58,39 @@ fn App() -> Element {
     let mut swipe_start = use_signal(|| None::<(u32, u32)>);
     let mut swipe_end = use_signal(|| None::<(u32, u32)>);
     
-    // Helper function to calculate device coordinates from mouse coordinates
+    // Helper function to calculate device coordinates from mouse coordinates (correcting for image border)
     let calculate_device_coords = |element_rect: dioxus::html::geometry::ElementPoint, screen_x: u32, screen_y: u32| -> (u32, u32) {
         let max_display_width = 400.0;
         let max_display_height = 600.0;
-        
+        let border_px = 8.0; // image border thickness
+
+        // Derive displayed image (content) size from aspect ratio constraints
         let image_aspect = screen_x as f32 / screen_y as f32;
         let container_aspect = max_display_width / max_display_height;
-        
-        let (actual_width, actual_height) = if image_aspect > container_aspect {
+        let (outer_w, outer_h) = if image_aspect > container_aspect {
             (max_display_width, max_display_width / image_aspect)
         } else {
             (max_display_height * image_aspect, max_display_height)
         };
-        
-        let scale_x = screen_x as f32 / actual_width;
-        let scale_y = screen_y as f32 / actual_height;
-        
-        let device_x = (element_rect.x as f32 * scale_x) as u32;
-        let device_y = (element_rect.y as f32 * scale_y) as u32;
-        
-        let clamped_x = device_x.min(screen_x - 1);
-        let clamped_y = device_y.min(screen_y - 1);
-        
-        (clamped_x, clamped_y)
+        // Remove border from both sides
+        let displayed_w = (outer_w - border_px * 2.0).max(1.0);
+        let displayed_h = (outer_h - border_px * 2.0).max(1.0);
+
+        // Adjust raw coordinates by border offset
+        let raw_x = element_rect.x as f32 - border_px;
+        let raw_y = element_rect.y as f32 - border_px;
+
+        // Clamp within displayed content
+        let clamped_x_in_display = raw_x.max(0.0).min(displayed_w - 1.0);
+        let clamped_y_in_display = raw_y.max(0.0).min(displayed_h - 1.0);
+
+        // Scale to device coordinates
+        let scale_x = screen_x as f32 / displayed_w;
+        let scale_y = screen_y as f32 / displayed_h;
+        let device_x = (clamped_x_in_display * scale_x) as u32;
+        let device_y = (clamped_y_in_display * scale_y) as u32;
+
+        (device_x.min(screen_x - 1), device_y.min(screen_y - 1))
     };
 
     // Initialize ADB connection on first render
