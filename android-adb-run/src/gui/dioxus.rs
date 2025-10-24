@@ -1,27 +1,7 @@
 use dioxus::prelude::*;
 use crate::adb::Adb;
-
-// Simple base64 encoding function
-fn base64_encode(data: &[u8]) -> String {
-    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut result = String::new();
-    
-    for chunk in data.chunks(3) {
-        let mut buf = [0u8; 3];
-        for (i, &byte) in chunk.iter().enumerate() {
-            buf[i] = byte;
-        }
-        
-        let b = ((buf[0] as u32) << 16) | ((buf[1] as u32) << 8) | (buf[2] as u32);
-        
-        result.push(CHARS[((b >> 18) & 63) as usize] as char);
-        result.push(CHARS[((b >> 12) & 63) as usize] as char);
-        result.push(if chunk.len() > 1 { CHARS[((b >> 6) & 63) as usize] as char } else { '=' });
-        result.push(if chunk.len() > 2 { CHARS[(b & 63) as usize] as char } else { '=' });
-    }
-    
-    result
-}
+use crate::gui::util::base64_encode;
+use crate::gui::components::{header::Header, device_info::DeviceInfo, actions::Actions, screenshot_panel::ScreenshotPanel};
 
 pub fn run_gui() {
     use dioxus::desktop::{Config, WindowBuilder};
@@ -48,18 +28,18 @@ fn App() -> Element {
     let mut screenshot_data = use_signal(|| None::<String>);
     let mut screenshot_bytes = use_signal(|| None::<Vec<u8>>);
     let mut screenshot_status = use_signal(|| "".to_string());
-    let mut mouse_coords = use_signal(|| None::<(i32, i32)>);
-    let mut device_coords = use_signal(|| None::<(u32, u32)>);
-    let mut auto_update_on_touch = use_signal(|| true);
+    let mouse_coords = use_signal(|| None::<(i32, i32)>);
+    let device_coords = use_signal(|| None::<(u32, u32)>);
+    let auto_update_on_touch = use_signal(|| true);
     let mut is_loading_screenshot = use_signal(|| false);
     
     // Swipe gesture state
-    let mut is_swiping = use_signal(|| false);
-    let mut swipe_start = use_signal(|| None::<(u32, u32)>);
-    let mut swipe_end = use_signal(|| None::<(u32, u32)>);
+    let is_swiping = use_signal(|| false);
+    let swipe_start = use_signal(|| None::<(u32, u32)>);
+    let swipe_end = use_signal(|| None::<(u32, u32)>);
     
     // Helper function to calculate device coordinates from mouse coordinates (correcting for image border)
-    let calculate_device_coords = |element_rect: dioxus::html::geometry::ElementPoint, screen_x: u32, screen_y: u32| -> (u32, u32) {
+    fn calculate_device_coords(element_rect: dioxus::html::geometry::ElementPoint, screen_x: u32, screen_y: u32) -> (u32, u32) {
         let max_display_width = 400.0;
         let max_display_height = 600.0;
         let border_px = 8.0; // image border thickness
@@ -91,7 +71,7 @@ fn App() -> Element {
         let device_y = (clamped_y_in_display * scale_y) as u32;
 
         (device_x.min(screen_x - 1), device_y.min(screen_y - 1))
-    };
+    }
 
     // Initialize ADB connection on first render
     use_effect(move || {
@@ -148,395 +128,24 @@ fn App() -> Element {
     };
 
     rsx! {
-        div {
-            style: "height: 100vh; display: flex; flex-direction: column; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: 2px solid rgba(255,255,255,0.25); box-sizing: border-box;",
-            div { style: "flex: 1; overflow: auto; padding: 8px;",
-                // Slim top bar (no heading now)
-                div {
-                    style: "display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px;",
-                }
-                // Main content split
-                div { style: "display: flex; gap: 14px; align-items: flex-start;",
+        div { style: "height:100vh; display:flex; flex-direction:column; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:white; border:2px solid rgba(255,255,255,0.25); box-sizing:border-box;",
+            div { style: "flex:1; overflow:auto; padding:8px;",
+                div { style: "display:flex; gap:14px; align-items:flex-start;",
                     div { style: "flex:1; min-width:0; display:flex; flex-direction:column; gap:10px;",
-                        div { // heading + moved buttons
-                            style: "background: rgba(255,255,255,0.08); padding:6px 10px; border-radius:10px; display:flex; align-items:center; gap:8px; border:1px solid rgba(255,255,255,0.15);",
-                            h1 { style: "font-size:1.05em; margin:0; font-weight:600; text-shadow:1px 1px 2px rgba(0,0,0,0.35);", "🤖 Android ADB Automation" }
-                            button { style: "background: rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); padding:3px 8px; border-radius:5px; font-size:0.65em; cursor:grab;", onmousedown: move |_| -> () { let _ = desktop.window.drag_window(); }, "🖱️ Drag" }
-                            button { style: "background: linear-gradient(135deg,#ff4d4d,#d63333); color:#fff; border:1px solid rgba(255,255,255,0.35); padding:3px 8px; border-radius:5px; font-size:0.65em; cursor:pointer; font-weight:600;", onclick: move |_| -> () { std::process::exit(0); }, "✖ Close" }
-                        }
-                        // Device info & actions (existing code follows)
+                        Header { on_drag: move |_| { let _ = desktop.window.drag_window(); }, on_close: move |_| { std::thread::spawn(|| std::process::exit(0)); } }
                         if let Some((name, transport_id, screen_x, screen_y)) = device_info.read().clone() {
-                            div {
-                                style: "background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 20px; border-radius: 15px; margin-bottom: 20px; border: 1px solid rgba(255,255,255,0.2);",
-                                div { // Device Information title + status indicator
-                                    style: "display: flex; align-items: center; gap: 10px; margin: 0 0 5px 0;",
-                                    h2 { style: "margin: 0; color: #90ee90;", "📋 Device Information" }
-                                    span { style: "{status_style}", "{status_label}" }
-                                }
-                                div {
-                            style: "display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px;",
-                            div {
-                                p { 
-                                    style: "margin: 5px 0; font-size: 1.1em;",
-                                    strong { "Device Name: " }
-                                    span { style: "color: #ffd700;", "{name}" }
-                                }
-                                p { 
-                                    style: "margin: 5px 0; font-size: 1.1em;",
-                                    strong { "Transport ID: " }
-                                    span { style: "color: #ffd700;", "{transport_id}" }
-                                }
-                            }
-                            div {
-                                p { 
-                                    style: "margin: 5px 0; font-size: 1.1em;",
-                                    strong { "Screen Width: " }
-                                    span { style: "color: #ffd700;", "{screen_x}px" }
-                                }
-                                p { 
-                                    style: "margin: 5px 0; font-size: 1.1em;",
-                                    strong { "Screen Height: " }
-                                    span { style: "color: #ffd700;", "{screen_y}px" }
-                                }
-                            }
-                        }
-                                }
-                            
-                            // Action buttons for connected device
-                            div {
-                                style: "background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 20px; border-radius: 15px; margin-bottom: 20px; border: 1px solid rgba(255,255,255,0.2);",
-                                h2 { 
-                                    style: "margin-top: 0; color: #87ceeb;",
-                                    "🎮 Actions" 
-                                }
-                                div {
-                            style: "display: flex; gap: 15px; flex-wrap: wrap; justify-content: center;",
-                            button {
-                                style: if *is_loading_screenshot.read() {
-                                    "background: linear-gradient(45deg, #ff6b35, #f7931e); color: white; padding: 15px 25px; border: none; border-radius: 10px; cursor: wait; font-size: 1.1em; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: all 0.3s ease; min-width: 150px; animation: pulse 1.5s infinite;"
-                                } else {
-                                    "background: linear-gradient(45deg, #28a745, #20c997); color: white; padding: 15px 25px; border: none; border-radius: 10px; cursor: pointer; font-size: 1.1em; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: all 0.3s ease; min-width: 150px;"
-                                },
-                                onclick: move |_| {
-                                    if *is_loading_screenshot.read() {
-                                        return; // Prevent multiple clicks while loading
-                                    }
-                                    
-                                    let name_clone = name.clone();
-                                    
-                                    // Set loading state immediately
-                                    is_loading_screenshot.set(true);
-                                    screenshot_status.set("📸 Taking screenshot...".to_string());
-                                    
-                                    // Run ADB command asynchronously
-                                    spawn(async move {
-                                        // Run ADB command asynchronously 
-                                        let result = async move {
-                                            match Adb::new_with_device(&name_clone).await {
-                                                Ok(adb) => {
-                                                    match adb.screen_capture_bytes().await {
-                                                        Ok(image_bytes) => Ok(image_bytes.to_vec()),
-                                                        Err(e) => Err(format!("Screenshot failed: {}", e)),
-                                                    }
-                                                }
-                                                Err(e) => Err(format!("ADB connection failed: {}", e)),
-                                            }
-                                        }.await;
-                                        
-                                        // Update UI based on result
-                                        match result {
-                                            Ok(image_bytes) => {
-                                                let base64_string = base64_encode(&image_bytes);
-                                                screenshot_data.set(Some(base64_string));
-                                                screenshot_bytes.set(Some(image_bytes));
-                                                screenshot_status.set("✅ Screenshot captured in memory!".to_string());
-                                            }
-                                            Err(e) => {
-                                                screenshot_status.set(format!("❌ {}", e));
-                                            }
-                                        }
-                                        is_loading_screenshot.set(false);
-                                    });
-                                },
-                                if *is_loading_screenshot.read() {
-                                    "📸 Taking..."
-                                } else {
-                                    "📸 Take Screenshot"
-                                }
-                            }
-                            
-                            // Auto-update checkbox
-                            div {
-                                style: "display: flex; align-items: center; justify-content: center; margin: 10px 0; gap: 8px;",
-                                input {
-                                    r#type: "checkbox",
-                                    id: "auto-update-checkbox",
-                                    checked: *auto_update_on_touch.read(),
-                                    onchange: move |evt| {
-                                        auto_update_on_touch.set(evt.value().parse().unwrap_or(false));
-                                    },
-                                    style: "width: 18px; height: 18px; cursor: pointer;"
-                                }
-                                label {
-                                    r#for: "auto-update-checkbox",
-                                    style: "font-size: 1em; cursor: pointer; user-select: none;",
-                                    "📱 Update on tap/swipe"
-                                }
-                            }
-                            
-                            // Save to Disk button - only show if we have screenshot data
-                            if screenshot_bytes.read().is_some() {
-                                button {
-                                    style: "background: linear-gradient(45deg, #6f42c1, #563d7c); color: white; padding: 15px 25px; border: none; border-radius: 10px; cursor: pointer; font-size: 1.1em; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: all 0.3s ease; min-width: 150px;",
-                                    onclick: move |_| {
-                                        if let Some(image_bytes) = screenshot_bytes.read().clone() {
-                                            spawn(async move {
-                                                // Generate filename with simple timestamp
-                                                let timestamp = std::time::SystemTime::now()
-                                                    .duration_since(std::time::UNIX_EPOCH)
-                                                    .unwrap()
-                                                    .as_secs();
-                                                let filename = format!("screenshot_{}.png", timestamp);
-                                                
-                                                match tokio::fs::write(&filename, &image_bytes).await {
-                                                    Ok(_) => {
-                                                        screenshot_status.set(format!("✅ Screenshot saved to {}", filename));
-                                                    }
-                                                    Err(e) => {
-                                                        screenshot_status.set(format!("❌ Failed to save: {}", e));
-                                                    }
-                                                }
-                                            });
-                                        }
-                                    },
-                                    "💾 Save to Disk"
-                                }
-                            }
-                            
-                            button {
-                                style: "background: linear-gradient(45deg, #dc3545, #e74c3c); color: white; padding: 15px 25px; border: none; border-radius: 10px; cursor: pointer; font-size: 1.1em; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: all 0.3s ease; min-width: 150px;",
-                                onclick: move |_| -> () {
-                                    std::process::exit(0);
-                                },
-                                "🚪 Exit Application"
-                            }
-                                }
-                            }
+                            DeviceInfo { name: name.clone(), transport_id: transport_id, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string() }
+                            Actions { name: name.clone(), is_loading: is_loading_screenshot, screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, auto_update_on_touch: auto_update_on_touch }
                         } else {
-                            // No device connected - show exit button
-                            div {
-                                style: "background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 20px; border-radius: 15px; margin-bottom: 20px; border: 1px solid rgba(255,255,255,0.2);",
-                                h2 { 
-                                    style: "margin-top: 0; color: #ffb347;",
-                                    "⚠️ No Device Connected" 
-                                }
-                                p {
-                                    style: "font-size: 1.1em; margin: 15px 0; text-align: center;",
-                                    "Please connect an Android device with ADB enabled, or use the CLI version with specific device commands."
-                                }
-                                div {
-                                    style: "display: flex; justify-content: center; margin-top: 20px;",
-                                    button {
-                                        style: "background: linear-gradient(45deg, #dc3545, #e74c3c); color: white; padding: 15px 25px; border: none; border-radius: 10px; cursor: pointer; font-size: 1.1em; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: all 0.3s ease; min-width: 150px;",
-                                        onclick: move |_| -> () {
-                                            std::process::exit(0);
-                                        },
-                                        "🚪 Exit Application"
-                                    }
-                                }
+                            div { style: "background:rgba(255,255,255,0.1); backdrop-filter:blur(10px); padding:20px; border-radius:15px; margin-bottom:20px; border:1px solid rgba(255,255,255,0.2);",
+                                h2 { style: "margin-top:0; color:#ffb347;", "⚠️ No Device Connected" }
+                                p { style: "font-size:1.1em; margin:15px 0; text-align:center;", "Please connect an Android device with ADB enabled, or use the CLI version." }
+                                button { style: "background:linear-gradient(45deg,#dc3545,#e74c3c); color:white; padding:15px 25px; border:none; border-radius:10px; cursor:pointer; font-size:1.1em; font-weight:bold; min-width:150px;", onclick: move |_| -> () { std::process::exit(0); }, "🚪 Exit Application" }
                             }
                         }
-                        // After actions add compact banner
                         div { style: "margin-top:4px; text-align:left; font-size:0.7em; opacity:0.75; letter-spacing:0.5px;", "Built with Rust 🦀 and Dioxus ⚛️" }
                     }
-                    // Right side - screenshot area
-                    if !screenshot_status.read().is_empty() {
-                        div {
-                            style: "flex: 0 0 400px; background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 15px; border-radius: 15px; border: 1px solid rgba(255,255,255,0.2); height: fit-content;",
-                            if let Some(image_data) = screenshot_data.read().as_ref() {
-                                div {
-                                    style: "text-align: center; position: relative;",
-                                    
-                                    img {
-                                        src: "data:image/png;base64,{image_data}",
-                                        style: if *is_loading_screenshot.read() {
-                                            "max-width: 100%; max-height: 600px; border-radius: 10px; cursor: crosshair; border: 8px solid #ff4444; box-shadow: 0 0 40px rgba(255, 68, 68, 0.8), 0 0 20px rgba(255, 68, 68, 0.6), 0 0 10px rgba(255, 68, 68, 0.4); user-select: none;"
-                                        } else {
-                                            "max-width: 100%; max-height: 600px; border-radius: 10px; cursor: crosshair; border: 8px solid rgba(255,255,255,0.2); box-shadow: 0 4px 15px rgba(0,0,0,0.3); user-select: none;"
-                                        },
-                                        onmousemove: move |evt| {
-                                            let element_rect = evt.element_coordinates();
-                                            mouse_coords.set(Some((element_rect.x as i32, element_rect.y as i32)));
-                                            
-                                            if let Some((_, _, screen_x, screen_y)) = device_info.read().as_ref() {
-                                                let (clamped_x, clamped_y) = calculate_device_coords(element_rect, *screen_x, *screen_y);
-                                                device_coords.set(Some((clamped_x, clamped_y)));
-                                            }
-                                        },
-                                        onmouseleave: move |_| {
-                                            mouse_coords.set(None);
-                                            device_coords.set(None);
-                                            // Reset swipe state if mouse leaves
-                                            is_swiping.set(false);
-                                            swipe_start.set(None);
-                                            swipe_end.set(None);
-                                        },
-                                        onmousedown: move |evt| {
-                                            if let Some((_, _, screen_x, screen_y)) = device_info.read().as_ref() {
-                                                let element_rect = evt.element_coordinates();
-                                                let (start_x, start_y) = calculate_device_coords(element_rect, *screen_x, *screen_y);
-                                                
-                                                is_swiping.set(true);
-                                                swipe_start.set(Some((start_x, start_y)));
-                                                swipe_end.set(None);
-                                            }
-                                        },
-                                        onmouseup: move |evt| {
-                                            if *is_swiping.read() {
-                                                if let Some((name, _, screen_x, screen_y)) = device_info.read().as_ref() {
-                                                    let element_rect = evt.element_coordinates();
-                                                    let (end_x, end_y) = calculate_device_coords(element_rect, *screen_x, *screen_y);
-                                                    
-                                                    if let Some((start_x, start_y)) = *swipe_start.read() {
-                                                        // Calculate distance to determine if it's a tap or swipe
-                                                        let dx = (end_x as i32 - start_x as i32).abs();
-                                                        let dy = (end_y as i32 - start_y as i32).abs();
-                                                        let distance = ((dx * dx + dy * dy) as f32).sqrt();
-                                                        
-                                                        let name_clone = name.clone();
-                                                        let should_auto_update = *auto_update_on_touch.read();
-                                                        
-                                                        if should_auto_update {
-                                                            is_loading_screenshot.set(true);
-                                                        }
-                                                        
-                                                        if distance < 10.0 {
-                                                            // Tap gesture (small movement)
-                                                            spawn(async move {
-                                                                let result = async move {
-                                                                    match Adb::new_with_device(&name_clone).await {
-                                                                        Ok(adb) => {
-                                                                            match adb.tap(start_x, start_y).await {
-                                                                                Ok(_) => {
-                                                                                    if should_auto_update {
-                                                                                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                                                                                        match adb.screen_capture_bytes().await {
-                                                                                            Ok(image_bytes) => Ok((true, image_bytes.to_vec(), format!("tap at ({}, {})", start_x, start_y))),
-                                                                                            Err(e) => Err(format!("Screenshot failed: {}", e)),
-                                                                                        }
-                                                                                    } else {
-                                                                                        Ok((false, Vec::new(), format!("tap at ({}, {})", start_x, start_y)))
-                                                                                    }
-                                                                                }
-                                                                                Err(e) => Err(format!("Tap failed: {}", e)),
-                                                                            }
-                                                                        }
-                                                                        Err(e) => Err(format!("ADB connection failed: {}", e)),
-                                                                    }
-                                                                }.await;
-                                                                
-                                                                match result {
-                                                                    Ok((updated_screenshot, image_bytes, _action)) => {
-                                                                        if updated_screenshot {
-                                                                            let base64_string = base64_encode(&image_bytes);
-                                                                            screenshot_data.set(Some(base64_string));
-                                                                            screenshot_bytes.set(Some(image_bytes));
-                                                                            screenshot_status.set(format!("✅ Tapped at ({}, {}) - Screenshot updated", start_x, start_y));
-                                                                            is_loading_screenshot.set(false);
-                                                                        } else {
-                                                                            screenshot_status.set(format!("✅ Tapped at ({}, {})", start_x, start_y));
-                                                                        }
-                                                                    }
-                                                                    Err(e) => {
-                                                                        screenshot_status.set(format!("❌ {}", e));
-                                                                        is_loading_screenshot.set(false);
-                                                                    }
-                                                                }
-                                                            });
-                                                        } else {
-                                                            // Swipe gesture (significant movement)
-                                                            spawn(async move {
-                                                                let result = async move {
-                                                                    match Adb::new_with_device(&name_clone).await {
-                                                                        Ok(adb) => {
-                                                                            match adb.swipe(start_x, start_y, end_x, end_y, Some(300)).await {
-                                                                                Ok(_) => {
-                                                                                    if should_auto_update {
-                                                                                        tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
-                                                                                        match adb.screen_capture_bytes().await {
-                                                                                            Ok(image_bytes) => Ok((true, image_bytes.to_vec(), format!("swipe from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y))),
-                                                                                            Err(e) => Err(format!("Screenshot failed: {}", e)),
-                                                                                        }
-                                                                                    } else {
-                                                                                        Ok((false, Vec::new(), format!("swipe from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y)))
-                                                                                    }
-                                                                                }
-                                                                                Err(e) => Err(format!("Swipe failed: {}", e)),
-                                                                            }
-                                                                        }
-                                                                        Err(e) => Err(format!("ADB connection failed: {}", e)),
-                                                                    }
-                                                                }.await;
-                                                                
-                                                                match result {
-                                                                    Ok((updated_screenshot, image_bytes, _action)) => {
-                                                                        if updated_screenshot {
-                                                                            let base64_string = base64_encode(&image_bytes);
-                                                                            screenshot_data.set(Some(base64_string));
-                                                                            screenshot_bytes.set(Some(image_bytes));
-                                                                            screenshot_status.set(format!("✅ Swiped from ({}, {}) to ({}, {}) - Screenshot updated", start_x, start_y, end_x, end_y));
-                                                                            is_loading_screenshot.set(false);
-                                                                        } else {
-                                                                            screenshot_status.set(format!("✅ Swiped from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y));
-                                                                        }
-                                                                    }
-                                                                    Err(e) => {
-                                                                        screenshot_status.set(format!("❌ {}", e));
-                                                                        is_loading_screenshot.set(false);
-                                                                    }
-                                                                }
-                                                            });
-                                                        }
-                                                    }
-                                                }
-                                                
-                                                // Reset swipe state
-                                                is_swiping.set(false);
-                                                swipe_start.set(None);
-                                                swipe_end.set(None);
-                                            }
-                                        }
-                                    }
-                                    
-                                    // Loading indicator
-                                    if *is_loading_screenshot.read() {
-                                        div {
-                                            style: "position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255, 68, 68, 0.95); color: white; padding: 15px 25px; border-radius: 25px; font-size: 1.2em; font-weight: bold; border: 2px solid white; box-shadow: 0 4px 20px rgba(0,0,0,0.5); z-index: 20;",
-                                            "📸 LOADING..."
-                                        }
-                                    }
-                                    
-                                    // Coordinate display
-                                    if let Some((device_x, device_y)) = device_coords.read().as_ref() {
-                                        div {
-                                            style: "position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.8); color: white; padding: 8px 12px; border-radius: 6px; font-size: 0.9em; font-family: monospace;",
-                                            "Device: {device_x}, {device_y}"
-                                        }
-                                    }
-                                    
-                                    // Swipe indicator
-                                    if *is_swiping.read() {
-                                        if let Some((start_x, start_y)) = *swipe_start.read() {
-                                            div {
-                                                style: "position: absolute; top: 10px; left: 10px; background: rgba(255, 165, 0, 0.9); color: white; padding: 8px 12px; border-radius: 6px; font-size: 0.9em; font-family: monospace; border: 2px solid orange;",
-                                                "🔄 Swipe from: ({start_x}, {start_y})"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    ScreenshotPanel { screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, device_info: device_info, device_coords: device_coords, mouse_coords: mouse_coords, is_loading_screenshot: is_loading_screenshot, auto_update_on_touch: auto_update_on_touch, is_swiping: is_swiping, swipe_start: swipe_start, swipe_end: swipe_end, calculate_device_coords: calculate_device_coords }
                 }
             }
         }

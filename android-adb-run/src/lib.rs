@@ -1,5 +1,5 @@
 pub mod adb;
-pub mod gui; // moved dioxus under gui
+pub mod gui; // replaced old dioxus root module
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
