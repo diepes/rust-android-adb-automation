@@ -26,12 +26,15 @@ Rust library and CLI tool for automating Android device control through the ADB 
 - Try to follow dioxus best practices
 - Use dioxuis-cli for interactive gui developement and fast reload
 
-      cargo install dioxus-cli
-
+```bash
+cargo install dioxus-cli
+```
 
 ## Building and Running
 
-- ```cargo install dioxus-cli```
+```bash
+cargo install dioxus-cli
+```
 
 ### Command-Line Tool
 
@@ -50,13 +53,19 @@ cd android-adb-run
 ./target/debug/android-adb-run
 ```
 
-#### GUI Features:
-- **Real-time screenshot display** with live coordinate tracking
-- **Click-to-tap**: Click anywhere on the screenshot to tap that location on the device
-- **Drag-to-swipe**: Click and drag to perform swipe gestures
-- **Visual feedback**: Red border and loading indicators during operations
-- **Auto-update**: Optional automatic screenshot after tap/swipe operations
-- **Async operations**: Non-blocking UI with truly async ADB commands
+#### GUI Features
+
+- **Compact borderless window** with custom drag and close buttons
+- **Merged heading + status indicator** inside Device Information panel
+- **Reduced vertical footprint**: slim screenshot (max-height 560px) and minimal paddings
+- **Real-time screenshot display** with live mouse & mapped device coordinates overlay
+- **Click-to-tap**: Click anywhere on the screenshot to tap that location
+- **Drag-to-swipe**: Click and drag (>=10px movement) to perform swipe gestures
+- **Gesture detection**: <10px treated as tap, otherwise swipe with duration 300ms
+- **Visual feedback**: Red glow/border while screenshot capture is in progress; swipe progress indicator
+- **Auto-update on touch**: Optional automatic screenshot refresh after tap/swipe (checkbox)
+- **Async ADB operations**: Fully non-blocking using Tokio async process
+- **Save screenshot to disk**: In-memory capture can be saved as PNG via button
 
 See `DIOXUS_SETUP.md` for GUI setup instructions.
 
@@ -71,48 +80,48 @@ See `DIOXUS_SETUP.md` for GUI setup instructions.
 ## Prerequisites
 
 1. **ADB installed and in PATH**:
-   ```bash
-   # Install ADB (Android SDK Platform Tools)
-   # On Ubuntu/Debian:
-   sudo apt install adb
-   
-   # Or download from: https://developer.android.com/studio/command-line/adb
-   ```
 
-2. **Android device with USB debugging enabled**
-3. **Device connected via USB or network**
+```bash
+# Install ADB (Android SDK Platform Tools)
+# On Ubuntu/Debian:
+sudo apt install adb
+# Or download from: https://developer.android.com/studio/command-line/adb
+```
+
+1. **Android device with USB debugging enabled**
+1. **Device connected via USB or network**
 
 ## Usage Examples
 
 ### Basic Connection
+
 ```rust
 use android_adb_run::adb::Adb;
-
 // Connect to first available device
 let adb = Adb::new(None)?;
-
 // Connect to specific transport ID
 let adb = Adb::new(Some("2"))?;
-
 // Connect to device by name (will attempt connection if not found)
 let adb = Adb::new_with_device("oneplus6:5555")?;
 ```
 
 ### Screen Capture
+
 ```rust
 adb.screen_capture("screenshot.png")?;
 ```
 
 ### Touch Input (CLI)
+
 ```rust
 // Tap at coordinates (540, 1000)
 adb.tap(540, 1000)?;
-
 // Swipe from top to bottom
 adb.swipe(540, 500, 540, 1500, Some(300))?;
 ```
 
 ### Touch Input (GUI)
+
 - **Tap**: Click on the screenshot image to tap that location
 - **Swipe**: Click and drag to create swipe gestures
 - **Gesture Detection**: Short movements (< 10px) = tap, longer movements = swipe
@@ -121,8 +130,18 @@ adb.swipe(540, 500, 540, 1500, Some(300))?;
 
 ## adb notes
 
- * Start game TheTower
+- Start game TheTower
 
-       adb -t 8 shell monkey -p com.TechTreeGames.TheTower 1
+```bash
+adb -t 8 shell monkey -p com.TechTreeGames.TheTower 1
+```
+
+## Development Notes
+
+- Uses Rust edition 2024
+- Custom base64 encoder avoids extra dependencies for inline image data
+- Coordinate mapping starts at (0,0) top-left with dynamic scaling (no image border offset)
+- Swipe and tap logic unified; screenshot auto-refresh guarded by checkbox state
+- Future ideas: minimize button, hover states, configurable swipe duration, theming tokens
 
 
