@@ -1,5 +1,5 @@
-use tokio::process::Command;
 use serde::Serialize;
+use tokio::process::Command;
 
 #[derive(Debug, PartialEq, Serialize, Clone)]
 pub struct Device {
@@ -21,7 +21,9 @@ impl Adb {
             return Err("No devices available".to_string());
         }
         let device = match transport_id {
-            Some(tid) => devices.into_iter().find(|d| d.transport_id.as_deref() == Some(tid)),
+            Some(tid) => devices
+                .into_iter()
+                .find(|d| d.transport_id.as_deref() == Some(tid)),
             None => devices.into_iter().next(),
         };
         let device = match device {
@@ -29,7 +31,9 @@ impl Adb {
             None => return Err("Device with specified transport_id not found".to_string()),
         };
         let transport_id = match &device.transport_id {
-            Some(tid_str) => tid_str.parse::<u32>().map_err(|_| "Invalid transport_id format".to_string())?,
+            Some(tid_str) => tid_str
+                .parse::<u32>()
+                .map_err(|_| "Invalid transport_id format".to_string())?,
             None => return Err("Device missing transport_id".to_string()),
         };
         let (screen_x, screen_y) = Self::get_screen_size().await?;
@@ -50,7 +54,10 @@ impl Adb {
             .await
             .map_err(|e| format!("Failed to run adb shell wm size: {}", e))?;
         if !output.status.success() {
-            return Err(format!("adb shell wm size failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "adb shell wm size failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
         // Example output: "Physical size: 1080x2400"
@@ -88,8 +95,7 @@ impl Adb {
         {
             return Err(format!(
                 "adb connect failed: Out:{}\nErr:{}\n Try: 'adb tcpip 5555'",
-                stdout_str,
-                stderr_str
+                stdout_str, stderr_str
             ));
         }
         print!("connect: {}", stdout_str);
@@ -109,14 +115,13 @@ impl Adb {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 2 && parts[1] == "device" {
                     let name = parts[0].to_string();
-                    let transport_id = line.split_whitespace()
-                        .find_map(|part| {
-                            if part.starts_with("transport_id:") {
-                                Some(part.trim_start_matches("transport_id:").to_string())
-                            } else {
-                                None
-                            }
-                        });
+                    let transport_id = line.split_whitespace().find_map(|part| {
+                        if part.starts_with("transport_id:") {
+                            Some(part.trim_start_matches("transport_id:").to_string())
+                        } else {
+                            None
+                        }
+                    });
                     Some(Device { name, transport_id })
                 } else {
                     None
@@ -133,7 +138,10 @@ impl Adb {
             .await
             .map_err(|e| format!("Failed to execute adb: {}", e))?;
         if !output.status.success() {
-            return Err(format!("adb devices failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "adb devices failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
         Ok(Self::parse_devices(&stdout))
@@ -191,7 +199,14 @@ impl Adb {
         Ok(())
     }
 
-    pub async fn swipe(&self, x1: u32, y1: u32, x2: u32, y2: u32, duration: Option<u32>) -> Result<(), String> {
+    pub async fn swipe(
+        &self,
+        x1: u32,
+        y1: u32,
+        x2: u32,
+        y2: u32,
+        duration: Option<u32>,
+    ) -> Result<(), String> {
         if x1 > self.screen_x || y1 > self.screen_y || x2 > self.screen_x || y2 > self.screen_y {
             return Err(format!(
                 "Swipe coordinates out of bounds: x1={}, y1={}, x2={}, y2={}, screen_x={}, screen_y={}",
@@ -209,7 +224,10 @@ impl Adb {
         if let Some(d) = duration {
             cmd.arg(d.to_string());
         }
-        let output = cmd.output().await.map_err(|e| format!("Failed to run adb shell input swipe: {}", e))?;
+        let output = cmd
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run adb shell input swipe: {}", e))?;
         if !output.status.success() {
             return Err(format!(
                 "adb swipe failed: {}",
@@ -228,26 +246,50 @@ mod tests {
     fn test_parse_devices_multiple() {
         let adb_output = "List of devices attached\n1d36d8f1               device usb:1-4 product:OnePlus6 model:ONEPLUS_A6000 device:OnePlus6 transport_id:2\noneplus6:5555          device product:OnePlus6 model:ONEPLUS_A6000 device:OnePlus6 transport_id:3\n";
         let devices = Adb::parse_devices(adb_output);
-        assert_eq!(devices, vec![
-            Device { name: "1d36d8f1".to_string(), transport_id: Some("2".to_string()) },
-            Device { name: "oneplus6:5555".to_string(), transport_id: Some("3".to_string()) },
-        ]);
+        assert_eq!(
+            devices,
+            vec![
+                Device {
+                    name: "1d36d8f1".to_string(),
+                    transport_id: Some("2".to_string())
+                },
+                Device {
+                    name: "oneplus6:5555".to_string(),
+                    transport_id: Some("3".to_string())
+                },
+            ]
+        );
     }
 
     #[test]
     fn test_parse_devices_single() {
         let adb_output = "List of devices attached\n1d36d8f1               device usb:1-4 product:OnePlus6 model:ONEPLUS_A6000 device:OnePlus6 transport_id:2\n";
         let devices = Adb::parse_devices(adb_output);
-        assert_eq!(devices, vec![Device { name: "1d36d8f1".to_string(), transport_id: Some("2".to_string()) }]);
+        assert_eq!(
+            devices,
+            vec![Device {
+                name: "1d36d8f1".to_string(),
+                transport_id: Some("2".to_string())
+            }]
+        );
     }
 
     #[test]
     fn test_list_devices_mock() {
         let adb_output = "List of devices attached\n1d36d8f1               device usb:1-4 product:OnePlus6 model:ONEPLUS_A6000 device:OnePlus6 transport_id:2\noneplus6:5555          device product:OnePlus6 model:ONEPLUS_A6000 device:OnePlus6 transport_id:3\n";
         let devices = Adb::parse_devices(adb_output);
-        assert_eq!(devices, vec![
-            Device { name: "1d36d8f1".to_string(), transport_id: Some("2".to_string()) },
-            Device { name: "oneplus6:5555".to_string(), transport_id: Some("3".to_string()) },
-        ]);
+        assert_eq!(
+            devices,
+            vec![
+                Device {
+                    name: "1d36d8f1".to_string(),
+                    transport_id: Some("2".to_string())
+                },
+                Device {
+                    name: "oneplus6:5555".to_string(),
+                    transport_id: Some("3".to_string())
+                },
+            ]
+        );
     }
 }

@@ -4,11 +4,11 @@
 pub mod util;
 // pub
 mod components {
-    pub mod header;
-    pub mod device_info;
     pub mod actions;
-    pub mod screenshot_panel;
-    pub mod interaction_info; // new panel for interaction status & coords
+    pub mod device_info;
+    pub mod header;
+    pub mod interaction_info;
+    pub mod screenshot_panel; // new panel for interaction status & coords
 }
 pub mod dioxus; // main app
 

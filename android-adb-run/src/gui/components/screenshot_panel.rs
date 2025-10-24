@@ -1,7 +1,7 @@
 // gui/components/screenshot_panel.rs
-use dioxus::prelude::*;
 use crate::adb::Adb;
 use crate::gui::util::base64_encode;
+use dioxus::prelude::*;
 
 #[derive(Props, PartialEq, Clone)]
 pub struct ScreenshotPanelProps {
@@ -9,14 +9,14 @@ pub struct ScreenshotPanelProps {
     pub screenshot_data: Signal<Option<String>>,
     pub screenshot_bytes: Signal<Option<Vec<u8>>>,
     pub device_info: Signal<Option<(String, u32, u32, u32)>>,
-    pub device_coords: Signal<Option<(u32,u32)>>,
-    pub mouse_coords: Signal<Option<(i32,i32)>>,
+    pub device_coords: Signal<Option<(u32, u32)>>,
+    pub mouse_coords: Signal<Option<(i32, i32)>>,
     pub is_loading_screenshot: Signal<bool>,
     pub auto_update_on_touch: Signal<bool>,
     pub is_swiping: Signal<bool>,
-    pub swipe_start: Signal<Option<(u32,u32)>>,
-    pub swipe_end: Signal<Option<(u32,u32)>>,
-    pub calculate_device_coords: fn(dioxus::html::geometry::ElementPoint, u32, u32) -> (u32,u32),
+    pub swipe_start: Signal<Option<(u32, u32)>>,
+    pub swipe_end: Signal<Option<(u32, u32)>>,
+    pub calculate_device_coords: fn(dioxus::html::geometry::ElementPoint, u32, u32) -> (u32, u32),
 }
 
 #[component]
@@ -40,7 +40,8 @@ pub fn ScreenshotPanel(props: ScreenshotPanelProps) -> Element {
             if let Some(image_data) = screenshot_data.read().as_ref() {
                 div { style: "text-align:center; position:relative;",
                     img { src: "data:image/png;base64,{image_data}",
-                        style: if loading { "max-width:100%; max-height:600px; border-radius:10px; cursor:crosshair; border:8px solid #ff4444; box-shadow:0 0 40px rgba(255,68,68,0.8); user-select:none;" } else { "max-width:100%; max-height:600px; border-radius:10px; cursor:crosshair; border:8px solid rgba(255,255,255,0.2); box-shadow:0 4px 15px rgba(0,0,0,0.3); user-select:none;" },
+                        style: if loading { "max-width:100%; max-height:600px; border-radius:10px; cursor:crosshair; border:8px solid #ff4444; box-shadow:0 0 40px rgba(255,68,68,0.8); user-select:none;" }
+                                else { "max-width:100%; max-height:600px; border-radius:10px; cursor:crosshair; border:8px solid rgba(255,255,255,0.2); box-shadow:0 4px 15px rgba(0,0,0,0.3); user-select:none;" },
                         onmousemove: move |evt| { let r = evt.element_coordinates(); mouse_coords.set(Some((r.x as i32, r.y as i32))); if let Some((_, _, sx, sy)) = device_info.read().as_ref() { let (cx, cy) = calculate_device_coords(r, *sx, *sy); device_coords.set(Some((cx, cy))); } },
                         onmouseleave: move |_| { mouse_coords.set(None); device_coords.set(None); is_swiping.set(false); swipe_start.set(None); swipe_end.set(None); },
                         onmousedown: move |evt| { if let Some((_, _, sx, sy)) = device_info.read().as_ref() { let r = evt.element_coordinates(); let (sx0, sy0) = calculate_device_coords(r, *sx, *sy); is_swiping.set(true); swipe_start.set(Some((sx0, sy0))); swipe_end.set(None); } },

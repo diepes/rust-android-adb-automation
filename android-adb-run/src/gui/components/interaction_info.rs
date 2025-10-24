@@ -3,7 +3,7 @@ use dioxus::prelude::*;
 
 #[derive(Props, PartialEq, Clone)]
 pub struct InteractionInfoProps {
-    pub device_coords: Signal<Option<(u32,u32)>>,
+    pub device_coords: Signal<Option<(u32, u32)>>,
     pub screenshot_status: Signal<String>,
 }
 

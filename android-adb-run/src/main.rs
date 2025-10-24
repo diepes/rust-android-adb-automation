@@ -4,14 +4,14 @@ use std::env;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    
+
     // If no command line arguments provided (only the program name), launch GUI
     if args.len() == 1 {
         println!("🚀 Launching Android ADB Control GUI...");
         run_gui();
         return;
     }
-    
+
     // Handle command line arguments
     if args.len() > 1 {
         match args[1].as_str() {
@@ -67,10 +67,7 @@ async fn take_screenshot() {
         Ok(adb) => {
             println!(
                 "📱 Connected to device: {} (transport_id: {}) screen size: {}x{}",
-                adb.device.name,
-                adb.transport_id,
-                adb.screen_x,
-                adb.screen_y
+                adb.device.name, adb.transport_id, adb.screen_x, adb.screen_y
             );
             match adb.screen_capture("cli-screenshot.png").await {
                 Ok(_) => println!("✅ Screenshot saved to cli-screenshot.png"),

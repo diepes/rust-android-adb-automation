@@ -1,20 +1,21 @@
-use dioxus::prelude::*;
 use crate::adb::Adb;
-use crate::gui::util::base64_encode;
-use crate::gui::components::{header::Header, device_info::DeviceInfo, actions::Actions, screenshot_panel::ScreenshotPanel};
 use crate::gui::components::interaction_info::InteractionInfo;
+use crate::gui::components::{
+    actions::Actions, device_info::DeviceInfo, header::Header, screenshot_panel::ScreenshotPanel,
+};
+use crate::gui::util::base64_encode;
+use dioxus::prelude::*;
 
 pub fn run_gui() {
     use dioxus::desktop::{Config, WindowBuilder};
     let enable_borderless = true; // borderless window
-    let config = Config::new()
-        .with_window(
-            WindowBuilder::new()
-                .with_title("Android ADB Automation")
-                .with_decorations(!enable_borderless) // false => no native title/menu
-                .with_resizable(true)
-                .with_inner_size(dioxus::desktop::LogicalSize::new(1000, 700))
-        );
+    let config = Config::new().with_window(
+        WindowBuilder::new()
+            .with_title("Android ADB Automation")
+            .with_decorations(!enable_borderless) // false => no native title/menu
+            .with_resizable(true)
+            .with_inner_size(dioxus::desktop::LogicalSize::new(1000, 700)),
+    );
     dioxus::LaunchBuilder::desktop()
         .with_cfg(config)
         .launch(App);
@@ -33,14 +34,18 @@ fn App() -> Element {
     let device_coords = use_signal(|| None::<(u32, u32)>);
     let auto_update_on_touch = use_signal(|| true);
     let mut is_loading_screenshot = use_signal(|| false);
-    
+
     // Swipe gesture state
     let is_swiping = use_signal(|| false);
     let swipe_start = use_signal(|| None::<(u32, u32)>);
     let swipe_end = use_signal(|| None::<(u32, u32)>);
-    
+
     // Helper function to calculate device coordinates from mouse coordinates (correcting for image border)
-    fn calculate_device_coords(element_rect: dioxus::html::geometry::ElementPoint, screen_x: u32, screen_y: u32) -> (u32, u32) {
+    fn calculate_device_coords(
+        element_rect: dioxus::html::geometry::ElementPoint,
+        screen_x: u32,
+        screen_y: u32,
+    ) -> (u32, u32) {
         let max_display_width = 400.0;
         let max_display_height = 600.0;
         let border_px = 8.0; // image border thickness
@@ -86,7 +91,7 @@ fn App() -> Element {
                         adb.screen_y,
                     )));
                     status.set("Connected".to_string());
-                    
+
                     // Automatically take first screenshot on launch
                     is_loading_screenshot.set(true);
                     screenshot_status.set("📸 Taking initial screenshot...".to_string());

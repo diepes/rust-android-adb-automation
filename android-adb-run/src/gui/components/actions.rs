@@ -1,7 +1,7 @@
 // gui/components/actions.rs
-use dioxus::prelude::*;
 use crate::adb::Adb;
 use crate::gui::util::base64_encode;
+use dioxus::prelude::*;
 
 #[derive(Props, PartialEq, Clone)]
 pub struct ActionsProps {
