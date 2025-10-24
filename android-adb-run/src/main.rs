@@ -1,5 +1,5 @@
 use android_adb_run::adb::Adb;
-use android_adb_run::gui::dioxus::run_gui; // updated path after moving dioxus.rs
+use android_adb_run::gui::dioxus_app::run_gui; // updated after rename
 use std::env;
 
 fn main() {
