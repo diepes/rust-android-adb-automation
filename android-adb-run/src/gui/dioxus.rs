@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use crate::adb::Adb;
 use crate::gui::util::base64_encode;
 use crate::gui::components::{header::Header, device_info::DeviceInfo, actions::Actions, screenshot_panel::ScreenshotPanel};
+use crate::gui::components::interaction_info::InteractionInfo;
 
 pub fn run_gui() {
     use dioxus::desktop::{Config, WindowBuilder};
@@ -136,6 +137,7 @@ fn App() -> Element {
                         if let Some((name, transport_id, screen_x, screen_y)) = device_info.read().clone() {
                             DeviceInfo { name: name.clone(), transport_id: transport_id, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string() }
                             Actions { name: name.clone(), is_loading: is_loading_screenshot, screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, auto_update_on_touch: auto_update_on_touch }
+                            InteractionInfo { device_coords: device_coords, screenshot_status: screenshot_status }
                         } else {
                             div { style: "background:rgba(255,255,255,0.1); backdrop-filter:blur(10px); padding:20px; border-radius:15px; margin-bottom:20px; border:1px solid rgba(255,255,255,0.2);",
                                 h2 { style: "margin-top:0; color:#ffb347;", "⚠️ No Device Connected" }
