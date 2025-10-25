@@ -4,6 +4,7 @@ use crate::gui::util::base64_encode;
 use dioxus::prelude::*;
 use dioxus::html::geometry::ElementPoint;
 
+#[allow(unpredictable_function_pointer_comparisons)]
 #[derive(Props, PartialEq, Clone)]
 pub struct ScreenshotPanelProps {
     pub screenshot_status: Signal<String>,

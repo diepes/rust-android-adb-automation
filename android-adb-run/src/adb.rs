@@ -1,5 +1,18 @@
 use serde::Serialize;
 use tokio::process::Command;
+use std::sync::Arc;
+
+// New trait to abstract ADB interactions for future pure-Rust implementation.
+#[allow(async_fn_in_trait)] // edition 2024 allows async fn in traits (nightly); retain for clarity.
+pub trait AdbClient: Send + Sync {
+    async fn list_devices() -> Result<Vec<Device>, String> where Self: Sized;
+    async fn new_with_device(device_name: &str) -> Result<Self, String> where Self: Sized;
+    async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String>;
+    async fn tap(&self, x: u32, y: u32) -> Result<(), String>;
+    async fn swipe(&self, x1: u32, y1: u32, x2: u32, y2: u32, duration: Option<u32>) -> Result<(), String>;
+    fn screen_dimensions(&self) -> (u32, u32);
+    fn device_name(&self) -> &str;
+}
 
 #[derive(Debug, PartialEq, Serialize, Clone)]
 pub struct Device {
@@ -60,7 +73,10 @@ impl Adb {
             ));
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
-        // Example output: "Physical size: 1080x2400"
+        Self::parse_screen_size(&stdout)
+    }
+
+    fn parse_screen_size(stdout: &str) -> Result<(u32, u32), String> {
         for line in stdout.lines() {
             if let Some(size_str) = line.strip_prefix("Physical size: ") {
                 let parts: Vec<&str> = size_str.trim().split('x').collect();
@@ -236,6 +252,26 @@ impl Adb {
         }
         Ok(())
     }
+}
+
+impl AdbClient for Adb {
+    async fn list_devices() -> Result<Vec<Device>, String> {
+        Self::list_devices().await
+    }
+    async fn new_with_device(device_name: &str) -> Result<Self, String> {
+        Adb::new_with_device(device_name).await
+    }
+    async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
+        self.screen_capture_bytes().await
+    }
+    async fn tap(&self, x: u32, y: u32) -> Result<(), String> {
+        self.tap(x, y).await
+    }
+    async fn swipe(&self, x1: u32, y1: u32, x2: u32, y2: u32, duration: Option<u32>) -> Result<(), String> {
+        self.swipe(x1, y1, x2, y2, duration).await
+    }
+    fn screen_dimensions(&self) -> (u32, u32) { (self.screen_x, self.screen_y) }
+    fn device_name(&self) -> &str { &self.device.name }
 }
 
 #[cfg(test)]

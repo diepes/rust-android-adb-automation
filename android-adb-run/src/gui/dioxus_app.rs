@@ -97,8 +97,6 @@ fn App() -> Element {
                         adb.screen_y,
                     )));
                     status.set("Connected".to_string());
-
-                    // Automatically take first screenshot on launch
                     is_loading_screenshot.set(true);
                     screenshot_status.set("📸 Taking initial screenshot...".to_string());
                     match adb.screen_capture_bytes().await {
