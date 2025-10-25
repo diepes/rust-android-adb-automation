@@ -134,24 +134,36 @@ fn App() -> Element {
     };
 
     rsx! {
-        div { style: "height:100vh; display:flex; flex-direction:column; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:white; border:2px solid rgba(255,255,255,0.25); box-sizing:border-box;",
+        // Main app container: vertical layout, fills viewport
+        div { style: "height:97vh; display:flex; flex-direction:column; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:white; border:1px solid rgba(255,255,255,0.25); box-sizing:content-box;",
+            // Scrollable content area
             div { style: "flex:1; overflow:auto; padding:8px;",
+                // Horizontal split: left (info/actions), right (screenshot)
                 div { style: "display:flex; gap:14px; align-items:flex-start;",
+                    // Left column: header, device info, actions, interaction info, credits
                     div { style: "flex:1; min-width:0; display:flex; flex-direction:column; gap:10px;",
+                        // App header bar (drag/close)
                         Header { on_drag: move |_| { let _ = desktop.window.drag_window(); }, on_close: move |_| { std::thread::spawn(|| std::process::exit(0)); } }
+                        // Device info, actions, and interaction info (only if device connected)
                         if let Some((name, transport_id, screen_x, screen_y)) = device_info.read().clone() {
+                            // Device metadata panel
                             DeviceInfo { name: name.clone(), transport_id: transport_id, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string() }
+                            // Action buttons (screenshot, save, exit, etc)
                             Actions { name: name.clone(), is_loading: is_loading_screenshot, screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, auto_update_on_touch: auto_update_on_touch }
+                            // Interaction info (tap/swipe coordinates, status)
                             InteractionInfo { device_coords: device_coords, screenshot_status: screenshot_status }
                         } else {
+                            // Fallback panel if no device is connected
                             div { style: "background:rgba(255,255,255,0.1); backdrop-filter:blur(10px); padding:20px; border-radius:15px; margin-bottom:20px; border:1px solid rgba(255,255,255,0.2);",
                                 h2 { style: "margin-top:0; color:#ffb347;", "⚠️ No Device Connected" }
                                 p { style: "font-size:1.1em; margin:15px 0; text-align:center;", "Please connect an Android device with ADB enabled, or use the CLI version." }
                                 button { style: "background:linear-gradient(45deg,#dc3545,#e74c3c); color:white; padding:15px 25px; border:none; border-radius:10px; cursor:pointer; font-size:1.1em; font-weight:bold; min-width:150px;", onclick: move |_| -> () { std::process::exit(0); }, "🚪 Exit Application" }
                             }
                         }
+                        // Credits/footer
                         div { style: "margin-top:4px; text-align:left; font-size:0.7em; opacity:0.75; letter-spacing:0.5px;", "Built with Rust 🦀 and Dioxus ⚛️" }
                     }
+                    // Right column: screenshot panel (image, gestures)
                     ScreenshotPanel { screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, device_info: device_info, device_coords: device_coords, mouse_coords: mouse_coords, is_loading_screenshot: is_loading_screenshot, auto_update_on_touch: auto_update_on_touch, is_swiping: is_swiping, swipe_start: swipe_start, swipe_end: swipe_end, calculate_device_coords: calculate_device_coords }
                 }
             }

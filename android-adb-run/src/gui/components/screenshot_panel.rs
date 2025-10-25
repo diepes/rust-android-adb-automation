@@ -34,7 +34,7 @@ pub fn ScreenshotPanel(props: ScreenshotPanelProps) -> Element {
     let auto_update_on_touch = props.auto_update_on_touch;
     let mut is_loading_screenshot = props.is_loading_screenshot;
     let calculate_device_coords = props.calculate_device_coords;
-    let status_text = screenshot_status.read().clone();
+    let _status_text = screenshot_status.read().clone();
     rsx! {
         div { style: "flex:0 0 400px; background:rgba(255,255,255,0.1); backdrop-filter:blur(10px); padding:15px; border-radius:15px; border:1px solid rgba(255,255,255,0.2); height:fit-content;",
             if let Some(image_data) = screenshot_data.read().as_ref() {

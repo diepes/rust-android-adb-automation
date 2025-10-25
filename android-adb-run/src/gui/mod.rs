@@ -10,6 +10,7 @@ pub mod components {
     pub mod screenshot_panel; // new panel for interaction status & coords
 }
 pub mod dioxus_app; // renamed from dioxus
+pub use dioxus_app::run_gui;
 
 // Optionally, re-export common GUI types/functions
 // pub use screenshot::*;
