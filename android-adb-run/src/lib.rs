@@ -1,4 +1,6 @@
 pub mod adb;
+pub mod adb_shell;
+pub mod adb_client;
 pub mod gui; // replaced old dioxus root module
 
 pub fn add(left: u64, right: u64) -> u64 {
