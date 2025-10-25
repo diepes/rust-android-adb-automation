@@ -33,7 +33,9 @@ fn App() -> Element {
     let mouse_coords = use_signal(|| None::<(i32, i32)>);
     let device_coords = use_signal(|| None::<(u32, u32)>);
     let auto_update_on_touch = use_signal(|| true);
+    let select_box = use_signal(|| false);
     let mut is_loading_screenshot = use_signal(|| false);
+
 
     // Swipe gesture state
     let is_swiping = use_signal(|| false);
@@ -149,7 +151,7 @@ fn App() -> Element {
                             // Device metadata panel
                             DeviceInfo { name: name.clone(), transport_id: transport_id, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string() }
                             // Action buttons (screenshot, save, exit, etc)
-                            Actions { name: name.clone(), is_loading: is_loading_screenshot, screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, auto_update_on_touch: auto_update_on_touch }
+                            Actions { name: name.clone(), is_loading: is_loading_screenshot, screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, auto_update_on_touch: auto_update_on_touch, select_box: select_box }
                             // Interaction info (tap/swipe coordinates, status)
                             InteractionInfo { device_coords: device_coords, screenshot_status: screenshot_status }
                         } else {

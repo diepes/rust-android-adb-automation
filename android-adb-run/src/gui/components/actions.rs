@@ -11,6 +11,7 @@ pub struct ActionsProps {
     pub screenshot_data: Signal<Option<String>>,
     pub screenshot_bytes: Signal<Option<Vec<u8>>>,
     pub auto_update_on_touch: Signal<bool>,
+    pub select_box: Signal<bool>, // new signal for select box
 }
 
 #[component]
@@ -20,6 +21,7 @@ pub fn Actions(props: ActionsProps) -> Element {
     let mut screenshot_data = props.screenshot_data;
     let mut screenshot_bytes = props.screenshot_bytes;
     let mut auto_update_on_touch = props.auto_update_on_touch;
+    let mut select_box = props.select_box;
     let name = props.name.clone();
     rsx! {
         div { style: "background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 20px; border-radius: 15px; margin-bottom: 20px; border: 1px solid rgba(255,255,255,0.2);",
@@ -52,9 +54,35 @@ pub fn Actions(props: ActionsProps) -> Element {
                     },
                     if *is_loading.read() { "📸 Taking..." } else { "📸 Take Screenshot" }
                 }
-                div { style: "display:flex; align-items:center; justify-content:center; margin:10px 0; gap:8px;",
-                    input { r#type: "checkbox", id: "auto-update-checkbox", checked: *auto_update_on_touch.read(), onchange: move |evt| { auto_update_on_touch.set(evt.value().parse().unwrap_or(false)); }, style: "width:18px; height:18px; cursor:pointer;" }
-                    label { r#for: "auto-update-checkbox", style: "font-size:1em; cursor:pointer; user-select:none;", "📱 Update on tap/swipe" }
+                div { style: "display:flex; flex-direction:column; align-items:center; justify-content:center; margin:10px 0; gap:8px;",
+                    div { style: "display:flex; align-items:center; gap:8px;", 
+                        input {
+                            r#type: "checkbox",
+                            id: "auto-update-checkbox",
+                            checked: *auto_update_on_touch.read(),
+                            onchange: move |evt| {
+                                let checked = evt.value().parse().unwrap_or(false);
+                                auto_update_on_touch.set(checked);
+                                if checked { select_box.set(false); }
+                            },
+                            style: "width:18px; height:18px; cursor:pointer;"
+                        }
+                        label { r#for: "auto-update-checkbox", style: "font-size:1em; cursor:pointer; user-select:none;", "📱 Update on tap/swipe" }
+                    }
+                    div { style: "display:flex; align-items:center; gap:8px;", 
+                        input {
+                            r#type: "checkbox",
+                            id: "select-box-checkbox",
+                            checked: *select_box.read(),
+                            onchange: move |evt| {
+                                let checked = evt.value().parse().unwrap_or(false);
+                                select_box.set(checked);
+                                if checked { auto_update_on_touch.set(false); }
+                            },
+                            style: "width:18px; height:18px; cursor:pointer;"
+                        }
+                        label { r#for: "select-box-checkbox", style: "font-size:1em; cursor:pointer; user-select:none;", "🟦 Select box" }
+                    }
                 }
                 if screenshot_bytes.read().is_some() { button { style: "background:linear-gradient(45deg,#6f42c1,#563d7c); color:white; padding:15px 25px; border:none; border-radius:10px; cursor:pointer; font-size:1.1em; font-weight:bold; min-width:150px;",
                     onclick: move |_| { if let Some(bytes) = screenshot_bytes.read().clone() { spawn(async move { let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(); let filename = format!("screenshot_{}.png", ts); match tokio::fs::write(&filename, &bytes).await { Ok(_) => screenshot_status.set(format!("✅ Screenshot saved to {}", filename)), Err(e) => screenshot_status.set(format!("❌ Failed to save: {}", e)), } }); } }, "💾 Save to Disk" } }
