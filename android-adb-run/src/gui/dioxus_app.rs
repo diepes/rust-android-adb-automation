@@ -36,6 +36,8 @@ fn App() -> Element {
     let select_box = use_signal(|| false);
     let mut is_loading_screenshot = use_signal(|| false);
 
+    let selection_start = use_signal(|| None::<dioxus::html::geometry::ElementPoint>);
+    let selection_end = use_signal(|| None::<dioxus::html::geometry::ElementPoint>);
 
     // Swipe gesture state
     let is_swiping = use_signal(|| false);
@@ -166,7 +168,7 @@ fn App() -> Element {
                         div { style: "margin-top:4px; text-align:left; font-size:0.7em; opacity:0.75; letter-spacing:0.5px;", "Built with Rust 🦀 and Dioxus ⚛️" }
                     }
                     // Right column: screenshot panel (image, gestures)
-                    ScreenshotPanel { screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, device_info: device_info, device_coords: device_coords, mouse_coords: mouse_coords, is_loading_screenshot: is_loading_screenshot, auto_update_on_touch: auto_update_on_touch, is_swiping: is_swiping, swipe_start: swipe_start, swipe_end: swipe_end, calculate_device_coords: calculate_device_coords }
+                    ScreenshotPanel { screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, device_info: device_info, device_coords: device_coords, mouse_coords: mouse_coords, is_loading_screenshot: is_loading_screenshot, auto_update_on_touch: auto_update_on_touch, is_swiping: is_swiping, swipe_start: swipe_start, swipe_end: swipe_end, calculate_device_coords: calculate_device_coords, select_box: select_box, selection_start: selection_start, selection_end: selection_end }
                 }
             }
         }
