@@ -52,7 +52,7 @@ pub fn Actions(props: ActionsProps) -> Element {
                             is_loading.set(false);
                         });
                     },
-                    if *is_loading.read() { "📸 Taking..." } else { "📸 Take Screenshot" }
+                    if *is_loading.read() { "📸 Taking..." } else { "📸 Screenshot" }
                 }
                 div { style: "display:flex; flex-direction:column; align-items:center; justify-content:center; margin:10px 0; gap:8px;",
                     div { style: "display:flex; align-items:center; gap:8px;", 

@@ -1,7 +1,7 @@
 use crate::adb::Adb;
 use crate::gui::components::interaction_info::InteractionInfo;
 use crate::gui::components::{
-    actions::Actions, device_info::DeviceInfo, header::Header, screenshot_panel::ScreenshotPanel,
+    actions::Actions, device_info::DeviceInfo, header::Header, screenshot_panel::screenshot_panel,
 };
 use crate::gui::util::base64_encode;
 use dioxus::prelude::*;
@@ -170,7 +170,7 @@ fn App() -> Element {
                         div { style: "margin-top:4px; text-align:left; font-size:0.7em; opacity:0.75; letter-spacing:0.5px;", "Built with Rust 🦀 and Dioxus ⚛️" }
                     }
                     // Right column: screenshot panel (image, gestures)
-                    ScreenshotPanel { screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, device_info: device_info, device_coords: device_coords, mouse_coords: mouse_coords, is_loading_screenshot: is_loading_screenshot, auto_update_on_touch: auto_update_on_touch, is_swiping: is_swiping, swipe_start: swipe_start, swipe_end: swipe_end, calculate_device_coords: calculate_device_coords, select_box: select_box, selection_start: selection_start, selection_end: selection_end, tap_markers: tap_markers }
+                    screenshot_panel { screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, device_info: device_info, device_coords: device_coords, mouse_coords: mouse_coords, is_loading_screenshot: is_loading_screenshot, auto_update_on_touch: auto_update_on_touch, is_swiping: is_swiping, swipe_start: swipe_start, swipe_end: swipe_end, calculate_device_coords: calculate_device_coords, select_box: select_box, selection_start: selection_start, selection_end: selection_end, tap_markers: tap_markers }
                 }
             }
         }

@@ -25,7 +25,7 @@ pub struct ScreenshotPanelProps {
 }
 
 #[component]
-pub fn ScreenshotPanel(props: ScreenshotPanelProps) -> Element {
+pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
     let loading = *props.is_loading_screenshot.read();
     let mut screenshot_status = props.screenshot_status;
     let mut screenshot_data = props.screenshot_data;
@@ -45,23 +45,26 @@ pub fn ScreenshotPanel(props: ScreenshotPanelProps) -> Element {
     let mut tap_markers = props.tap_markers;
     let _status_text = screenshot_status.read().clone();
 
-    // Helper to compute square overlay adjusted for panel padding and image border
+    // Helper to compute rectangle overlay adjusted for image border
     let adjust_overlay = |start: ElementPoint, end: ElementPoint| {
         let dx = end.x - start.x;
         let dy = end.y - start.y;
-        let size = dx.abs().min(dy.abs());
-        let left_raw = if dx >= 0.0 { start.x } else { start.x - size };
-        let top_raw = if dy >= 0.0 { start.y } else { start.y - size };
-        // Panel has 15px padding, image has 8px border; add both so overlay matches visual position
-        let left = left_raw + 8.0; // border only (flex centering removed panel padding influence)
-        let top = top_raw + 8.0;
-        (left, top, size)
+        let width = dx.abs();
+        let height = dy.abs();
+        let left_raw = if dx >= 0.0 { start.x } else { start.x - width };
+        let top_raw = if dy >= 0.0 { start.y } else { start.y - height };
+        // compensate for 8px image border
+        let border = 8.0;
+        let left = left_raw + border;
+        let top = top_raw + border;
+        (left, top, width, height)
     };
 
-    let overlay_square: Option<(i32, i32, i32)> = if *select_box.read() {
+    // Rectangle (not square) overlay state derived from selection signals
+    let overlay_rect: Option<(i32, i32, i32, i32)> = if *select_box.read() {
         if let (Some(start), Some(end)) = (selection_start.read().clone(), selection_end.read().clone()) {
-            let (left, top, size) = adjust_overlay(start, end);
-            Some((left.round() as i32, top.round() as i32, size.round() as i32))
+            let (left, top, w, h) = adjust_overlay(start, end);
+            Some((left.round() as i32, top.round() as i32, w.round() as i32, h.round() as i32))
         } else { None }
     } else { None };
 
@@ -97,13 +100,16 @@ pub fn ScreenshotPanel(props: ScreenshotPanelProps) -> Element {
                                 if *select_box.read() {
                                     if let (Some(start), Some(end)) = (selection_start.read().clone(), selection_end.read().clone()) {
                                         if let Some((_, _, screen_x, screen_y)) = device_info.read().as_ref() {
-                                            let dx = end.x - start.x; let dy = end.y - start.y; let size = dx.abs().min(dy.abs());
-                                            let left = if dx >= 0.0 { start.x } else { start.x - size }; let top = if dy >= 0.0 { start.y } else { start.y - size };
-                                            let br_x = left + size; let br_y = top + size;
-                                            let tl = ElementPoint { x: left, y: top, ..start }; let br = ElementPoint { x: br_x, y: br_y, ..start };
+                                            let dx = end.x - start.x; let dy = end.y - start.y;
+                                            let width = dx.abs(); let height = dy.abs();
+                                            let left = if dx >= 0.0 { start.x } else { start.x - width }; 
+                                            let top = if dy >= 0.0 { start.y } else { start.y - height };
+                                            let right = left + width; let bottom = top + height;
+                                            let tl = ElementPoint { x: left, y: top, ..start }; 
+                                            let br = ElementPoint { x: right, y: bottom, ..start };
                                             let (d_tl_x, d_tl_y) = calculate_device_coords(tl, *screen_x, *screen_y);
                                             let (d_br_x, d_br_y) = calculate_device_coords(br, *screen_x, *screen_y);
-                                            screenshot_status.set(format!("🟦 Selected square: ({},{}) to ({},{})", d_tl_x, d_tl_y, d_br_x, d_br_y));
+                                            screenshot_status.set(format!("🟦 Selected rectangle: ({},{}) to ({},{}) size {}x{}", d_tl_x, d_tl_y, d_br_x, d_br_y, (d_br_x - d_tl_x).max(1), (d_br_y - d_tl_y).max(1)));
                                         }
                                     }
                                     return;
@@ -133,9 +139,9 @@ pub fn ScreenshotPanel(props: ScreenshotPanelProps) -> Element {
                                 }
                             },
                         }
-                        if let Some((ox, oy, osize)) = overlay_square {
-                            div { style: format!("position:absolute; left:{ox}px; top:{oy}px; width:{osize}px; height:{osize}px; border:2px solid #4da3ff; background:rgba(77,163,255,0.15); box-shadow:0 0 10px rgba(77,163,255,0.6); pointer-events:none; z-index:10;"),
-                                div { style: "position:absolute; right:0; bottom:0; background:rgba(0,0,0,0.6); color:#fff; font-size:10px; padding:2px 4px; border-top-left-radius:4px;", "{osize}px" }
+                        if let Some((ox, oy, ow, oh)) = overlay_rect {
+                            div { style: format!("position:absolute; left:{ox}px; top:{oy}px; width:{ow}px; height:{oh}px; border:2px solid #4da3ff; background:rgba(77,163,255,0.12); box-shadow:0 0 10px rgba(77,163,255,0.5); pointer-events:none; z-index:10;"),
+                                div { style: "position:absolute; right:0; bottom:0; background:rgba(0,0,0,0.55); color:#fff; font-size:10px; padding:2px 4px; border-top-left-radius:4px;", "{ow}x{oh}" }
                             }
                         }
                         for p in tap_markers.read().iter() { {(|| {
