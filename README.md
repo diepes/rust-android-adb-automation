@@ -30,6 +30,13 @@ Rust library and CLI tool for automating Android device control through the ADB 
 cargo install dioxus-cli
 ```
 
+- if it fails try installing the binary directly
+
+```bash
+cargo install cargo-binstall
+cargo-binstall dioxus-cli
+```
+
 ## Building and Running
 
 ```bash
