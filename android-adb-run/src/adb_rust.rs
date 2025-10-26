@@ -1,3 +1,4 @@
+// https://crates.io/crates/adb_client
 use crate::adb::{AdbClient, Device};
 use tokio::process::Command;
 
@@ -50,6 +51,7 @@ impl RustAdb {
 
 impl AdbClient for RustAdb {
     async fn list_devices() -> Result<Vec<Device>, String> {
+        // Temporary: revert to shell invocation until adb_client API confirmed
         let output = Command::new("adb")
             .arg("devices")
             .arg("-l")
@@ -63,7 +65,6 @@ impl AdbClient for RustAdb {
             ));
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
-        // Reuse parse from Adb implementation
         let devices = crate::adb::Adb::parse_devices(&stdout);
         Ok(devices)
     }

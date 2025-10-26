@@ -1,9 +1,5 @@
 // gui/components/screenshot_panel.rs
 use crate::AdbBackend;
-use crate::adb::Adb;
-use crate::adb::AdbClient;
-use crate::adb_rust::RustAdb;
-use crate::adb_shell::AdbShell;
 use crate::gui::util::base64_encode;
 use dioxus::html::geometry::ElementPoint;
 use dioxus::prelude::*;
@@ -139,7 +135,7 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                         let r = evt.element_coordinates(); let (ex, ey) = calculate_device_coords(r, *sx, *sy);
                                         if let Some((sx0, sy0)) = swipe_start_val {
                                             let dx = (ex as i32 - sx0 as i32).abs(); let dy = (ey as i32 - sy0 as i32).abs(); let distance = ((dx*dx + dy*dy) as f32).sqrt();
-                                            let name_clone = name.clone(); let auto = *auto_update_on_touch.read(); if auto { is_loading_screenshot.set(true); }
+                                            let _name_clone = name.clone(); let auto = *auto_update_on_touch.read(); if auto { is_loading_screenshot.set(true); }
                                             if distance < 10.0 {
                                                 let raw_point = evt.element_coordinates(); tap_markers.with_mut(|v| v.push(raw_point));
                                                 spawn(async move {

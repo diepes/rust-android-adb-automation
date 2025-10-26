@@ -1,5 +1,4 @@
 use crate::AdbBackend;
-use crate::adb::AdbClient;
 use crate::gui::components::interaction_info::InteractionInfo;
 use crate::gui::components::{
     actions::Actions, device_info::DeviceInfo, header::Header, screenshot_panel::screenshot_panel,
