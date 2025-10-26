@@ -12,12 +12,23 @@ fn main() {
 
     // Parse all flags (skip program name)
     for arg in args.iter().skip(1) {
-        if arg == "--help" || arg == "-h" { print_help(); return; }
-        else if arg == "--version" || arg == "-v" { println!("Android ADB Run v{}", env!("CARGO_PKG_VERSION")); return; }
-        else if arg == "--gui" { mode = Some("gui"); }
-        else if arg == "--screenshot" || arg == "-s" { mode = Some("screenshot"); }
-        else if let Some(rest) = arg.strip_prefix("--impl=") { impl_choice = rest; }
-        else { println!("❌ Unknown argument: {}", arg); print_help(); return; }
+        if arg == "--help" || arg == "-h" {
+            print_help();
+            return;
+        } else if arg == "--version" || arg == "-v" {
+            println!("Android ADB Run v{}", env!("CARGO_PKG_VERSION"));
+            return;
+        } else if arg == "--gui" {
+            mode = Some("gui");
+        } else if arg == "--screenshot" || arg == "-s" {
+            mode = Some("screenshot");
+        } else if let Some(rest) = arg.strip_prefix("--impl=") {
+            impl_choice = rest;
+        } else {
+            println!("❌ Unknown argument: {}", arg);
+            print_help();
+            return;
+        }
     }
 
     match mode {
@@ -27,7 +38,13 @@ fn main() {
             rt.block_on(take_screenshot(impl_choice));
         }
         Some("gui") | None => {
-            println!("🚀 Launching Android ADB Control GUI (impl='{}' for CLI ops)...", impl_choice);
+            println!(
+                "🚀 Launching Android ADB Control GUI (impl='{}' for CLI ops)...",
+                impl_choice
+            );
+            unsafe {
+                std::env::set_var("ADB_IMPL", impl_choice);
+            }
             run_gui();
         }
         _ => unreachable!(),
@@ -57,39 +74,47 @@ fn print_help() {
 
 async fn take_screenshot(impl_choice: &str) {
     match impl_choice {
-        "rust" => {
-            match RustAdb::list_devices().await {
-                Ok(devs) if !devs.is_empty() => {
-                    let first = &devs[0];
-                    match RustAdb::new_with_device(&first.name).await {
-                        Ok(radb) => {
-                            println!("📱 (rust) Device: {} size: {}x{}", radb.device_name(), radb.screen_dimensions().0, radb.screen_dimensions().1);
-                            match radb.screen_capture_bytes().await {
-                                Ok(bytes) => {
-                                    if let Err(e) = tokio::fs::write("cli-screenshot.png", &bytes).await { println!("❌ Write failed: {e}"); }
-                                    else { println!("✅ Screenshot saved to cli-screenshot.png"); }
+        "rust" => match RustAdb::list_devices().await {
+            Ok(devs) if !devs.is_empty() => {
+                let first = &devs[0];
+                match RustAdb::new_with_device(&first.name).await {
+                    Ok(radb) => {
+                        println!(
+                            "📱 (rust) Device: {} size: {}x{}",
+                            radb.device_name(),
+                            radb.screen_dimensions().0,
+                            radb.screen_dimensions().1
+                        );
+                        match radb.screen_capture_bytes().await {
+                            Ok(bytes) => {
+                                if let Err(e) = tokio::fs::write("cli-screenshot.png", &bytes).await
+                                {
+                                    println!("❌ Write failed: {e}");
+                                } else {
+                                    println!("✅ Screenshot saved to cli-screenshot.png");
                                 }
-                                Err(e) => println!("❌ Screenshot failed: {e}"),
                             }
+                            Err(e) => println!("❌ Screenshot failed: {e}"),
                         }
-                        Err(e) => println!("❌ Rust impl device open error: {e}"),
                     }
+                    Err(e) => println!("❌ Rust impl device open error: {e}"),
                 }
-                Ok(_) => println!("❌ No devices found (rust impl)"),
-                Err(e) => println!("❌ Rust impl list error: {e}"),
             }
-        }
-        _ => {
-            match Adb::new(None).await {
-                Ok(adb) => {
-                    println!("📱 Device: {} (transport_id: {}) size: {}x{}", adb.device.name, adb.transport_id, adb.screen_x, adb.screen_y);
-                    match adb.screen_capture("cli-screenshot.png").await {
-                        Ok(_) => println!("✅ Screenshot saved to cli-screenshot.png"),
-                        Err(e) => println!("❌ Screenshot failed: {e}"),
-                    }
+            Ok(_) => println!("❌ No devices found (rust impl)"),
+            Err(e) => println!("❌ Rust impl list error: {e}"),
+        },
+        _ => match Adb::new(None).await {
+            Ok(adb) => {
+                println!(
+                    "📱 Device: {} (transport_id: {}) size: {}x{}",
+                    adb.device.name, adb.transport_id, adb.screen_x, adb.screen_y
+                );
+                match adb.screen_capture("cli-screenshot.png").await {
+                    Ok(_) => println!("✅ Screenshot saved to cli-screenshot.png"),
+                    Err(e) => println!("❌ Screenshot failed: {e}"),
                 }
-                Err(e) => println!("❌ Error: {e}"),
             }
-        }
+            Err(e) => println!("❌ Error: {e}"),
+        },
     }
 }

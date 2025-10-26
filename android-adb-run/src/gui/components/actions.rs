@@ -1,5 +1,5 @@
 // gui/components/actions.rs
-use crate::adb::Adb;
+use crate::AdbBackend;
 use crate::gui::util::base64_encode;
 use dioxus::prelude::*;
 
@@ -34,11 +34,10 @@ pub fn Actions(props: ActionsProps) -> Element {
                         is_loading.set(true);
                         screenshot_status.set("📸 Taking screenshot...".to_string());
                         spawn(async move {
+                            let impl_choice = std::env::var("ADB_IMPL").unwrap_or_else(|_| "rust".to_string());
+                            let open = AdbBackend::new_with_device(&impl_choice, &name_clone).await;
                             let result = async move {
-                                match Adb::new_with_device(&name_clone).await {
-                                    Ok(adb) => match adb.screen_capture_bytes().await { Ok(bytes) => Ok(bytes.to_vec()), Err(e) => Err(format!("Screenshot failed: {}", e)) },
-                                    Err(e) => Err(format!("ADB connection failed: {}", e)),
-                                }
+                                match open { Ok(client) => match client.screen_capture_bytes().await { Ok(bytes) => Ok(bytes), Err(e) => Err(format!("Screenshot failed: {}", e)) }, Err(e) => Err(format!("ADB connection failed: {}", e)), }
                             }.await;
                             match result {
                                 Ok(bytes) => {
@@ -55,7 +54,7 @@ pub fn Actions(props: ActionsProps) -> Element {
                     if *is_loading.read() { "📸 Taking..." } else { "📸 Screenshot" }
                 }
                 div { style: "display:flex; flex-direction:column; align-items:center; justify-content:center; margin:10px 0; gap:8px;",
-                    div { style: "display:flex; align-items:center; gap:8px;", 
+                    div { style: "display:flex; align-items:center; gap:8px;",
                         input {
                             r#type: "checkbox",
                             id: "auto-update-checkbox",
@@ -69,7 +68,7 @@ pub fn Actions(props: ActionsProps) -> Element {
                         }
                         label { r#for: "auto-update-checkbox", style: "font-size:1em; cursor:pointer; user-select:none;", "📱 Update on tap/swipe" }
                     }
-                    div { style: "display:flex; align-items:center; gap:8px;", 
+                    div { style: "display:flex; align-items:center; gap:8px;",
                         input {
                             r#type: "checkbox",
                             id: "select-box-checkbox",

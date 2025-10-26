@@ -3,13 +3,25 @@ use serde::Serialize;
 // Trait defining ADB capabilities (shell or rust implementations)
 #[allow(async_fn_in_trait)]
 pub trait AdbClient: Send + Sync {
-    async fn list_devices() -> Result<Vec<Device>, String> where Self: Sized;
-    async fn new_with_device(device_name: &str) -> Result<Self, String> where Self: Sized;
+    async fn list_devices() -> Result<Vec<Device>, String>
+    where
+        Self: Sized;
+    async fn new_with_device(device_name: &str) -> Result<Self, String>
+    where
+        Self: Sized;
     async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String>;
     async fn tap(&self, x: u32, y: u32) -> Result<(), String>;
-    async fn swipe(&self, x1: u32, y1: u32, x2: u32, y2: u32, duration: Option<u32>) -> Result<(), String>;
+    async fn swipe(
+        &self,
+        x1: u32,
+        y1: u32,
+        x2: u32,
+        y2: u32,
+        duration: Option<u32>,
+    ) -> Result<(), String>;
     fn screen_dimensions(&self) -> (u32, u32);
     fn device_name(&self) -> &str;
+    fn transport_id(&self) -> Option<u32>; // new optional shell-specific identifier
 }
 
 #[derive(Debug, PartialEq, Serialize, Clone)]

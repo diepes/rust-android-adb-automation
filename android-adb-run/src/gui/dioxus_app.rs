@@ -1,4 +1,5 @@
-use crate::adb::Adb;
+use crate::AdbBackend;
+use crate::adb::AdbClient;
 use crate::gui::components::interaction_info::InteractionInfo;
 use crate::gui::components::{
     actions::Actions, device_info::DeviceInfo, header::Header, screenshot_panel::screenshot_panel,
@@ -26,7 +27,7 @@ fn App() -> Element {
     use dioxus::desktop::use_window; // access desktop window for dragging
     let desktop = use_window();
     let mut status = use_signal(|| "Initializing...".to_string());
-    let mut device_info = use_signal(|| None::<(String, u32, u32, u32)>);
+    let mut device_info = use_signal(|| None::<(String, Option<u32>, u32, u32)>);
     let mut screenshot_data = use_signal(|| None::<String>);
     let mut screenshot_bytes = use_signal(|| None::<Vec<u8>>);
     let mut screenshot_status = use_signal(|| "".to_string());
@@ -88,18 +89,20 @@ fn App() -> Element {
     // Initialize ADB connection on first render
     use_effect(move || {
         spawn(async move {
-            match Adb::new(None).await {
-                Ok(adb) => {
+            let impl_choice = std::env::var("ADB_IMPL").unwrap_or_else(|_| "rust".to_string());
+            match AdbBackend::connect_first(&impl_choice).await {
+                Ok(client) => {
+                    let (sx, sy) = client.screen_dimensions();
                     device_info.set(Some((
-                        adb.device.name.clone(),
-                        adb.transport_id,
-                        adb.screen_x,
-                        adb.screen_y,
+                        client.device_name().to_string(),
+                        client.transport_id(),
+                        sx,
+                        sy,
                     )));
-                    status.set("Connected".to_string());
+                    status.set(format!("Connected via {impl_choice}"));
                     is_loading_screenshot.set(true);
                     screenshot_status.set("📸 Taking initial screenshot...".to_string());
-                    match adb.screen_capture_bytes().await {
+                    match client.screen_capture_bytes().await {
                         Ok(image_bytes) => {
                             let base64_string = base64_encode(&image_bytes);
                             screenshot_data.set(Some(base64_string));
@@ -113,9 +116,7 @@ fn App() -> Element {
                         }
                     }
                 }
-                Err(e) => {
-                    status.set(format!("Error: {}", e));
-                }
+                Err(e) => status.set(format!("Error: {e}")),
             }
         });
     });
@@ -149,9 +150,9 @@ fn App() -> Element {
                         // App header bar (drag/close)
                         Header { on_drag: move |_| { let _ = desktop.window.drag_window(); }, on_close: move |_| { std::thread::spawn(|| std::process::exit(0)); } }
                         // Device info, actions, and interaction info (only if device connected)
-                        if let Some((name, transport_id, screen_x, screen_y)) = device_info.read().clone() {
+                        if let Some((name, transport_id_opt, screen_x, screen_y)) = device_info.read().clone() {
                             // Device metadata panel
-                            DeviceInfo { name: name.clone(), transport_id: transport_id, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string() }
+                            DeviceInfo { name: name.clone(), transport_id: transport_id_opt, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string() }
                             // Action buttons (screenshot, save, exit, etc)
                             Actions { name: name.clone(), is_loading: is_loading_screenshot, screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, auto_update_on_touch: auto_update_on_touch, select_box: select_box }
                             // Interaction info (tap/swipe coordinates, status)

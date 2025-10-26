@@ -1,8 +1,12 @@
 // gui/components/screenshot_panel.rs
+use crate::AdbBackend;
 use crate::adb::Adb;
+use crate::adb::AdbClient;
+use crate::adb_client::RustAdb;
+use crate::adb_shell::AdbShell;
 use crate::gui::util::base64_encode;
-use dioxus::prelude::*;
 use dioxus::html::geometry::ElementPoint;
+use dioxus::prelude::*;
 
 #[allow(unpredictable_function_pointer_comparisons)]
 #[derive(Props, PartialEq, Clone)]
@@ -10,7 +14,7 @@ pub struct ScreenshotPanelProps {
     pub screenshot_status: Signal<String>,
     pub screenshot_data: Signal<Option<String>>,
     pub screenshot_bytes: Signal<Option<Vec<u8>>>,
-    pub device_info: Signal<Option<(String, u32, u32, u32)>>,
+    pub device_info: Signal<Option<(String, Option<u32>, u32, u32)>>,
     pub device_coords: Signal<Option<(u32, u32)>>,
     pub mouse_coords: Signal<Option<(i32, i32)>>,
     pub is_loading_screenshot: Signal<bool>,
@@ -66,17 +70,28 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
 
     // Rectangle (not square) overlay state derived from selection signals
     let overlay_rect: Option<(i32, i32, i32, i32)> = if *select_box.read() {
-        if let (Some(start), Some(end)) = (selection_start.read().clone(), selection_end.read().clone()) {
+        if let (Some(start), Some(end)) =
+            (selection_start.read().clone(), selection_end.read().clone())
+        {
             let (left, top, w, h) = adjust_overlay(start, end);
-            Some((left.round() as i32, top.round() as i32, w.round() as i32, h.round() as i32))
-        } else { None }
-    } else { None };
+            Some((
+                left.round() as i32,
+                top.round() as i32,
+                w.round() as i32,
+                h.round() as i32,
+            ))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     rsx! {
         div { style: "flex:0 0 400px; background:rgba(255,255,255,0.1); backdrop-filter:blur(10px); padding:15px; border-radius:15px; border:1px solid rgba(255,255,255,0.2); height:fit-content;",
             if let Some(image_data) = screenshot_data.read().as_ref() {
-                div { style: "display:flex; justify-content:center;", 
-                    div { style: "position:relative; width:fit-content;", 
+                div { style: "display:flex; justify-content:center;",
+                    div { style: "position:relative; width:fit-content;",
                         img { src: "data:image/png;base64,{image_data}",
                             style: if loading { "max-width:100%; max-height:600px; border-radius:10px; cursor:crosshair; border:8px solid #ff4444; box-shadow:0 0 40px rgba(255,68,68,0.8); user-select:none;" } else { "max-width:100%; max-height:600px; border-radius:10px; cursor:crosshair; border:8px solid rgba(255,255,255,0.2); box-shadow:0 4px 15px rgba(0,0,0,0.3); user-select:none;" },
                             onmousemove: move |evt| {
@@ -106,10 +121,10 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                         if let Some((_, _, screen_x, screen_y)) = device_info.read().as_ref() {
                                             let dx = end.x - start.x; let dy = end.y - start.y;
                                             let width = dx.abs(); let height = dy.abs();
-                                            let left = if dx >= 0.0 { start.x } else { start.x - width }; 
+                                            let left = if dx >= 0.0 { start.x } else { start.x - width };
                                             let top = if dy >= 0.0 { start.y } else { start.y - height };
                                             let right = left + width; let bottom = top + height;
-                                            let tl = ElementPoint { x: left, y: top, ..start }; 
+                                            let tl = ElementPoint { x: left, y: top, ..start };
                                             let br = ElementPoint { x: right, y: bottom, ..start };
                                             let (d_tl_x, d_tl_y) = calculate_device_coords(tl, *screen_x, *screen_y);
                                             let (d_br_x, d_br_y) = calculate_device_coords(br, *screen_x, *screen_y);
@@ -128,12 +143,16 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                             if distance < 10.0 {
                                                 let raw_point = evt.element_coordinates(); tap_markers.with_mut(|v| v.push(raw_point));
                                                 spawn(async move {
-                                                    let result = async move { match Adb::new_with_device(&name_clone).await { Ok(adb) => match adb.tap(sx0, sy0).await { Ok(_) => { if auto { tokio::time::sleep(tokio::time::Duration::from_millis(500)).await; match adb.screen_capture_bytes().await { Ok(bytes) => Ok((true, bytes.to_vec())), Err(e) => Err(format!("Screenshot failed: {}", e)), } } else { Ok((false, Vec::new())) } }, Err(e) => Err(format!("Tap failed: {}", e)), }, Err(e) => Err(format!("ADB connection failed: {}", e)), } }.await;
+                                                    let impl_choice = std::env::var("ADB_IMPL").unwrap_or_else(|_| "rust".to_string());
+                                                    let open = AdbBackend::connect_first(&impl_choice).await;
+                                                    let result = async move { match open { Ok(client) => match client.tap(sx0, sy0).await { Ok(_) => { if auto { tokio::time::sleep(tokio::time::Duration::from_millis(500)).await; match client.screen_capture_bytes().await { Ok(bytes) => Ok((true, bytes)), Err(e) => Err(format!("Screenshot failed: {}", e)), } } else { Ok((false, Vec::new())) } }, Err(e) => Err(format!("Tap failed: {}", e)), }, Err(e) => Err(format!("ADB connection failed: {}", e)), } }.await;
                                                     match result { Ok((updated, bytes)) => { if updated { let b64 = base64_encode(&bytes); screenshot_data.set(Some(b64)); screenshot_bytes.set(Some(bytes)); screenshot_status.set(format!("✅ Tapped at ({},{}) - Screenshot updated", sx0, sy0)); is_loading_screenshot.set(false); } else { screenshot_status.set(format!("✅ Tapped at ({},{})", sx0, sy0)); } }, Err(e) => { screenshot_status.set(format!("❌ {}", e)); is_loading_screenshot.set(false); } }
                                                 });
                                             } else {
                                                 spawn(async move {
-                                                    let result = async move { match Adb::new_with_device(&name_clone).await { Ok(adb) => match adb.swipe(sx0, sy0, ex, ey, Some(300)).await { Ok(_) => { if auto { tokio::time::sleep(tokio::time::Duration::from_millis(800)).await; match adb.screen_capture_bytes().await { Ok(bytes) => Ok((true, bytes.to_vec())), Err(e) => Err(format!("Screenshot failed: {}", e)), } } else { Ok((false, Vec::new())) } }, Err(e) => Err(format!("Swipe failed: {}", e)), }, Err(e) => Err(format!("ADB connection failed: {}", e)), } }.await;
+                                                    let impl_choice = std::env::var("ADB_IMPL").unwrap_or_else(|_| "rust".to_string());
+                                                    let open = AdbBackend::connect_first(&impl_choice).await;
+                                                    let result = async move { match open { Ok(client) => match client.swipe(sx0, sy0, ex, ey, Some(300)).await { Ok(_) => { if auto { tokio::time::sleep(tokio::time::Duration::from_millis(800)).await; match client.screen_capture_bytes().await { Ok(bytes) => Ok((true, bytes)), Err(e) => Err(format!("Screenshot failed: {}", e)), } } else { Ok((false, Vec::new())) } }, Err(e) => Err(format!("Swipe failed: {}", e)), }, Err(e) => Err(format!("ADB connection failed: {}", e)), } }.await;
                                                     match result { Ok((updated, bytes)) => { if updated { let b64 = base64_encode(&bytes); screenshot_data.set(Some(b64)); screenshot_bytes.set(Some(bytes)); screenshot_status.set(format!("✅ Swiped ({},{}) -> ({},{}) - Screenshot updated", sx0, sy0, ex, ey)); is_loading_screenshot.set(false); } else { screenshot_status.set(format!("✅ Swiped ({},{}) -> ({},{})", sx0, sy0, ex, ey)); } }, Err(e) => { screenshot_status.set(format!("❌ {}", e)); is_loading_screenshot.set(false); } }
                                                 });
                                             }
