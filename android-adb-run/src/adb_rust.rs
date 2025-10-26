@@ -1,40 +1,47 @@
 // https://crates.io/crates/adb_client
 use crate::adb::{AdbClient, Device};
-use tokio::process::Command;
+// use tokio::process::Command;
+use adb_client::{ADBDeviceExt, ADBServer, ADBServerDevice};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[allow(dead_code)]
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub struct RustAdb {
     device: Device,
+    server: Arc<Mutex<ADBServer>>, // manage server instance
+    server_device: Arc<Mutex<ADBServerDevice>>, // underlying connected device
     screen_x: u32,
     screen_y: u32,
 }
 
 impl RustAdb {
-    async fn new(device: Device, screen_x: u32, screen_y: u32) -> Self {
+    async fn new(
+        device: Device,
+        server: ADBServer,
+        server_device: ADBServerDevice,
+        screen_x: u32,
+        screen_y: u32,
+    ) -> Self {
         Self {
             device,
+            server: Arc::new(Mutex::new(server)),
+            server_device: Arc::new(Mutex::new(server_device)),
             screen_x,
             screen_y,
         }
     }
 
-    async fn get_screen_size() -> Result<(u32, u32), String> {
-        let output = Command::new("adb")
-            .arg("shell")
-            .arg("wm")
-            .arg("size")
-            .output()
-            .await
-            .map_err(|e| format!("RustAdb: wm size failed: {e}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "RustAdb: wm size non-zero: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
+    async fn get_screen_size_with(&self) -> Result<(u32, u32), String> {
+        // Use device shell_command instead of external adb binary
+        let mut out: Vec<u8> = Vec::new();
+        {
+            let mut dev = self.server_device.lock().await;
+            // wm size returns text
+            dev.shell_command(&["wm", "size"], &mut out)
+                .map_err(|e| format!("RustAdb: wm size failed: {e}"))?;
         }
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        // Reuse parsing logic similar to Adb
+        let stdout = String::from_utf8_lossy(&out);
         for line in stdout.lines() {
             if let Some(size_str) = line.strip_prefix("Physical size: ") {
                 let parts: Vec<&str> = size_str.trim().split('x').collect();
@@ -51,70 +58,78 @@ impl RustAdb {
 
 impl AdbClient for RustAdb {
     async fn list_devices() -> Result<Vec<Device>, String> {
-        // Temporary: revert to shell invocation until adb_client API confirmed
-        let output = Command::new("adb")
-            .arg("devices")
-            .arg("-l")
-            .output()
+        let mut server = ADBServer::default();
+        let result = tokio::task::spawn_blocking(move || server.devices())
             .await
-            .map_err(|e| format!("RustAdb: adb devices failed: {e}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "RustAdb: adb devices non-zero: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let devices = crate::adb::Adb::parse_devices(&stdout);
-        Ok(devices)
-    }
-    async fn new_with_device(device_name: &str) -> Result<Self, String> {
-        let devices = Self::list_devices().await?;
-        let device = devices
+            .map_err(|e| format!("RustAdb: join error: {e}"))?;
+        let device_list = result.map_err(|e| format!("RustAdb: devices failed: {e}"))?;
+        let mapped = device_list
             .into_iter()
-            .find(|d| d.name == device_name)
-            .ok_or_else(|| format!("RustAdb: device '{device_name}' not found"))?;
-        let (sx, sy) = Self::get_screen_size().await?;
-        Ok(RustAdb::new(device, sx, sy).await)
+            .map(|d| Device {
+                name: d.identifier,
+                transport_id: None,
+            })
+            .collect();
+        Ok(mapped)
     }
+
+    async fn new_with_device(device_name: &str) -> Result<Self, String> {
+        let mut server = ADBServer::default();
+        // get_device_by_name or get_device depending on provided name
+        let server_device = tokio::task::spawn_blocking({
+            let name = device_name.to_string();
+            move || {
+                if name.is_empty() {
+                    server.get_device()
+                } else {
+                    server.get_device_by_name(&name)
+                }
+                .map(|dev| (server, dev))
+            }
+        })
+        .await
+        .map_err(|e| format!("RustAdb: join error: {e}"))?
+        .map_err(|e| format!("RustAdb: open device failed: {e}"))?;
+        let (srv, dev) = server_device;
+        let tmp = RustAdb {
+            device: Device {
+                name: device_name.to_string(),
+                transport_id: None,
+            },
+            server: Arc::new(Mutex::new(srv)),
+            server_device: Arc::new(Mutex::new(dev)),
+            screen_x: 0,
+            screen_y: 0,
+        };
+        let (sx, sy) = tmp.get_screen_size_with().await?;
+        Ok(RustAdb {
+            screen_x: sx,
+            screen_y: sy,
+            ..tmp
+        })
+    }
+
     async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
-        // Simple exec-out screencap similar to Adb
-        let output = Command::new("adb")
-            .arg("exec-out")
-            .arg("screencap")
-            .arg("-p")
-            .output()
-            .await
+        let mut out: Vec<u8> = Vec::new();
+        let mut dev = self.server_device.lock().await;
+        dev.shell_command(&["screencap", "-p"], &mut out)
             .map_err(|e| format!("RustAdb: screencap failed: {e}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "RustAdb: screencap non-zero: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-        Ok(output.stdout)
+        Ok(out)
     }
+
     async fn tap(&self, x: u32, y: u32) -> Result<(), String> {
         if x > self.screen_x || y > self.screen_y {
             return Err(format!("RustAdb: tap out of bounds x={x} y={y}"));
         }
-        let output = Command::new("adb")
-            .arg("shell")
-            .arg("input")
-            .arg("tap")
-            .arg(x.to_string())
-            .arg(y.to_string())
-            .output()
-            .await
+        let mut out: Vec<u8> = Vec::new();
+        let mut dev = self.server_device.lock().await;
+        let xs = x.to_string();
+        let ys = y.to_string();
+        dev.shell_command(&["input", "tap", &xs, &ys], &mut out)
             .map_err(|e| format!("RustAdb: tap failed: {e}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "RustAdb: tap non-zero: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
         Ok(())
     }
+
     async fn swipe(
         &self,
         x1: u32,
@@ -128,29 +143,22 @@ impl AdbClient for RustAdb {
                 return Err("RustAdb: swipe out of bounds".into());
             }
         }
-        let mut cmd = Command::new("adb");
-        cmd.arg("shell")
-            .arg("input")
-            .arg("swipe")
-            .arg(x1.to_string())
-            .arg(y1.to_string())
-            .arg(x2.to_string())
-            .arg(y2.to_string());
+        let mut out: Vec<u8> = Vec::new();
+        let mut dev = self.server_device.lock().await;
+        let s1 = x1.to_string();
+        let s2 = y1.to_string();
+        let s3 = x2.to_string();
+        let s4 = y2.to_string();
+        let mut cmd_parts: Vec<String> = vec!["input".into(), "swipe".into(), s1, s2, s3, s4];
         if let Some(d) = duration {
-            cmd.arg(d.to_string());
+            cmd_parts.push(d.to_string());
         }
-        let output = cmd
-            .output()
-            .await
+        let refs: Vec<&str> = cmd_parts.iter().map(|s| s.as_str()).collect();
+        dev.shell_command(&refs, &mut out)
             .map_err(|e| format!("RustAdb: swipe failed: {e}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "RustAdb: swipe non-zero: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
         Ok(())
     }
+
     fn screen_dimensions(&self) -> (u32, u32) {
         (self.screen_x, self.screen_y)
     }

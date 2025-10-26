@@ -136,6 +136,12 @@ fn App() -> Element {
     } else {
         "background: #5a4b1f; color: #ffd857; border: 1px solid #ffd857; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; letter-spacing: 0.5px; font-weight: 600;"
     };
+    // Use detailed error message (e.g. missing adb guidance) when status contains Error
+    let fallback_message = if current_status.contains("Error") {
+        current_status.clone()
+    } else {
+        "Please connect an Android device with ADB enabled, or use the CLI version.".to_string()
+    };
 
     rsx! {
         // Main app container: vertical layout, fills viewport
@@ -160,7 +166,7 @@ fn App() -> Element {
                             // Fallback panel if no device is connected
                             div { style: "background:rgba(255,255,255,0.1); backdrop-filter:blur(10px); padding:20px; border-radius:15px; margin-bottom:20px; border:1px solid rgba(255,255,255,0.2);",
                                 h2 { style: "margin-top:0; color:#ffb347;", "⚠️ No Device Connected" }
-                                p { style: "font-size:1.1em; margin:15px 0; text-align:center;", "Please connect an Android device with ADB enabled, or use the CLI version." }
+                                p { style: "font-size:1.1em; margin:15px 0; text-align:center;", "{fallback_message}" }
                                 button { style: "background:linear-gradient(45deg,#dc3545,#e74c3c); color:white; padding:15px 25px; border:none; border-radius:10px; cursor:pointer; font-size:1.1em; font-weight:bold; min-width:150px;", onclick: move |_| -> () { std::process::exit(0); }, "🚪 Exit Application" }
                             }
                         }

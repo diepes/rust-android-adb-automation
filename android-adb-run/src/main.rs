@@ -62,6 +62,9 @@ fn print_help() {
     println!("    --gui               Launch GUI interface");
     println!("    --screenshot, -s    Take a screenshot and save to file (cli-screenshot.png)");
     println!("    --impl=<shell|rust> Select ADB implementation for CLI actions (default: rust)");
+    println!(
+        "                        The shell implementation reqires the ADB tool to be installed."
+    );
     println!("    --help, -h          Show this help message");
     println!("    --version, -v       Show version information");
     println!();

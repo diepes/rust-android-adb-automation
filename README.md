@@ -1,156 +1,115 @@
 # rust-android-adb-automation
 
-Rust library and CLI tool for automating Android device control through the ADB (Android Debug Bridge).
+Rust library, CLI, and Dioxus desktop GUI for Android device automation via ADB. Provides two interchangeable backends:
 
-## Project Structure
+- `rust` (default): Pure Rust using the `adb_client` crate (no external `adb` binary required).
+- `shell`: Legacy subprocess backend invoking external `adb` (requires Platform Tools in PATH).
 
-- **Library**: Core ADB automation functionality in `src/adb.rs`
-- **CLI Tool**: Command-line interface in `src/main.rs` 
-- **GUI Tool**: Desktop GUI using Dioxus (optional, see `DIOXUS_SETUP.md`)
+See detailed crate documentation in `android-adb-run/README.md`.
 
-## Features
+## Structure
 
-- Device discovery and connection
+```
+./
+  android-adb-run/        # main crate (library + CLI + GUI)
+    src/adb.rs            # AdbClient trait + Device
+    src/adb_rust.rs       # Pure Rust backend
+    src/adb_shell.rs      # External adb backend
+    src/adb_backend.rs    # Runtime enum dispatch
+    src/gui/              # Dioxus components
+```
+
+## Features (Summary)
+
+- Device listing & connection
 - Screen size detection
-- Screen capture (PNG format)
-- Touch input simulation (tap, swipe)
-- **GUI with interactive touch**: Click to tap, drag to swipe on live screenshots
-- Automatic device connection via network
-- Transport ID-based device selection
-- Async/non-blocking operations for responsive GUI
+- PNG screen capture (bytes)
+- Tap & swipe input
+- Transport ID (shell backend)
+- Async (Tokio) for responsiveness
+- GUI: live screenshot, tap markers (centered), selection rectangle, mutually exclusive modes (auto-refresh vs selection)
+- Runtime backend selection via `--impl=<rust|shell>` or env `ADB_IMPL`
 
-## Developement and using AI
-
-- Try to keep the rust code modular
-- Use async(tokio) to keep gui responsive
-- Try to follow dioxus best practices
-- Use dioxuis-cli for interactive gui developement and fast reload
+## Backend Selection
 
 ```bash
-cargo install dioxus-cli
-dx serve --hot-reload
+./android-adb-run --gui                # GUI (default rust backend)
+./android-adb-run --screenshot         # Take screenshot (rust backend)
+./android-adb-run --screenshot --impl=shell
+ADB_IMPL=shell ./android-adb-run --gui # Force shell backend in GUI
 ```
 
-- if it fails try installing the binary directly
+## Conditional Prerequisites
+
+External adb only needed for `--impl=shell`:
 
 ```bash
-cargo install cargo-binstall
-cargo-binstall dioxus-cli
-dx serve --hot-reload
+sudo apt install adb  # or add platform-tools to PATH
 ```
 
-## Building and Running
+General:
 
-```bash
-cargo install dioxus-cli
-```
+1. Android device with USB debugging enabled
+2. USB or TCP/IP connection (e.g. `adb tcpip 5555; adb connect <ip>:5555` for shell backend)
 
-### Command-Line Tool
-
-```bash
-cd android-adb-run
-cargo build
-./target/debug/android-adb-run
-```
-
-### GUI Tool (Optional)
-
-```bash
-cd android-adb-run
-./target/debug/android-adb-run --gui
-# or simply
-./target/debug/android-adb-run
-```
-
-#### GUI Features
-
-- **Compact borderless window** with custom drag and close buttons
-- **Merged heading + status indicator** inside Device Information panel
-- **Reduced vertical footprint**: slim screenshot (max-height 560px) and minimal paddings
-- **Real-time screenshot display** with live mouse & mapped device coordinates overlay
-- **Click-to-tap**: Click anywhere on the screenshot to tap that location
-- **Drag-to-swipe**: Click and drag (>=10px movement) to perform swipe gestures
-- **Gesture detection**: <10px treated as tap, otherwise swipe with duration 300ms
-- **Visual feedback**: Red glow/border while screenshot capture is in progress; swipe progress indicator
-- **Auto-update on touch**: Optional automatic screenshot refresh after tap/swipe (checkbox)
-- **Async ADB operations**: Fully non-blocking using Tokio async process
-- **Save screenshot to disk**: In-memory capture can be saved as PNG via button
-
-See `DIOXUS_SETUP.md` for GUI setup instructions.
-
-## Adb Automation Functions
-
-- `screen_capture(output_path: &str)`: Capture the current screen and save as PNG.
-- `tap(x: u32, y: u32)`: Tap at the given (x, y) coordinates on the device screen.
-- `swipe(x1: u32, y1: u32, x2: u32, y2: u32, duration: Option<u32>)`: Swipe from (x1, y1) to (x2, y2) with optional duration.
-- Device selection and connection via transport_id or device name.
-- Screen size detection and bounds checking for input events.
-
-## Prerequisites
-
-1. **ADB installed and in PATH**:
-
-```bash
-# Install ADB (Android SDK Platform Tools)
-# On Ubuntu/Debian:
-sudo apt install adb
-# Or download from: https://developer.android.com/studio/command-line/adb
-```
-
-1. **Android device with USB debugging enabled**
-1. **Device connected via USB or network**
-
-## Usage Examples
-
-### Basic Connection
+## Trait Overview
 
 ```rust
-use android_adb_run::adb::Adb;
-// Connect to first available device
-let adb = Adb::new(None)?;
-// Connect to specific transport ID
-let adb = Adb::new(Some("2"))?;
-// Connect to device by name (will attempt connection if not found)
-let adb = Adb::new_with_device("oneplus6:5555")?;
+pub trait AdbClient: Send + Sync {
+    async fn list_devices() -> Result<Vec<Device>, String> where Self: Sized;
+    async fn new_with_device(device_name: &str) -> Result<Self, String> where Self: Sized;
+    async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String>;
+    async fn tap(&self, x: u32, y: u32) -> Result<(), String>;
+    async fn swipe(&self, x1: u32, y1: u32, x2: u32, y2: u32, duration: Option<u32>) -> Result<(), String>;
+    fn screen_dimensions(&self) -> (u32, u32);
+    fn device_name(&self) -> &str;
+    fn transport_id(&self) -> Option<u32>;
+}
 ```
 
-### Screen Capture
+## Example (Pure Rust Backend)
 
 ```rust
-adb.screen_capture("screenshot.png")?;
+use android_adb_run::adb_rust::RustAdb;
+
+#[tokio::main]
+async fn main() -> Result<(), String> {
+    let devices = RustAdb::list_devices().await?;
+    let first = devices.first().ok_or("No devices")?;
+    let adb = RustAdb::new_with_device(&first.name).await?;
+    let (w,h) = adb.screen_dimensions();
+    println!("{} {}x{}", adb.device_name(), w, h);
+    let bytes = adb.screen_capture_bytes().await?;
+    std::fs::write("shot.png", &bytes).map_err(|e| e.to_string())?;
+    adb.tap(w/2, h/2).await?;
+    Ok(())
+}
 ```
 
-### Touch Input (CLI)
+## Example (Shell Backend)
 
 ```rust
-// Tap at coordinates (540, 1000)
-adb.tap(540, 1000)?;
-// Swipe from top to bottom
-adb.swipe(540, 500, 540, 1500, Some(300))?;
+use android_adb_run::adb_shell::AdbShell;
+
+#[tokio::main]
+async fn main() -> Result<(), String> {
+    let devices = AdbShell::list_devices().await?;
+    let first = devices.first().ok_or("No devices")?;
+    let adb = AdbShell::new_with_device(&first.name).await?;
+    let (w,h) = adb.screen_dimensions();
+    adb.swipe(10,10,200,200, Some(300)).await?;
+    Ok(())
+}
 ```
 
-### Touch Input (GUI)
+## Development & AI Notes
 
-- **Tap**: Click on the screenshot image to tap that location
-- **Swipe**: Click and drag to create swipe gestures
-- **Gesture Detection**: Short movements (< 10px) = tap, longer movements = swipe
-- **Visual Feedback**: Orange indicator shows swipe start position during gesture
-- **Auto-Screenshot**: Optional refresh after each gesture (checkbox control)
+- Edition 2024
+- Async Tokio throughout
+- Dioxus modular GUI components
+- Planned: multi-device selection, backend instance caching, screenshot debounce
 
-## adb notes
+## License
 
-- Start game TheTower
-
-```bash
-adb -t 8 shell monkey -p com.TechTreeGames.TheTower 1
-```
-
-## Development Notes
-
-- Uses Rust edition 2024
-- Custom base64 encoder avoids extra dependencies for inline image data
-- Coordinate mapping starts at (0,0) top-left with dynamic scaling (no image border offset)
-- Swipe and tap logic unified; screenshot auto-refresh guarded by checkbox state
-- Future ideas: minimize button, hover states, configurable swipe duration, theming tokens
-
+MIT
 

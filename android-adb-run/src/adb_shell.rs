@@ -10,10 +10,35 @@ pub struct AdbShell {
 }
 
 impl AdbShell {
+    fn ensure_adb_available() -> Result<(), String> {
+        match std::process::Command::new("adb").arg("version").output() {
+            Ok(out) => {
+                if !out.status.success() {
+                    return Err(format!(
+                        "'adb' command found but returned non-zero ({}). Ensure Android Platform Tools are properly installed, or restart with --impl=rust to use the pure Rust backend.",
+                        out.status
+                    ));
+                }
+                Ok(())
+            }
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    Err("'adb' binary not found in PATH. Install Android Platform Tools (https://developer.android.com/tools/adb) or add 'adb' to PATH. Alternatively run with --impl=rust (pure Rust backend).".to_string())
+                } else {
+                    Err(format!("Failed to invoke 'adb': {e}. Verify installation or switch to --impl=rust."))
+                }
+            }
+        }
+    }
+
     pub async fn new(transport_id: Option<&str>) -> Result<Self, String> {
+        // Provide early backend guidance if adb unavailable
+        if let Err(e) = Self::ensure_adb_available() {
+            return Err(e);
+        }
         let devices = Self::list_devices().await?;
         if devices.is_empty() {
-            return Err("No devices available".to_string());
+            return Err("No devices available (shell backend). Connect a device or use --impl=rust for pure Rust backend.".to_string());
         }
         let device = match transport_id {
             Some(tid) => devices
@@ -38,6 +63,7 @@ impl AdbShell {
     }
 
     async fn get_screen_size() -> Result<(u32, u32), String> {
+        Self::ensure_adb_available()?;
         let output = Command::new("adb")
             .arg("shell")
             .arg("wm")
@@ -121,6 +147,7 @@ impl AdbShell {
     }
 
     pub async fn list_devices() -> Result<Vec<Device>, String> {
+        Self::ensure_adb_available()?;
         let output = Command::new("adb")
             .arg("devices")
             .arg("-l")
@@ -146,6 +173,7 @@ impl AdbShell {
     }
 
     pub async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
+        Self::ensure_adb_available()?;
         let mut cmd = Command::new("adb");
         cmd.arg("-t").arg(self.transport_id.to_string());
         let output = cmd
@@ -165,6 +193,7 @@ impl AdbShell {
     }
 
     pub async fn tap(&self, x: u32, y: u32) -> Result<(), String> {
+        Self::ensure_adb_available()?;
         if x > self.screen_x || y > self.screen_y {
             return Err(format!("Coordinates out of bounds x={x} y={y}"));
         }
@@ -194,6 +223,7 @@ impl AdbShell {
         y2: u32,
         duration: Option<u32>,
     ) -> Result<(), String> {
+        Self::ensure_adb_available()?;
         for &(x, y) in &[(x1, y1), (x2, y2)] {
             if x > self.screen_x || y > self.screen_y {
                 return Err("Swipe coordinates out of bounds".into());
