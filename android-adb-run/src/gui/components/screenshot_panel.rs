@@ -61,6 +61,9 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
         (left, top, width, height)
     };
 
+    // Cursor hotspot adjustment (use center instead of bottom-right)
+    const CURSOR_OFFSET: f64 = 11.0; // adjust if cursor size changes
+
     // Rectangle (not square) overlay state derived from selection signals
     let overlay_rect: Option<(i32, i32, i32, i32)> = if *select_box.read() {
         if let (Some(start), Some(end)) = (selection_start.read().clone(), selection_end.read().clone()) {
@@ -83,7 +86,7 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                     let (cx, cy) = calculate_device_coords(r, *sx, *sy);
                                     device_coords.set(Some((cx, cy)));
                                 }
-                                if *select_box.read() { if selection_start.read().is_some() { selection_end.set(Some(r)); } }
+                                if *select_box.read() { if selection_start.read().is_some() { let adj = ElementPoint { x: r.x - CURSOR_OFFSET, y: r.y - CURSOR_OFFSET, ..r }; selection_end.set(Some(adj)); } }
                             },
                             onmouseleave: move |_| {
                                 mouse_coords.set(None); device_coords.set(None); is_swiping.set(false); swipe_start.set(None); swipe_end.set(None);
@@ -91,7 +94,7 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                             },
                             onmousedown: move |evt| {
                                 if *select_box.read() {
-                                    let r = evt.element_coordinates(); selection_start.set(Some(r)); selection_end.set(None);
+                                    let r = evt.element_coordinates(); let adj = ElementPoint { x: r.x - CURSOR_OFFSET, y: r.y - CURSOR_OFFSET, ..r }; selection_start.set(Some(adj)); selection_end.set(None);
                                 } else if let Some((_, _, sx, sy)) = device_info.read().as_ref() {
                                     let r = evt.element_coordinates(); let (sx0, sy0) = calculate_device_coords(r, *sx, *sy);
                                     is_swiping.set(true); swipe_start.set(Some((sx0, sy0))); swipe_end.set(None);
