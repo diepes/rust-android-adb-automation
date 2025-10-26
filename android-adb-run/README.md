@@ -36,7 +36,7 @@ android-adb-run/
   src/
     adb.rs          # AdbClient trait + Device definition, re-exports shell impl as Adb
     adb_shell.rs    # Shell (external binary) implementation
-    adb_client.rs   # RustAdb implementation (toward pure client)
+    adb_rust.rs   # RustAdb implementation (toward pure client)
     gui/            # Dioxus GUI components
     main.rs         # CLI / entrypoint
 ```
@@ -88,7 +88,7 @@ pub trait AdbClient {
 
 ## Moving Toward Pure Rust
 
-Future step: replace shell calls with the `adb_client` crate for true binary independence. Current `RustAdb` mirrors shell functionality to ease transition.
+Future step: replace shell calls with the `adb_rust` crate for true binary independence. Current `RustAdb` mirrors shell functionality to ease transition.
 
 ## Development Notes
 

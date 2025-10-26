@@ -1,5 +1,5 @@
 use android_adb_run::adb::{Adb, AdbClient};
-use android_adb_run::adb_client::RustAdb;
+use android_adb_run::adb_rust::RustAdb;
 use android_adb_run::gui::dioxus_app::run_gui; // updated after rename
 use std::env;
 

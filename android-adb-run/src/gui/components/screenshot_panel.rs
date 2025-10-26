@@ -2,7 +2,7 @@
 use crate::AdbBackend;
 use crate::adb::Adb;
 use crate::adb::AdbClient;
-use crate::adb_client::RustAdb;
+use crate::adb_rust::RustAdb;
 use crate::adb_shell::AdbShell;
 use crate::gui::util::base64_encode;
 use dioxus::html::geometry::ElementPoint;

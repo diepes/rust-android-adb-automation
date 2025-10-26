@@ -1,6 +1,6 @@
 pub mod adb;
 pub mod adb_backend;
-pub mod adb_client;
+pub mod adb_rust;
 pub mod adb_shell;
 pub mod gui; // replaced old dioxus root module
 

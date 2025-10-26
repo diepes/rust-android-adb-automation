@@ -1,5 +1,5 @@
 use crate::adb::{AdbClient, Device};
-use crate::adb_client::RustAdb;
+use crate::adb_rust::RustAdb;
 use crate::adb_shell::AdbShell;
 
 pub enum AdbBackend {
