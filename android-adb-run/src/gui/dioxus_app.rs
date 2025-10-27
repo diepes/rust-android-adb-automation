@@ -1,12 +1,18 @@
-use crate::AdbBackend;
+use crate::adb_backend::AdbBackend;
 use crate::gui::components::interaction_info::InteractionInfo;
 use crate::gui::components::{
     actions::Actions, device_info::DeviceInfo, header::Header, screenshot_panel::screenshot_panel,
 };
 use crate::gui::util::base64_encode;
 use dioxus::prelude::*;
+use std::sync::OnceLock;
 
-pub fn run_gui() {
+// Global state to store the ADB implementation choice
+static USE_RUST_IMPL: OnceLock<bool> = OnceLock::new();
+
+pub fn run_gui(use_rust_impl: bool) {
+    USE_RUST_IMPL.set(use_rust_impl).expect("USE_RUST_IMPL should only be set once");
+    
     use dioxus::desktop::{Config, WindowBuilder};
     let enable_borderless = true; // borderless window
     let config = Config::new().with_window(
@@ -87,8 +93,9 @@ fn App() -> Element {
 
     // Initialize ADB connection on first render
     use_effect(move || {
+        let use_rust_impl = *USE_RUST_IMPL.get().unwrap_or(&true);
         spawn(async move {
-            match AdbBackend::connect_first().await {
+            match AdbBackend::connect_first(use_rust_impl).await {
                 Ok(client) => {
                     let (sx, sy) = client.screen_dimensions();
                     device_info.set(Some((
@@ -99,7 +106,7 @@ fn App() -> Element {
                     )));
                     status.set(format!(
                         "Connected via {}",
-                        std::env::var("ADB_IMPL").unwrap_or_else(|_| "rust".to_string())
+                        if use_rust_impl { "rust" } else { "shell" }
                     ));
                     is_loading_screenshot.set(true);
                     screenshot_status.set("📸 Taking initial screenshot...".to_string());
@@ -164,7 +171,7 @@ fn App() -> Element {
                             // Device metadata panel
                             DeviceInfo { name: name.clone(), transport_id: transport_id_opt, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string() }
                             // Action buttons (screenshot, save, exit, etc)
-                            Actions { name: name.clone(), is_loading: is_loading_screenshot, screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, auto_update_on_touch: auto_update_on_touch, select_box: select_box }
+                            Actions { name: name.clone(), is_loading: is_loading_screenshot, screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, auto_update_on_touch: auto_update_on_touch, select_box: select_box, use_rust_impl: *USE_RUST_IMPL.get().unwrap_or(&true) }
                             // Interaction info (tap/swipe coordinates, status)
                             InteractionInfo { device_coords: device_coords, screenshot_status: screenshot_status }
                         } else {
@@ -179,7 +186,7 @@ fn App() -> Element {
                         div { style: "margin-top:4px; text-align:left; font-size:0.7em; opacity:0.75; letter-spacing:0.5px;", "Built with Rust 🦀 and Dioxus ⚛️" }
                     }
                     // Right column: screenshot panel (image, gestures)
-                    screenshot_panel { screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, device_info: device_info, device_coords: device_coords, mouse_coords: mouse_coords, is_loading_screenshot: is_loading_screenshot, auto_update_on_touch: auto_update_on_touch, is_swiping: is_swiping, swipe_start: swipe_start, swipe_end: swipe_end, calculate_device_coords: calculate_device_coords, select_box: select_box, selection_start: selection_start, selection_end: selection_end, tap_markers: tap_markers }
+                    screenshot_panel { screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, device_info: device_info, device_coords: device_coords, mouse_coords: mouse_coords, is_loading_screenshot: is_loading_screenshot, auto_update_on_touch: auto_update_on_touch, is_swiping: is_swiping, swipe_start: swipe_start, swipe_end: swipe_end, calculate_device_coords: calculate_device_coords, select_box: select_box, selection_start: selection_start, selection_end: selection_end, tap_markers: tap_markers, use_rust_impl: *USE_RUST_IMPL.get().unwrap_or(&true) }
                 }
             }
         }

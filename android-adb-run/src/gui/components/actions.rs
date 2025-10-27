@@ -1,5 +1,5 @@
 // gui/components/actions.rs
-use crate::AdbBackend;
+use crate::adb_backend::AdbBackend;
 use crate::gui::util::base64_encode;
 use dioxus::prelude::*;
 
@@ -12,6 +12,7 @@ pub struct ActionsProps {
     pub screenshot_bytes: Signal<Option<Vec<u8>>>,
     pub auto_update_on_touch: Signal<bool>,
     pub select_box: Signal<bool>, // new signal for select box
+    pub use_rust_impl: bool,
 }
 
 #[component]
@@ -23,6 +24,7 @@ pub fn Actions(props: ActionsProps) -> Element {
     let mut auto_update_on_touch = props.auto_update_on_touch;
     let mut select_box = props.select_box;
     let name = props.name.clone();
+    let use_rust_impl = props.use_rust_impl;
     rsx! {
         div { style: "background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 20px; border-radius: 15px; margin-bottom: 20px; border: 1px solid rgba(255,255,255,0.2);",
             h2 { style: "margin-top:0; color:#87ceeb;", "🎮 Actions" }
@@ -34,9 +36,8 @@ pub fn Actions(props: ActionsProps) -> Element {
                         is_loading.set(true);
                         screenshot_status.set("📸 Taking screenshot...".to_string());
                         spawn(async move {
-                            let open = AdbBackend::new_with_device(&name_clone).await;
                             let result = async move {
-                                match open {
+                                match AdbBackend::new_with_device(&name_clone, use_rust_impl).await {
                                     Ok(client) => match client.screen_capture().await {
                                         Ok(cap) => Ok(cap),
                                         Err(e) => Err(format!("Screenshot failed: {}", e)),

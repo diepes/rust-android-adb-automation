@@ -1,5 +1,5 @@
 // gui/components/screenshot_panel.rs
-use crate::AdbBackend;
+use crate::adb_backend::AdbBackend;
 use crate::gui::util::base64_encode;
 use dioxus::html::geometry::ElementPoint;
 use dioxus::prelude::*;
@@ -23,6 +23,7 @@ pub struct ScreenshotPanelProps {
     pub selection_start: Signal<Option<ElementPoint>>,
     pub selection_end: Signal<Option<ElementPoint>>,
     pub tap_markers: Signal<Vec<ElementPoint>>,
+    pub use_rust_impl: bool,
 }
 
 #[component]
@@ -44,6 +45,7 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
     let mut selection_start = props.selection_start;
     let mut selection_end = props.selection_end;
     let mut tap_markers = props.tap_markers;
+    let use_rust_impl = props.use_rust_impl;
     let _status_text = screenshot_status.read().clone();
 
     // Helper to compute rectangle overlay adjusted for image border
@@ -144,9 +146,8 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                             if distance < 10.0 {
                                                 let raw_point = evt.element_coordinates(); tap_markers.with_mut(|v| v.push(raw_point));
                                                 spawn(async move {
-                                                    let open = AdbBackend::connect_first().await;
                                                     let result = async move {
-                                                        match open {
+                                                        match AdbBackend::connect_first(use_rust_impl).await {
                                                             Ok(client) => match client.tap(sx0, sy0).await {
                                                                 Ok(_) => {
                                                                     if refresh_after {
@@ -177,9 +178,8 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                                 });
                                             } else {
                                                 spawn(async move {
-                                                    let open = AdbBackend::connect_first().await;
                                                     let result = async move {
-                                                        match open {
+                                                        match AdbBackend::connect_first(use_rust_impl).await {
                                                             Ok(client) => match client.swipe(sx0, sy0, ex, ey, Some(300)).await {
                                                                 Ok(_) => {
                                                                     if refresh_after {

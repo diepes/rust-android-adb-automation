@@ -40,15 +40,12 @@ fn main() {
         Some("screenshot") => {
             let impl_str = if use_rust_adb_impl { "rust" } else { "shell" };
             println!("📸 CLI screenshot using impl='{}'...", impl_str);
-            unsafe {
-                std::env::set_var("ADB_IMPL", impl_str);
-            }
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
-                match android_adb_run::adb_backend::AdbBackend::list_devices_env().await {
+                match android_adb_run::adb_backend::AdbBackend::list_devices(use_rust_adb_impl).await {
                     Ok(devs) if !devs.is_empty() => {
                         let first = &devs[0];
-                        match android_adb_run::adb_backend::AdbBackend::new_with_device(&first.name).await {
+                        match android_adb_run::adb_backend::AdbBackend::new_with_device(&first.name, use_rust_adb_impl).await {
                             Ok(client) => {
                                 let (sx, sy) = client.screen_dimensions();
                                 println!("📱 Device: {} size: {}x{} (backend={})", client.device_name(), sx, sy, impl_str);
@@ -73,10 +70,7 @@ fn main() {
                 "🚀 Launching Android ADB Control GUI (impl='{}')...",
                 impl_str
             );
-            unsafe {
-                std::env::set_var("ADB_IMPL", impl_str);
-            }
-            run_gui();
+            run_gui(use_rust_adb_impl);
         }
         _ => unreachable!(),
     }

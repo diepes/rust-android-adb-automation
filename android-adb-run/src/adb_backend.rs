@@ -7,31 +7,29 @@ pub enum AdbBackend {
     Rust(RustAdb),
 }
 
-fn current_choice() -> String {
-    std::env::var("ADB_IMPL").unwrap_or_else(|_| "rust".to_string())
-}
-
 impl AdbBackend {
-    pub async fn list_devices_env() -> Result<Vec<Device>, String> {
-        match current_choice().as_str() {
-            "shell" => AdbShell::list_devices().await,
-            _ => RustAdb::list_devices().await,
+    pub async fn list_devices(use_rust: bool) -> Result<Vec<Device>, String> {
+        if use_rust {
+            RustAdb::list_devices().await
+        } else {
+            AdbShell::list_devices().await
         }
     }
 
-    pub async fn connect_first() -> Result<Self, String> {
-        let devices = Self::list_devices_env().await?;
+    pub async fn connect_first(use_rust: bool) -> Result<Self, String> {
+        let devices = Self::list_devices(use_rust).await?;
         let first = devices
             .into_iter()
             .next()
             .ok_or_else(|| "No devices found".to_string())?;
-        Self::new_with_device(&first.name).await
+        Self::new_with_device(&first.name, use_rust).await
     }
 
-    pub async fn new_with_device(name: &str) -> Result<Self, String> {
-        match current_choice().as_str() {
-            "shell" => Ok(AdbBackend::Shell(AdbShell::new_with_device(name).await?)),
-            _ => Ok(AdbBackend::Rust(RustAdb::new_with_device(name).await?)),
+    pub async fn new_with_device(name: &str, use_rust: bool) -> Result<Self, String> {
+        if use_rust {
+            Ok(AdbBackend::Rust(RustAdb::new_with_device(name).await?))
+        } else {
+            Ok(AdbBackend::Shell(AdbShell::new_with_device(name).await?))
         }
     }
 
@@ -97,14 +95,16 @@ impl AdbClient for AdbBackend {
     where
         Self: Sized,
     {
-        AdbBackend::list_devices_env().await
+        // Default to rust implementation for backward compatibility
+        AdbBackend::list_devices(true).await
     }
 
     async fn new_with_device(device_name: &str) -> Result<Self, String>
     where
         Self: Sized,
     {
-        AdbBackend::new_with_device(device_name).await
+        // Default to rust implementation for backward compatibility
+        AdbBackend::new_with_device(device_name, true).await
     }
 
     async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
