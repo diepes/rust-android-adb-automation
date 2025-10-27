@@ -1,12 +1,12 @@
-use crate::adb::{AdbClient, Device};
+use crate::adb::{AdbClient, Device, ImageCapture};
 use tokio::process::Command;
 
-#[derive(Clone, PartialEq)]
 pub struct AdbShell {
     pub device: Device,
     pub transport_id: u32,
     pub screen_x: u32,
     pub screen_y: u32,
+    capture_count: std::sync::atomic::AtomicU64,
 }
 
 impl AdbShell {
@@ -25,7 +25,9 @@ impl AdbShell {
                 if e.kind() == std::io::ErrorKind::NotFound {
                     Err("'adb' binary not found in PATH. Install Android Platform Tools (https://developer.android.com/tools/adb) or add 'adb' to PATH. Alternatively run with --impl=rust (pure Rust backend).".to_string())
                 } else {
-                    Err(format!("Failed to invoke 'adb': {e}. Verify installation or switch to --impl=rust."))
+                    Err(format!(
+                        "Failed to invoke 'adb': {e}. Verify installation or switch to --impl=rust."
+                    ))
                 }
             }
         }
@@ -59,6 +61,7 @@ impl AdbShell {
             transport_id,
             screen_x,
             screen_y,
+            capture_count: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -165,8 +168,8 @@ impl AdbShell {
     }
 
     pub async fn screen_capture(&self, output_path: &str) -> Result<(), String> {
-        let png = self.screen_capture_bytes().await?;
-        tokio::fs::write(output_path, &png)
+        let cap = <AdbShell as AdbClient>::screen_capture(self).await?;
+        tokio::fs::write(output_path, &cap.bytes)
             .await
             .map_err(|e| format!("Failed to write PNG file: {e}"))?;
         Ok(())
@@ -263,6 +266,11 @@ impl AdbClient for AdbShell {
     }
     async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
         self.screen_capture_bytes().await
+    }
+    fn next_capture_index(&self) -> u64 {
+        self.capture_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1
     }
     async fn tap(&self, x: u32, y: u32) -> Result<(), String> {
         self.tap(x, y).await

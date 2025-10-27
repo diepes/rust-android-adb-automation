@@ -34,17 +34,22 @@ pub fn Actions(props: ActionsProps) -> Element {
                         is_loading.set(true);
                         screenshot_status.set("📸 Taking screenshot...".to_string());
                         spawn(async move {
-                            let impl_choice = std::env::var("ADB_IMPL").unwrap_or_else(|_| "rust".to_string());
-                            let open = AdbBackend::new_with_device(&impl_choice, &name_clone).await;
+                            let open = AdbBackend::new_with_device(&name_clone).await;
                             let result = async move {
-                                match open { Ok(client) => match client.screen_capture_bytes().await { Ok(bytes) => Ok(bytes), Err(e) => Err(format!("Screenshot failed: {}", e)) }, Err(e) => Err(format!("ADB connection failed: {}", e)), }
+                                match open {
+                                    Ok(client) => match client.screen_capture().await {
+                                        Ok(cap) => Ok(cap),
+                                        Err(e) => Err(format!("Screenshot failed: {}", e)),
+                                    },
+                                    Err(e) => Err(format!("ADB connection failed: {}", e)),
+                                }
                             }.await;
                             match result {
-                                Ok(bytes) => {
-                                    let b64 = base64_encode(&bytes);
+                                Ok(cap) => {
+                                    let b64 = base64_encode(&cap.bytes);
                                     screenshot_data.set(Some(b64));
-                                    screenshot_bytes.set(Some(bytes));
-                                    screenshot_status.set("✅ Screenshot captured in memory!".to_string());
+                                    screenshot_bytes.set(Some(cap.bytes));
+                                    screenshot_status.set(format!("✅ Screenshot #{} captured in {}ms", cap.index, cap.duration_ms));
                                 }
                                 Err(e) => screenshot_status.set(format!("❌ {}", e)),
                             }

@@ -88,8 +88,7 @@ fn App() -> Element {
     // Initialize ADB connection on first render
     use_effect(move || {
         spawn(async move {
-            let impl_choice = std::env::var("ADB_IMPL").unwrap_or_else(|_| "rust".to_string());
-            match AdbBackend::connect_first(&impl_choice).await {
+            match AdbBackend::connect_first().await {
                 Ok(client) => {
                     let (sx, sy) = client.screen_dimensions();
                     device_info.set(Some((
@@ -98,15 +97,21 @@ fn App() -> Element {
                         sx,
                         sy,
                     )));
-                    status.set(format!("Connected via {impl_choice}"));
+                    status.set(format!(
+                        "Connected via {}",
+                        std::env::var("ADB_IMPL").unwrap_or_else(|_| "rust".to_string())
+                    ));
                     is_loading_screenshot.set(true);
                     screenshot_status.set("📸 Taking initial screenshot...".to_string());
-                    match client.screen_capture_bytes().await {
-                        Ok(image_bytes) => {
-                            let base64_string = base64_encode(&image_bytes);
+                    match client.screen_capture().await {
+                        Ok(image_cap) => {
+                            let base64_string = base64_encode(&image_cap.bytes);
                             screenshot_data.set(Some(base64_string));
-                            screenshot_bytes.set(Some(image_bytes.to_vec()));
-                            screenshot_status.set("✅ Initial screenshot captured!".to_string());
+                            screenshot_bytes.set(Some(image_cap.bytes.clone()));
+                            screenshot_status.set(format!(
+                                "✅ Initial screenshot #{} ({}ms)",
+                                image_cap.index, image_cap.duration_ms
+                            ));
                             is_loading_screenshot.set(false);
                         }
                         Err(e) => {

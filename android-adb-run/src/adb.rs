@@ -1,5 +1,12 @@
 use serde::Serialize;
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ImageCapture {
+    pub bytes: Vec<u8>,
+    pub duration_ms: u128,
+    pub index: u64, // sequential capture count (per backend instance)
+}
+
 // Trait defining ADB capabilities (shell or rust implementations)
 #[allow(async_fn_in_trait)]
 pub trait AdbClient: Send + Sync {
@@ -9,7 +16,25 @@ pub trait AdbClient: Send + Sync {
     async fn new_with_device(device_name: &str) -> Result<Self, String>
     where
         Self: Sized;
+
+    // Raw backend-specific capture (implemented per backend)
     async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String>;
+    // Increment and return the next capture index (per instance)
+    fn next_capture_index(&self) -> u64;
+
+    // Default high-level capture with timing + index
+    async fn screen_capture(&self) -> Result<ImageCapture, String> {
+        let start = std::time::Instant::now();
+        let bytes = self.screen_capture_bytes().await?;
+        let dur = start.elapsed().as_millis();
+        let idx = self.next_capture_index();
+        Ok(ImageCapture {
+            bytes,
+            duration_ms: dur,
+            index: idx,
+        })
+    }
+
     async fn tap(&self, x: u32, y: u32) -> Result<(), String>;
     async fn swipe(
         &self,

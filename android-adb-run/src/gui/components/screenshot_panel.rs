@@ -135,21 +135,78 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                         let r = evt.element_coordinates(); let (ex, ey) = calculate_device_coords(r, *sx, *sy);
                                         if let Some((sx0, sy0)) = swipe_start_val {
                                             let dx = (ex as i32 - sx0 as i32).abs(); let dy = (ey as i32 - sy0 as i32).abs(); let distance = ((dx*dx + dy*dy) as f32).sqrt();
-                                            let _name_clone = name.clone(); let auto = *auto_update_on_touch.read(); if auto { is_loading_screenshot.set(true); }
+                                            let _name_clone = name.clone();
+                                            let auto = *auto_update_on_touch.read();
+                                            let already_loading = *is_loading_screenshot.read();
+                                            // Only start a new screenshot capture if auto enabled AND not currently loading
+                                            let refresh_after = auto && !already_loading;
+                                            if refresh_after { is_loading_screenshot.set(true); }
                                             if distance < 10.0 {
                                                 let raw_point = evt.element_coordinates(); tap_markers.with_mut(|v| v.push(raw_point));
                                                 spawn(async move {
-                                                    let impl_choice = std::env::var("ADB_IMPL").unwrap_or_else(|_| "rust".to_string());
-                                                    let open = AdbBackend::connect_first(&impl_choice).await;
-                                                    let result = async move { match open { Ok(client) => match client.tap(sx0, sy0).await { Ok(_) => { if auto { tokio::time::sleep(tokio::time::Duration::from_millis(500)).await; match client.screen_capture_bytes().await { Ok(bytes) => Ok((true, bytes)), Err(e) => Err(format!("Screenshot failed: {}", e)), } } else { Ok((false, Vec::new())) } }, Err(e) => Err(format!("Tap failed: {}", e)), }, Err(e) => Err(format!("ADB connection failed: {}", e)), } }.await;
-                                                    match result { Ok((updated, bytes)) => { if updated { let b64 = base64_encode(&bytes); screenshot_data.set(Some(b64)); screenshot_bytes.set(Some(bytes)); screenshot_status.set(format!("✅ Tapped at ({},{}) - Screenshot updated", sx0, sy0)); is_loading_screenshot.set(false); } else { screenshot_status.set(format!("✅ Tapped at ({},{})", sx0, sy0)); } }, Err(e) => { screenshot_status.set(format!("❌ {}", e)); is_loading_screenshot.set(false); } }
+                                                    let open = AdbBackend::connect_first().await;
+                                                    let result = async move {
+                                                        match open {
+                                                            Ok(client) => match client.tap(sx0, sy0).await {
+                                                                Ok(_) => {
+                                                                    if refresh_after {
+                                                                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                                                        match client.screen_capture().await {
+                                                                            Ok(cap) => Ok((true, Some(cap))),
+                                                                            Err(e) => Err(format!("Screenshot failed: {}", e)),
+                                                                        }
+                                                                    } else { Ok((false, None)) }
+                                                                }
+                                                                Err(e) => Err(format!("Tap failed: {}", e)),
+                                                            },
+                                                            Err(e) => Err(format!("ADB connection failed: {}", e)),
+                                                        }
+                                                    }.await;
+                                                    match result {
+                                                        Ok((updated, cap_opt)) => {
+                                                            if let Some(cap) = cap_opt {
+                                                                let b64 = base64_encode(&cap.bytes); screenshot_data.set(Some(b64)); screenshot_bytes.set(Some(cap.bytes.clone()));
+                                                                screenshot_status.set(format!("✅ Tapped at ({},{}) - Screenshot #{} ({}ms)", sx0, sy0, cap.index, cap.duration_ms));
+                                                                is_loading_screenshot.set(false);
+                                                            } else {
+                                                                screenshot_status.set(format!("✅ Tapped at ({},{})", sx0, sy0));
+                                                            }
+                                                        }
+                                                        Err(e) => { screenshot_status.set(format!("❌ {}", e)); if refresh_after { is_loading_screenshot.set(false); } }
+                                                    }
                                                 });
                                             } else {
                                                 spawn(async move {
-                                                    let impl_choice = std::env::var("ADB_IMPL").unwrap_or_else(|_| "rust".to_string());
-                                                    let open = AdbBackend::connect_first(&impl_choice).await;
-                                                    let result = async move { match open { Ok(client) => match client.swipe(sx0, sy0, ex, ey, Some(300)).await { Ok(_) => { if auto { tokio::time::sleep(tokio::time::Duration::from_millis(800)).await; match client.screen_capture_bytes().await { Ok(bytes) => Ok((true, bytes)), Err(e) => Err(format!("Screenshot failed: {}", e)), } } else { Ok((false, Vec::new())) } }, Err(e) => Err(format!("Swipe failed: {}", e)), }, Err(e) => Err(format!("ADB connection failed: {}", e)), } }.await;
-                                                    match result { Ok((updated, bytes)) => { if updated { let b64 = base64_encode(&bytes); screenshot_data.set(Some(b64)); screenshot_bytes.set(Some(bytes)); screenshot_status.set(format!("✅ Swiped ({},{}) -> ({},{}) - Screenshot updated", sx0, sy0, ex, ey)); is_loading_screenshot.set(false); } else { screenshot_status.set(format!("✅ Swiped ({},{}) -> ({},{})", sx0, sy0, ex, ey)); } }, Err(e) => { screenshot_status.set(format!("❌ {}", e)); is_loading_screenshot.set(false); } }
+                                                    let open = AdbBackend::connect_first().await;
+                                                    let result = async move {
+                                                        match open {
+                                                            Ok(client) => match client.swipe(sx0, sy0, ex, ey, Some(300)).await {
+                                                                Ok(_) => {
+                                                                    if refresh_after {
+                                                                        tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
+                                                                        match client.screen_capture().await {
+                                                                            Ok(cap) => Ok((true, Some(cap))),
+                                                                            Err(e) => Err(format!("Screenshot failed: {}", e)),
+                                                                        }
+                                                                    } else { Ok((false, None)) }
+                                                                }
+                                                                Err(e) => Err(format!("Swipe failed: {}", e)),
+                                                            },
+                                                            Err(e) => Err(format!("ADB connection failed: {}", e)),
+                                                        }
+                                                    }.await;
+                                                    match result {
+                                                        Ok((updated, cap_opt)) => {
+                                                            if let Some(cap) = cap_opt {
+                                                                let b64 = base64_encode(&cap.bytes); screenshot_data.set(Some(b64)); screenshot_bytes.set(Some(cap.bytes.clone()));
+                                                                screenshot_status.set(format!("✅ Swiped ({},{}) -> ({},{}) - Screenshot #{} ({}ms)", sx0, sy0, ex, ey, cap.index, cap.duration_ms));
+                                                                is_loading_screenshot.set(false);
+                                                            } else {
+                                                                screenshot_status.set(format!("✅ Swiped ({},{}) -> ({},{})", sx0, sy0, ex, ey));
+                                                            }
+                                                        }
+                                                        Err(e) => { screenshot_status.set(format!("❌ {}", e)); if refresh_after { is_loading_screenshot.set(false); } }
+                                                    }
                                                 });
                                             }
                                             is_swiping.set(false); swipe_start.set(None); swipe_end.set(None);

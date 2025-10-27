@@ -1,18 +1,18 @@
 // https://crates.io/crates/adb_client
-use crate::adb::{AdbClient, Device};
+use crate::adb::{AdbClient, Device, ImageCapture};
 // use tokio::process::Command;
 use adb_client::{ADBDeviceExt, ADBServer, ADBServerDevice};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 #[allow(dead_code)]
-#[derive(Clone)]
 pub struct RustAdb {
     device: Device,
     server: Arc<Mutex<ADBServer>>, // manage server instance
     server_device: Arc<Mutex<ADBServerDevice>>, // underlying connected device
     screen_x: u32,
     screen_y: u32,
+    capture_count: std::sync::atomic::AtomicU64,
 }
 
 impl RustAdb {
@@ -29,6 +29,7 @@ impl RustAdb {
             server_device: Arc::new(Mutex::new(server_device)),
             screen_x,
             screen_y,
+            capture_count: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -53,6 +54,14 @@ impl RustAdb {
             }
         }
         Err("RustAdb: could not parse screen size".into())
+    }
+
+    async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
+        let mut out: Vec<u8> = Vec::new();
+        let mut dev = self.server_device.lock().await;
+        dev.shell_command(&["screencap", "-p"], &mut out)
+            .map_err(|e| format!("RustAdb: screencap failed: {e}"))?;
+        Ok(out)
     }
 }
 
@@ -100,6 +109,7 @@ impl AdbClient for RustAdb {
             server_device: Arc::new(Mutex::new(dev)),
             screen_x: 0,
             screen_y: 0,
+            capture_count: std::sync::atomic::AtomicU64::new(0),
         };
         let (sx, sy) = tmp.get_screen_size_with().await?;
         Ok(RustAdb {
@@ -110,11 +120,13 @@ impl AdbClient for RustAdb {
     }
 
     async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
-        let mut out: Vec<u8> = Vec::new();
-        let mut dev = self.server_device.lock().await;
-        dev.shell_command(&["screencap", "-p"], &mut out)
-            .map_err(|e| format!("RustAdb: screencap failed: {e}"))?;
-        Ok(out)
+        self.screen_capture_bytes().await
+    }
+
+    fn next_capture_index(&self) -> u64 {
+        self.capture_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1
     }
 
     async fn tap(&self, x: u32, y: u32) -> Result<(), String> {

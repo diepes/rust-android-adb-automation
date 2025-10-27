@@ -1,4 +1,4 @@
-use crate::adb::{AdbClient, Device};
+use crate::adb::{AdbClient, Device, ImageCapture};
 use crate::adb_rust::RustAdb;
 use crate::adb_shell::AdbShell;
 
@@ -7,35 +7,31 @@ pub enum AdbBackend {
     Rust(RustAdb),
 }
 
-pub use AdbBackend as Backend;
+fn current_choice() -> String {
+    std::env::var("ADB_IMPL").unwrap_or_else(|_| "rust".to_string())
+}
 
 impl AdbBackend {
-    pub async fn list_devices(impl_choice: &str) -> Result<Vec<Device>, String> {
-        match impl_choice {
+    pub async fn list_devices_env() -> Result<Vec<Device>, String> {
+        match current_choice().as_str() {
             "shell" => AdbShell::list_devices().await,
             _ => RustAdb::list_devices().await,
         }
     }
 
-    pub async fn connect_first(impl_choice: &str) -> Result<Self, String> {
-        let devices = Self::list_devices(impl_choice).await?;
+    pub async fn connect_first() -> Result<Self, String> {
+        let devices = Self::list_devices_env().await?;
         let first = devices
             .into_iter()
             .next()
             .ok_or_else(|| "No devices found".to_string())?;
-        Self::new_with_device(impl_choice, &first.name).await
+        Self::new_with_device(&first.name).await
     }
 
-    pub async fn new_with_device(impl_choice: &str, name: &str) -> Result<Self, String> {
-        match impl_choice {
-            "shell" => {
-                let shell = AdbShell::new_with_device(name).await?;
-                Ok(AdbBackend::Shell(shell))
-            }
-            _ => {
-                let rust = RustAdb::new_with_device(name).await?;
-                Ok(AdbBackend::Rust(rust))
-            }
+    pub async fn new_with_device(name: &str) -> Result<Self, String> {
+        match current_choice().as_str() {
+            "shell" => Ok(AdbBackend::Shell(AdbShell::new_with_device(name).await?)),
+            _ => Ok(AdbBackend::Rust(RustAdb::new_with_device(name).await?)),
         }
     }
 
@@ -45,30 +41,42 @@ impl AdbBackend {
             AdbBackend::Rust(r) => r.device_name(),
         }
     }
+
     pub fn screen_dimensions(&self) -> (u32, u32) {
         match self {
             AdbBackend::Shell(s) => s.screen_dimensions(),
             AdbBackend::Rust(r) => r.screen_dimensions(),
         }
     }
+
     pub fn transport_id(&self) -> Option<u32> {
         match self {
-            AdbBackend::Shell(s) => Some(s.transport_id),
+            AdbBackend::Shell(s) => s.transport_id(),
             AdbBackend::Rust(r) => r.transport_id(),
         }
     }
+
+    pub async fn screen_capture(&self) -> Result<ImageCapture, String> {
+        match self {
+            AdbBackend::Shell(s) => <AdbShell as AdbClient>::screen_capture(s).await,
+            AdbBackend::Rust(r) => <RustAdb as AdbClient>::screen_capture(r).await,
+        }
+    }
+
     pub async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
         match self {
             AdbBackend::Shell(s) => s.screen_capture_bytes().await,
             AdbBackend::Rust(r) => r.screen_capture_bytes().await,
         }
     }
+
     pub async fn tap(&self, x: u32, y: u32) -> Result<(), String> {
         match self {
             AdbBackend::Shell(s) => s.tap(x, y).await,
             AdbBackend::Rust(r) => r.tap(x, y).await,
         }
     }
+
     pub async fn swipe(
         &self,
         x1: u32,
@@ -83,3 +91,59 @@ impl AdbBackend {
         }
     }
 }
+
+impl AdbClient for AdbBackend {
+    async fn list_devices() -> Result<Vec<Device>, String>
+    where
+        Self: Sized,
+    {
+        AdbBackend::list_devices_env().await
+    }
+
+    async fn new_with_device(device_name: &str) -> Result<Self, String>
+    where
+        Self: Sized,
+    {
+        AdbBackend::new_with_device(device_name).await
+    }
+
+    async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
+        self.screen_capture_bytes().await
+    }
+
+    fn next_capture_index(&self) -> u64 {
+        match self {
+            AdbBackend::Shell(s) => <AdbShell as AdbClient>::next_capture_index(s),
+            AdbBackend::Rust(r) => <RustAdb as AdbClient>::next_capture_index(r),
+        }
+    }
+
+    async fn tap(&self, x: u32, y: u32) -> Result<(), String> {
+        self.tap(x, y).await
+    }
+
+    async fn swipe(
+        &self,
+        x1: u32,
+        y1: u32,
+        x2: u32,
+        y2: u32,
+        duration: Option<u32>,
+    ) -> Result<(), String> {
+        self.swipe(x1, y1, x2, y2, duration).await
+    }
+
+    fn screen_dimensions(&self) -> (u32, u32) {
+        self.screen_dimensions()
+    }
+
+    fn device_name(&self) -> &str {
+        self.device_name()
+    }
+
+    fn transport_id(&self) -> Option<u32> {
+        self.transport_id()
+    }
+}
+
+pub use AdbBackend as Backend;
