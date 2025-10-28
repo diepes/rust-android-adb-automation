@@ -12,7 +12,6 @@ pub struct RustAdb {
     server_device: Arc<Mutex<ADBServerDevice>>, // underlying connected device
     screen_x: u32,
     screen_y: u32,
-    capture_count: std::sync::atomic::AtomicU64,
 }
 
 impl RustAdb {
@@ -29,7 +28,6 @@ impl RustAdb {
             server_device: Arc::new(Mutex::new(server_device)),
             screen_x,
             screen_y,
-            capture_count: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -56,7 +54,7 @@ impl RustAdb {
         Err("RustAdb: could not parse screen size".into())
     }
 
-    async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
+    async fn capture_screen_bytes_internal(&self) -> Result<Vec<u8>, String> {
         let mut out: Vec<u8> = Vec::new();
         let mut dev = self.server_device.lock().await;
         dev.shell_command(&["screencap", "-p"], &mut out)
@@ -109,7 +107,6 @@ impl AdbClient for RustAdb {
             server_device: Arc::new(Mutex::new(dev)),
             screen_x: 0,
             screen_y: 0,
-            capture_count: std::sync::atomic::AtomicU64::new(0),
         };
         let (sx, sy) = tmp.get_screen_size_with().await?;
         Ok(RustAdb {
@@ -120,13 +117,7 @@ impl AdbClient for RustAdb {
     }
 
     async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
-        self.screen_capture_bytes().await
-    }
-
-    fn next_capture_index(&self) -> u64 {
-        self.capture_count
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-            + 1
+        self.capture_screen_bytes_internal().await
     }
 
     async fn tap(&self, x: u32, y: u32) -> Result<(), String> {

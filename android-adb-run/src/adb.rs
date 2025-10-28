@@ -19,19 +19,16 @@ pub trait AdbClient: Send + Sync {
 
     // Raw backend-specific capture (implemented per backend)
     async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String>;
-    // Increment and return the next capture index (per instance)
-    fn next_capture_index(&self) -> u64;
 
-    // Default high-level capture with timing + index
+    // Default high-level capture with timing (index now managed by GUI)
     async fn screen_capture(&self) -> Result<ImageCapture, String> {
         let start = std::time::Instant::now();
         let bytes = self.screen_capture_bytes().await?;
         let dur = start.elapsed().as_millis();
-        let idx = self.next_capture_index();
         Ok(ImageCapture {
             bytes,
             duration_ms: dur,
-            index: idx,
+            index: 0, // Index is now managed by GUI, this is unused
         })
     }
 

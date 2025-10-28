@@ -24,6 +24,7 @@ pub struct ScreenshotPanelProps {
     pub selection_end: Signal<Option<ElementPoint>>,
     pub tap_markers: Signal<Vec<ElementPoint>>,
     pub use_rust_impl: bool,
+    pub screenshot_counter: Signal<u64>, // GUI-level counter
 }
 
 #[component]
@@ -46,6 +47,7 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
     let mut selection_end = props.selection_end;
     let mut tap_markers = props.tap_markers;
     let use_rust_impl = props.use_rust_impl;
+    let mut screenshot_counter = props.screenshot_counter;
     let _status_text = screenshot_status.read().clone();
 
     // Helper to compute rectangle overlay adjusted for image border
@@ -151,9 +153,14 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                                             Ok(client) => match client.tap(sx0, sy0).await {
                                                                 Ok(_) => {
                                                                     if refresh_after {
-                                                                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                                                                        match client.screen_capture().await {
-                                                                            Ok(cap) => Ok((true, Some(cap))),
+                                                                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;  
+                                                                        let start = std::time::Instant::now();
+                                                                        match client.screen_capture_bytes().await {
+                                                                            Ok(bytes) => {
+                                                                                let duration_ms = start.elapsed().as_millis();
+                                                                                let counter_val = screenshot_counter.with_mut(|c| { *c += 1; *c });
+                                                                                Ok((true, Some((bytes, duration_ms, counter_val))))
+                                                                            },
                                                                             Err(e) => Err(format!("Screenshot failed: {}", e)),
                                                                         }
                                                                     } else { Ok((false, None)) }
@@ -164,10 +171,10 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                                         }
                                                     }.await;
                                                     match result {
-                                                        Ok((updated, cap_opt)) => {
-                                                            if let Some(cap) = cap_opt {
-                                                                let b64 = base64_encode(&cap.bytes); screenshot_data.set(Some(b64)); screenshot_bytes.set(Some(cap.bytes.clone()));
-                                                                screenshot_status.set(format!("✅ Tapped at ({},{}) - Screenshot #{} ({}ms)", sx0, sy0, cap.index, cap.duration_ms));
+                                                        Ok((_updated, cap_opt)) => {
+                                                            if let Some((bytes, duration_ms, counter_val)) = cap_opt {
+                                                                let b64 = base64_encode(&bytes); screenshot_data.set(Some(b64)); screenshot_bytes.set(Some(bytes.clone()));
+                                                                screenshot_status.set(format!("✅ Tapped at ({},{}) - Screenshot #{} ({}ms)", sx0, sy0, counter_val, duration_ms));
                                                                 is_loading_screenshot.set(false);
                                                             } else {
                                                                 screenshot_status.set(format!("✅ Tapped at ({},{})", sx0, sy0));
@@ -184,8 +191,13 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                                                 Ok(_) => {
                                                                     if refresh_after {
                                                                         tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
-                                                                        match client.screen_capture().await {
-                                                                            Ok(cap) => Ok((true, Some(cap))),
+                                                                        let start = std::time::Instant::now();
+                                                                        match client.screen_capture_bytes().await {
+                                                                            Ok(bytes) => {
+                                                                                let duration_ms = start.elapsed().as_millis();
+                                                                                let counter_val = screenshot_counter.with_mut(|c| { *c += 1; *c });
+                                                                                Ok((true, Some((bytes, duration_ms, counter_val))))
+                                                                            },
                                                                             Err(e) => Err(format!("Screenshot failed: {}", e)),
                                                                         }
                                                                     } else { Ok((false, None)) }
@@ -196,10 +208,10 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                                         }
                                                     }.await;
                                                     match result {
-                                                        Ok((updated, cap_opt)) => {
-                                                            if let Some(cap) = cap_opt {
-                                                                let b64 = base64_encode(&cap.bytes); screenshot_data.set(Some(b64)); screenshot_bytes.set(Some(cap.bytes.clone()));
-                                                                screenshot_status.set(format!("✅ Swiped ({},{}) -> ({},{}) - Screenshot #{} ({}ms)", sx0, sy0, ex, ey, cap.index, cap.duration_ms));
+                                                        Ok((_updated, cap_opt)) => {
+                                                            if let Some((bytes, duration_ms, counter_val)) = cap_opt {
+                                                                let b64 = base64_encode(&bytes); screenshot_data.set(Some(b64)); screenshot_bytes.set(Some(bytes.clone()));
+                                                                screenshot_status.set(format!("✅ Swiped ({},{}) -> ({},{}) - Screenshot #{} ({}ms)", sx0, sy0, ex, ey, counter_val, duration_ms));
                                                                 is_loading_screenshot.set(false);
                                                             } else {
                                                                 screenshot_status.set(format!("✅ Swiped ({},{}) -> ({},{})", sx0, sy0, ex, ey));

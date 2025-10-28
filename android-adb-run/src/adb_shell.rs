@@ -6,7 +6,6 @@ pub struct AdbShell {
     pub transport_id: u32,
     pub screen_x: u32,
     pub screen_y: u32,
-    capture_count: std::sync::atomic::AtomicU64,
 }
 
 impl AdbShell {
@@ -61,7 +60,6 @@ impl AdbShell {
             transport_id,
             screen_x,
             screen_y,
-            capture_count: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -175,7 +173,7 @@ impl AdbShell {
         Ok(())
     }
 
-    pub async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
+    pub async fn capture_screen_bytes_internal(&self) -> Result<Vec<u8>, String> {
         Self::ensure_adb_available()?;
         let mut cmd = Command::new("adb");
         cmd.arg("-t").arg(self.transport_id.to_string());
@@ -265,12 +263,7 @@ impl AdbClient for AdbShell {
         Self::new_with_device(device_name).await
     }
     async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
-        self.screen_capture_bytes().await
-    }
-    fn next_capture_index(&self) -> u64 {
-        self.capture_count
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-            + 1
+        self.capture_screen_bytes_internal().await
     }
     async fn tap(&self, x: u32, y: u32) -> Result<(), String> {
         self.tap(x, y).await

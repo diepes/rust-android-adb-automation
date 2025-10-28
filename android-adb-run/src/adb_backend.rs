@@ -111,13 +111,6 @@ impl AdbClient for AdbBackend {
         self.screen_capture_bytes().await
     }
 
-    fn next_capture_index(&self) -> u64 {
-        match self {
-            AdbBackend::Shell(s) => <AdbShell as AdbClient>::next_capture_index(s),
-            AdbBackend::Rust(r) => <RustAdb as AdbClient>::next_capture_index(r),
-        }
-    }
-
     async fn tap(&self, x: u32, y: u32) -> Result<(), String> {
         self.tap(x, y).await
     }

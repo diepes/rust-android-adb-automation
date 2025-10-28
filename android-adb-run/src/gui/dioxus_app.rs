@@ -36,6 +36,7 @@ fn App() -> Element {
     let mut screenshot_data = use_signal(|| None::<String>);
     let mut screenshot_bytes = use_signal(|| None::<Vec<u8>>);
     let mut screenshot_status = use_signal(|| "".to_string());
+    let mut screenshot_counter = use_signal(|| 0u64); // GUI-level screenshot counter
     let mouse_coords = use_signal(|| None::<(i32, i32)>);
     let device_coords = use_signal(|| None::<(u32, u32)>);
     let auto_update_on_touch = use_signal(|| true);
@@ -110,14 +111,17 @@ fn App() -> Element {
                     ));
                     is_loading_screenshot.set(true);
                     screenshot_status.set("📸 Taking initial screenshot...".to_string());
-                    match client.screen_capture().await {
-                        Ok(image_cap) => {
-                            let base64_string = base64_encode(&image_cap.bytes);
+                    let start = std::time::Instant::now();
+                    match client.screen_capture_bytes().await {
+                        Ok(bytes) => {
+                            let duration_ms = start.elapsed().as_millis();
+                            let counter_val = screenshot_counter.with_mut(|c| { *c += 1; *c });
+                            let base64_string = base64_encode(&bytes);
                             screenshot_data.set(Some(base64_string));
-                            screenshot_bytes.set(Some(image_cap.bytes.clone()));
+                            screenshot_bytes.set(Some(bytes.clone()));
                             screenshot_status.set(format!(
                                 "✅ Initial screenshot #{} ({}ms)",
-                                image_cap.index, image_cap.duration_ms
+                                counter_val, duration_ms
                             ));
                             is_loading_screenshot.set(false);
                         }
@@ -171,7 +175,7 @@ fn App() -> Element {
                             // Device metadata panel
                             DeviceInfo { name: name.clone(), transport_id: transport_id_opt, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string() }
                             // Action buttons (screenshot, save, exit, etc)
-                            Actions { name: name.clone(), is_loading: is_loading_screenshot, screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, auto_update_on_touch: auto_update_on_touch, select_box: select_box, use_rust_impl: *USE_RUST_IMPL.get().unwrap_or(&true) }
+                            Actions { name: name.clone(), is_loading: is_loading_screenshot, screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, auto_update_on_touch: auto_update_on_touch, select_box: select_box, use_rust_impl: *USE_RUST_IMPL.get().unwrap_or(&true), screenshot_counter: screenshot_counter }
                             // Interaction info (tap/swipe coordinates, status)
                             InteractionInfo { device_coords: device_coords, screenshot_status: screenshot_status }
                         } else {
@@ -186,7 +190,7 @@ fn App() -> Element {
                         div { style: "margin-top:4px; text-align:left; font-size:0.7em; opacity:0.75; letter-spacing:0.5px;", "Built with Rust 🦀 and Dioxus ⚛️" }
                     }
                     // Right column: screenshot panel (image, gestures)
-                    screenshot_panel { screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, device_info: device_info, device_coords: device_coords, mouse_coords: mouse_coords, is_loading_screenshot: is_loading_screenshot, auto_update_on_touch: auto_update_on_touch, is_swiping: is_swiping, swipe_start: swipe_start, swipe_end: swipe_end, calculate_device_coords: calculate_device_coords, select_box: select_box, selection_start: selection_start, selection_end: selection_end, tap_markers: tap_markers, use_rust_impl: *USE_RUST_IMPL.get().unwrap_or(&true) }
+                    screenshot_panel { screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, device_info: device_info, device_coords: device_coords, mouse_coords: mouse_coords, is_loading_screenshot: is_loading_screenshot, auto_update_on_touch: auto_update_on_touch, is_swiping: is_swiping, swipe_start: swipe_start, swipe_end: swipe_end, calculate_device_coords: calculate_device_coords, select_box: select_box, selection_start: selection_start, selection_end: selection_end, tap_markers: tap_markers, use_rust_impl: *USE_RUST_IMPL.get().unwrap_or(&true), screenshot_counter: screenshot_counter }
                 }
             }
         }
