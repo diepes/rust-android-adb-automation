@@ -1,5 +1,5 @@
 // https://crates.io/crates/adb_client
-use crate::adb::{AdbClient, Device, ImageCapture};
+use crate::adb::{AdbClient, Device};
 // use tokio::process::Command;
 use adb_client::{ADBDeviceExt, ADBServer, ADBServerDevice};
 use std::sync::Arc;
@@ -15,21 +15,6 @@ pub struct RustAdb {
 }
 
 impl RustAdb {
-    async fn new(
-        device: Device,
-        server: ADBServer,
-        server_device: ADBServerDevice,
-        screen_x: u32,
-        screen_y: u32,
-    ) -> Self {
-        Self {
-            device,
-            server: Arc::new(Mutex::new(server)),
-            server_device: Arc::new(Mutex::new(server_device)),
-            screen_x,
-            screen_y,
-        }
-    }
 
     async fn get_screen_size_with(&self) -> Result<(u32, u32), String> {
         // Use device shell_command instead of external adb binary
@@ -44,11 +29,10 @@ impl RustAdb {
         for line in stdout.lines() {
             if let Some(size_str) = line.strip_prefix("Physical size: ") {
                 let parts: Vec<&str> = size_str.trim().split('x').collect();
-                if parts.len() == 2 {
-                    if let (Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                if parts.len() == 2
+                    && let (Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
                         return Ok((x, y));
                     }
-                }
             }
         }
         Err("RustAdb: could not parse screen size".into())

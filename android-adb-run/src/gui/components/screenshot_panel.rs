@@ -4,13 +4,15 @@ use crate::gui::util::base64_encode;
 use dioxus::html::geometry::ElementPoint;
 use dioxus::prelude::*;
 
+type DeviceInfo = (String, Option<u32>, u32, u32);
+
 #[allow(unpredictable_function_pointer_comparisons)]
 #[derive(Props, PartialEq, Clone)]
 pub struct ScreenshotPanelProps {
     pub screenshot_status: Signal<String>,
     pub screenshot_data: Signal<Option<String>>,
     pub screenshot_bytes: Signal<Option<Vec<u8>>>,
-    pub device_info: Signal<Option<(String, Option<u32>, u32, u32)>>,
+    pub device_info: Signal<Option<DeviceInfo>>,
     pub device_coords: Signal<Option<(u32, u32)>>,
     pub mouse_coords: Signal<Option<(i32, i32)>>,
     pub is_loading_screenshot: Signal<bool>,
@@ -71,7 +73,7 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
     // Rectangle (not square) overlay state derived from selection signals
     let overlay_rect: Option<(i32, i32, i32, i32)> = if *select_box.read() {
         if let (Some(start), Some(end)) =
-            (selection_start.read().clone(), selection_end.read().clone())
+            (*selection_start.read(), *selection_end.read())
         {
             let (left, top, w, h) = adjust_overlay(start, end);
             Some((
@@ -101,7 +103,7 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                     let (cx, cy) = calculate_device_coords(r, *sx, *sy);
                                     device_coords.set(Some((cx, cy)));
                                 }
-                                if *select_box.read() { if selection_start.read().is_some() { let adj = ElementPoint { x: r.x - CURSOR_OFFSET, y: r.y - CURSOR_OFFSET, ..r }; selection_end.set(Some(adj)); } }
+                                if *select_box.read() && selection_start.read().is_some() { let adj = ElementPoint { x: r.x - CURSOR_OFFSET, y: r.y - CURSOR_OFFSET, ..r }; selection_end.set(Some(adj)); }
                             },
                             onmouseleave: move |_| {
                                 mouse_coords.set(None); device_coords.set(None); is_swiping.set(false); swipe_start.set(None); swipe_end.set(None);
@@ -117,8 +119,8 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                             },
                             onmouseup: move |evt| {
                                 if *select_box.read() {
-                                    if let (Some(start), Some(end)) = (selection_start.read().clone(), selection_end.read().clone()) {
-                                        if let Some((_, _, screen_x, screen_y)) = device_info.read().as_ref() {
+                                    if let (Some(start), Some(end)) = (*selection_start.read(), *selection_end.read())
+                                        && let Some((_, _, screen_x, screen_y)) = device_info.read().as_ref() {
                                             let dx = end.x - start.x; let dy = end.y - start.y;
                                             let width = dx.abs(); let height = dy.abs();
                                             let left = if dx >= 0.0 { start.x } else { start.x - width };
@@ -130,11 +132,9 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                             let (d_br_x, d_br_y) = calculate_device_coords(br, *screen_x, *screen_y);
                                             screenshot_status.set(format!("🟦 Selected rectangle: ({},{}) to ({},{}) size {}x{}", d_tl_x, d_tl_y, d_br_x, d_br_y, (d_br_x - d_tl_x).max(1), (d_br_y - d_tl_y).max(1)));
                                         }
-                                    }
                                     return;
                                 }
-                                if *is_swiping.read() {
-                                    let swipe_start_val = swipe_start.read().clone();
+                                if *is_swiping.read() {                                                    let swipe_start_val = *swipe_start.read();
                                     if let Some((name, _, sx, sy)) = device_info.read().as_ref() {
                                         let r = evt.element_coordinates(); let (ex, ey) = calculate_device_coords(r, *sx, *sy);
                                         if let Some((sx0, sy0)) = swipe_start_val {
@@ -153,7 +153,7 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                                             Ok(client) => match client.tap(sx0, sy0).await {
                                                                 Ok(_) => {
                                                                     if refresh_after {
-                                                                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;  
+                                                                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                                                                         let start = std::time::Instant::now();
                                                                         match client.screen_capture_bytes().await {
                                                                             Ok(bytes) => {
@@ -232,11 +232,11 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                 div { style: "position:absolute; right:0; bottom:0; background:rgba(0,0,0,0.55); color:#fff; font-size:10px; padding:2px 4px; border-top-left-radius:4px;", "{ow}x{oh}" }
                             }
                         }
-                        for p in tap_markers.read().iter() { {(|| {
+                        for p in tap_markers.read().iter() { {
                             let marker_x = p.x + 0.0;
                             let marker_y = p.y + 0.0;
                             rsx!{ div { style: format!("position:absolute; left:{marker_x}px; top:{marker_y}px; width:10px; height:10px; background:#ffffff; border:2px solid #ff4444; border-radius:50%; box-shadow:0 0 6px rgba(255,255,255,0.8); transform:translate(-50%, -50%); pointer-events:none; z-index:9;"), } }
-                        })()} }
+                        } }
                         if loading { div { style: "position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255, 68, 68, 0.95); color: white; padding: 15px 25px; border-radius: 25px; font-size: 1.2em; font-weight: bold; border: 2px solid white; box-shadow: 0 4px 20px rgba(0,0,0,0.5); z-index: 20;", "📸 LOADING..." } }
                     }
                 }

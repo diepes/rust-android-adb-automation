@@ -1,4 +1,4 @@
-use crate::adb::{AdbClient, Device, ImageCapture};
+use crate::adb::{AdbClient, Device};
 use tokio::process::Command;
 
 pub struct AdbShell {
@@ -34,9 +34,7 @@ impl AdbShell {
 
     pub async fn new(transport_id: Option<&str>) -> Result<Self, String> {
         // Provide early backend guidance if adb unavailable
-        if let Err(e) = Self::ensure_adb_available() {
-            return Err(e);
-        }
+        Self::ensure_adb_available()?;
         let devices = Self::list_devices().await?;
         if devices.is_empty() {
             return Err("No devices available (shell backend). Connect a device or use --impl=rust for pure Rust backend.".to_string());
@@ -86,11 +84,10 @@ impl AdbShell {
         for line in stdout.lines() {
             if let Some(size_str) = line.strip_prefix("Physical size: ") {
                 let parts: Vec<&str> = size_str.trim().split('x').collect();
-                if parts.len() == 2 {
-                    if let (Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                if parts.len() == 2
+                    && let (Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
                         return Ok((x, y));
                     }
-                }
             }
         }
         Err("Could not parse screen size".into())

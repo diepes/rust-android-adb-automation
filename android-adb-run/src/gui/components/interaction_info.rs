@@ -10,8 +10,8 @@ pub struct InteractionInfoProps {
 #[component]
 pub fn InteractionInfo(props: InteractionInfoProps) -> Element {
     let status = props.screenshot_status.read().clone();
-    let coords = props.device_coords.read().clone();
-    let capture_summary = if let Some(idx_start) = status.find("#") {
+    let coords = *props.device_coords.read();
+    let capture_summary = if let Some(_idx_start) = status.find("#") {
         status.clone()
     } else {
         status.clone()

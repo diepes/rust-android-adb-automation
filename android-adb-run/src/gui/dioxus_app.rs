@@ -11,8 +11,10 @@ use std::sync::OnceLock;
 static USE_RUST_IMPL: OnceLock<bool> = OnceLock::new();
 
 pub fn run_gui(use_rust_impl: bool) {
-    USE_RUST_IMPL.set(use_rust_impl).expect("USE_RUST_IMPL should only be set once");
-    
+    USE_RUST_IMPL
+        .set(use_rust_impl)
+        .expect("USE_RUST_IMPL should only be set once");
+
     use dioxus::desktop::{Config, WindowBuilder};
     let enable_borderless = true; // borderless window
     let config = Config::new().with_window(
@@ -51,7 +53,7 @@ fn App() -> Element {
     let swipe_start = use_signal(|| None::<(u32, u32)>);
     let swipe_end = use_signal(|| None::<(u32, u32)>);
 
-    let tap_markers = use_signal(|| Vec::<dioxus::html::geometry::ElementPoint>::new());
+    let tap_markers = use_signal(Vec::<dioxus::html::geometry::ElementPoint>::new);
 
     // Helper function to calculate device coordinates from mouse coordinates (correcting for image border)
     fn calculate_device_coords(
@@ -115,7 +117,10 @@ fn App() -> Element {
                     match client.screen_capture_bytes().await {
                         Ok(bytes) => {
                             let duration_ms = start.elapsed().as_millis();
-                            let counter_val = screenshot_counter.with_mut(|c| { *c += 1; *c });
+                            let counter_val = screenshot_counter.with_mut(|c| {
+                                *c += 1;
+                                *c
+                            });
                             let base64_string = base64_encode(&bytes);
                             screenshot_data.set(Some(base64_string));
                             screenshot_bytes.set(Some(bytes.clone()));
@@ -183,7 +188,7 @@ fn App() -> Element {
                             div { style: "background:rgba(255,255,255,0.1); backdrop-filter:blur(10px); padding:20px; border-radius:15px; margin-bottom:20px; border:1px solid rgba(255,255,255,0.2);",
                                 h2 { style: "margin-top:0; color:#ffb347;", "⚠️ No Device Connected" }
                                 p { style: "font-size:1.1em; margin:15px 0; text-align:center;", "{fallback_message}" }
-                                button { style: "background:linear-gradient(45deg,#dc3545,#e74c3c); color:white; padding:15px 25px; border:none; border-radius:10px; cursor:pointer; font-size:1.1em; font-weight:bold; min-width:150px;", onclick: move |_| -> () { std::process::exit(0); }, "🚪 Exit Application" }
+                                button { style: "background:linear-gradient(45deg,#dc3545,#e74c3c); color:white; padding:15px 25px; border:none; border-radius:10px; cursor:pointer; font-size:1.1em; font-weight:bold; min-width:150px;", onclick: move |_| { std::thread::spawn(|| std::process::exit(0)); }, "🚪 Exit Application" }
                             }
                         }
                         // Credits/footer
