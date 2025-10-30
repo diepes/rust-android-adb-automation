@@ -1,4 +1,5 @@
 use crate::adb_backend::AdbBackend;
+use crate::game_automation::{create_automation_channels, GameAutomation, AutomationCommand, AutomationEvent, GameState};
 use crate::gui::components::interaction_info::InteractionInfo;
 use crate::gui::components::{
     actions::Actions, device_info::DeviceInfo, header::Header, screenshot_panel::screenshot_panel,
@@ -6,14 +7,21 @@ use crate::gui::components::{
 use crate::gui::util::base64_encode;
 use dioxus::prelude::*;
 use std::sync::OnceLock;
+use tokio::sync::mpsc;
 
 // Global state to store the ADB implementation choice
 static USE_RUST_IMPL: OnceLock<bool> = OnceLock::new();
 
-pub fn run_gui(use_rust_impl: bool) {
+// Global state to store the debug mode choice
+static DEBUG_MODE: OnceLock<bool> = OnceLock::new();
+
+pub fn run_gui(use_rust_impl: bool, debug_mode: bool) {
     USE_RUST_IMPL
         .set(use_rust_impl)
         .expect("USE_RUST_IMPL should only be set once");
+    DEBUG_MODE
+        .set(debug_mode)
+        .expect("DEBUG_MODE should only be set once");
 
     use dioxus::desktop::{Config, WindowBuilder};
     let enable_borderless = true; // borderless window
@@ -44,6 +52,11 @@ fn App() -> Element {
     let auto_update_on_touch = use_signal(|| true);
     let select_box = use_signal(|| false);
     let mut is_loading_screenshot = use_signal(|| false);
+
+    // Game automation state
+    let automation_state = use_signal(|| GameState::Idle);
+    let automation_command_tx = use_signal(|| None::<mpsc::Sender<AutomationCommand>>);
+    let automation_interval = use_signal(|| 30u64);
 
     let selection_start = use_signal(|| None::<dioxus::html::geometry::ElementPoint>);
     let selection_end = use_signal(|| None::<dioxus::html::geometry::ElementPoint>);
@@ -141,6 +154,75 @@ fn App() -> Element {
         });
     });
 
+    // Initialize game automation on first render
+    use_effect(move || {
+        let use_rust_impl = *USE_RUST_IMPL.get().unwrap_or(&true);
+        let debug_mode = *DEBUG_MODE.get().unwrap_or(&false);
+        // Clone signals for use in async context
+        let mut automation_command_tx_clone = automation_command_tx.clone();
+        let mut automation_state_clone = automation_state.clone();
+        let mut automation_interval_clone = automation_interval.clone();
+        let mut screenshot_counter_clone = screenshot_counter.clone();
+        let mut screenshot_data_clone = screenshot_data.clone();
+        let mut screenshot_bytes_clone = screenshot_bytes.clone();
+        let mut screenshot_status_clone = screenshot_status.clone();
+        
+        spawn(async move {
+            // Create automation channels
+            let (cmd_tx, cmd_rx, event_tx, mut event_rx) = create_automation_channels();
+            
+            // Store command sender for GUI controls
+            automation_command_tx_clone.set(Some(cmd_tx));
+            
+            // Start automation task
+            let mut automation = GameAutomation::new(cmd_rx, event_tx, debug_mode);
+            if let Err(e) = automation.initialize_adb(use_rust_impl).await {
+                if debug_mode {
+                    println!("❌ Failed to initialize automation ADB: {}", e);
+                }
+                return;
+            }
+            
+            // Spawn automation FSM loop
+            let _automation_task = spawn(async move {
+                automation.run().await;
+            });
+            
+            // Event listener loop
+            spawn(async move {
+                while let Some(event) = event_rx.recv().await {
+                    match event {
+                        AutomationEvent::ScreenshotReady(bytes) => {
+                            // Update GUI with new screenshot from automation
+                            let counter_val = screenshot_counter_clone.with_mut(|c| {
+                                *c += 1;
+                                *c
+                            });
+                            let base64_string = base64_encode(&bytes);
+                            screenshot_data_clone.set(Some(base64_string));
+                            screenshot_bytes_clone.set(Some(bytes));
+                            screenshot_status_clone.set(format!(
+                                "🤖 Automation screenshot #{}", counter_val
+                            ));
+                        }
+                        AutomationEvent::StateChanged(new_state) => {
+                            automation_state_clone.set(new_state);
+                        }
+                        AutomationEvent::Error(error) => {
+                            if debug_mode {
+                                println!("🤖 Automation error: {}", error);
+                            }
+                            screenshot_status_clone.set(format!("🤖 Automation error: {}", error));
+                        }
+                        AutomationEvent::IntervalUpdate(seconds) => {
+                            automation_interval_clone.set(seconds);
+                        }
+                    }
+                }
+            });
+        });
+    });
+
     // Prepare compact status display variables
     let current_status = status.read().clone();
     let status_label = if current_status.contains("Connected") {
@@ -180,7 +262,20 @@ fn App() -> Element {
                             // Device metadata panel
                             DeviceInfo { name: name.clone(), transport_id: transport_id_opt, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string() }
                             // Action buttons (screenshot, save, exit, etc)
-                            Actions { name: name.clone(), is_loading: is_loading_screenshot, screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, auto_update_on_touch: auto_update_on_touch, select_box: select_box, use_rust_impl: *USE_RUST_IMPL.get().unwrap_or(&true), screenshot_counter: screenshot_counter }
+                            Actions { 
+                                name: name.clone(), 
+                                is_loading: is_loading_screenshot, 
+                                screenshot_status: screenshot_status, 
+                                screenshot_data: screenshot_data, 
+                                screenshot_bytes: screenshot_bytes, 
+                                auto_update_on_touch: auto_update_on_touch, 
+                                select_box: select_box, 
+                                use_rust_impl: *USE_RUST_IMPL.get().unwrap_or(&true), 
+                                screenshot_counter: screenshot_counter,
+                                automation_state: automation_state,
+                                automation_command_tx: automation_command_tx,
+                                automation_interval: automation_interval
+                            }
                             // Interaction info (tap/swipe coordinates, status)
                             InteractionInfo { device_coords: device_coords, screenshot_status: screenshot_status }
                         } else {

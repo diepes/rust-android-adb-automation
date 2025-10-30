@@ -7,6 +7,7 @@ fn main() {
     // Defaults
     let mut mode: Option<&str> = None; // None => GUI
     let mut use_rust_adb_impl: bool = true; // default rust
+    let mut debug_mode: bool = false; // default no debug
 
     // Parse all flags (skip program name)
     for arg in args.iter().skip(1) {
@@ -16,6 +17,8 @@ fn main() {
         } else if arg == "--version" || arg == "-v" {
             println!("Android ADB Run v{}", env!("CARGO_PKG_VERSION"));
             return;
+        } else if arg == "--debug" {
+            debug_mode = true;
         } else if arg == "--gui" {
             mode = Some("gui");
         } else if arg == "--screenshot" || arg == "-s" {
@@ -67,10 +70,11 @@ fn main() {
         Some("gui") | None => {
             let impl_str = if use_rust_adb_impl { "rust" } else { "shell" };
             println!(
-                "🚀 Launching Android ADB Control GUI (impl='{}')...",
-                impl_str
+                "🚀 Launching Android ADB Control GUI (impl='{}'){}...",
+                impl_str,
+                if debug_mode { " [DEBUG MODE]" } else { "" }
             );
-            run_gui(use_rust_adb_impl);
+            run_gui(use_rust_adb_impl, debug_mode);
         }
         _ => unreachable!(),
     }
@@ -90,6 +94,7 @@ fn print_help() {
     println!(
         "                        The shell implementation reqires the ADB tool to be installed."
     );
+    println!("    --debug             Enable debug output for automation");
     println!("    --help, -h          Show this help message");
     println!("    --version, -v       Show version information");
     println!();

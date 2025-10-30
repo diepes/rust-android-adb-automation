@@ -3,6 +3,7 @@ pub mod adb_backend;
 pub mod adb_impl;
 pub mod adb_rust;
 pub mod adb_shell;
+pub mod game_automation;
 pub mod gui; // replaced old dioxus root module // new selector trait
 
 pub use adb_backend::AdbBackend;
