@@ -1,5 +1,6 @@
-// Game automation finite state machine
+// Finite State Machine implementation for game automation
 use crate::adb_backend::AdbBackend;
+use super::types::{GameState, AutomationCommand, AutomationEvent};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::{sleep, Duration, Instant};
@@ -11,34 +12,6 @@ macro_rules! debug_print {
             println!($($arg)*);
         }
     };
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum GameState {
-    Idle,
-    WaitingForScreenshot,
-    Analyzing,
-    Acting,
-    Paused,
-}
-
-#[derive(Debug, Clone)]
-pub enum AutomationCommand {
-    Start,
-    Pause,
-    Resume,
-    Stop,
-    TakeScreenshot,
-    UpdateInterval(u64), // seconds
-    Shutdown,
-}
-
-#[derive(Debug, Clone)]
-pub enum AutomationEvent {
-    ScreenshotReady(Vec<u8>),
-    StateChanged(GameState),
-    Error(String),
-    IntervalUpdate(u64),
 }
 
 pub struct GameAutomation {
@@ -223,16 +196,4 @@ impl GameAutomation {
 
         debug_print!(self.debug_enabled, "🎮 Game automation FSM loop ended");
     }
-}
-
-// Helper function to create automation channels
-pub fn create_automation_channels() -> (
-    mpsc::Sender<AutomationCommand>,
-    mpsc::Receiver<AutomationCommand>,
-    mpsc::Sender<AutomationEvent>,
-    mpsc::Receiver<AutomationEvent>,
-) {
-    let (cmd_tx, cmd_rx) = mpsc::channel(32);
-    let (event_tx, event_rx) = mpsc::channel(32);
-    (cmd_tx, cmd_rx, event_tx, event_rx)
 }
