@@ -1,5 +1,5 @@
 // gui/components/screenshot_panel.rs
-use crate::adb_backend::AdbBackend;
+use crate::adb::AdbBackend;
 use crate::gui::util::base64_encode;
 use dioxus::html::geometry::ElementPoint;
 use dioxus::prelude::*;

@@ -1,12 +1,8 @@
 pub mod adb;
-pub mod adb_backend;
-pub mod adb_impl;
-pub mod adb_rust;
-pub mod adb_shell;
 pub mod game_automation;
-pub mod gui; // replaced old dioxus root module // new selector trait
+pub mod gui; // replaced old dioxus root module
 
-pub use adb_backend::AdbBackend;
+pub use adb::AdbBackend;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right

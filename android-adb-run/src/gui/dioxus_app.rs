@@ -1,4 +1,4 @@
-use crate::adb_backend::AdbBackend;
+use crate::adb::AdbBackend;
 use crate::game_automation::{create_automation_channels, GameAutomation, AutomationCommand, AutomationEvent, GameState};
 use crate::gui::components::interaction_info::InteractionInfo;
 use crate::gui::components::{

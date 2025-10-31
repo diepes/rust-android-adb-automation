@@ -1,5 +1,5 @@
 // https://crates.io/crates/adb_client
-use crate::adb::{AdbClient, Device};
+use super::types::{AdbClient, Device};
 // use tokio::process::Command;
 use adb_client::{ADBDeviceExt, ADBServer, ADBServerDevice};
 use std::sync::Arc;

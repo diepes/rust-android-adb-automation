@@ -1,4 +1,4 @@
-use crate::adb::{AdbClient, Device};
+use super::types::{AdbClient, Device};
 use tokio::process::Command;
 
 pub struct AdbShell {
@@ -297,5 +297,56 @@ mod tests {
         assert_eq!(devs.len(), 1);
         assert_eq!(devs[0].name, "abc123");
         assert_eq!(devs[0].transport_id, Some("5".to_string()));
+    }
+
+    #[test]
+    fn test_parse_devices_multiple() {
+        let adb_output = "List of devices attached\n1d36d8f1               device usb:1-4 product:OnePlus6 model:ONEPLUS_A6000 device:OnePlus6 transport_id:2\noneplus6:5555          device product:OnePlus6 model:ONEPLUS_A6000 device:OnePlus6 transport_id:3\n";
+        let devices = AdbShell::parse_devices(adb_output);
+        assert_eq!(
+            devices,
+            vec![
+                Device {
+                    name: "1d36d8f1".to_string(),
+                    transport_id: Some("2".to_string())
+                },
+                Device {
+                    name: "oneplus6:5555".to_string(),
+                    transport_id: Some("3".to_string())
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_devices_single() {
+        let adb_output = "List of devices attached\n1d36d8f1               device usb:1-4 product:OnePlus6 model:ONEPLUS_A6000 device:OnePlus6 transport_id:2\n";
+        let devices = AdbShell::parse_devices(adb_output);
+        assert_eq!(
+            devices,
+            vec![Device {
+                name: "1d36d8f1".to_string(),
+                transport_id: Some("2".to_string())
+            }]
+        );
+    }
+
+    #[test]
+    fn test_list_devices_mock() {
+        let adb_output = "List of devices attached\n1d36d8f1               device usb:1-4 product:OnePlus6 model:ONEPLUS_A6000 device:OnePlus6 transport_id:2\noneplus6:5555          device product:OnePlus6 model:ONEPLUS_A6000 device:OnePlus6 transport_id:3\n";
+        let devices = AdbShell::parse_devices(adb_output);
+        assert_eq!(
+            devices,
+            vec![
+                Device {
+                    name: "1d36d8f1".to_string(),
+                    transport_id: Some("2".to_string())
+                },
+                Device {
+                    name: "oneplus6:5555".to_string(),
+                    transport_id: Some("3".to_string())
+                },
+            ]
+        );
     }
 }

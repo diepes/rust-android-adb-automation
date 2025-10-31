@@ -1,6 +1,6 @@
-use crate::adb::{AdbClient, Device, ImageCapture};
-use crate::adb_rust::RustAdb;
-use crate::adb_shell::AdbShell;
+use super::types::{AdbClient, Device, ImageCapture};
+use super::rust_impl::RustAdb;
+use super::shell::AdbShell;
 
 pub enum AdbBackend {
     Shell(AdbShell),

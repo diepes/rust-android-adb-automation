@@ -1,5 +1,5 @@
 // gui/components/actions.rs
-use crate::adb_backend::AdbBackend;
+use crate::adb::AdbBackend;
 use crate::game_automation::{AutomationCommand, GameState};
 use crate::gui::util::base64_encode;
 use dioxus::prelude::*;

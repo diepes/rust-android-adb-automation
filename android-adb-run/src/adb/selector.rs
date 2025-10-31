@@ -1,4 +1,4 @@
-// filepath: android-adb-run/src/adb_impl.rs
+// ADB implementation selector trait
 pub trait AdbImplementationSelector {
     fn is_rust(&self) -> bool;
     fn impl_str(&self) -> &'static str {

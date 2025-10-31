@@ -1,5 +1,5 @@
 // Finite State Machine implementation for game automation
-use crate::adb_backend::AdbBackend;
+use crate::adb::AdbBackend;
 use super::types::{GameState, AutomationCommand, AutomationEvent};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
