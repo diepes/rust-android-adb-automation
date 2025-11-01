@@ -173,7 +173,12 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                                     match result {
                                                         Ok((_updated, cap_opt)) => {
                                                             if let Some((bytes, duration_ms, counter_val)) = cap_opt {
-                                                                let b64 = base64_encode(&bytes); screenshot_data.set(Some(b64)); screenshot_bytes.set(Some(bytes.clone()));
+                                                                // Move base64 encoding to background thread
+                                                                let bytes_clone = bytes.clone();
+                                                                let b64 = tokio::task::spawn_blocking(move || {
+                                                                    base64_encode(&bytes_clone)
+                                                                }).await.unwrap_or_else(|_| "".to_string());
+                                                                screenshot_data.set(Some(b64)); screenshot_bytes.set(Some(bytes));
                                                                 screenshot_status.set(format!("✅ Tapped at ({},{}) - Screenshot #{} ({}ms)", sx0, sy0, counter_val, duration_ms));
                                                                 is_loading_screenshot.set(false);
                                                             } else {
@@ -210,7 +215,12 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                                     match result {
                                                         Ok((_updated, cap_opt)) => {
                                                             if let Some((bytes, duration_ms, counter_val)) = cap_opt {
-                                                                let b64 = base64_encode(&bytes); screenshot_data.set(Some(b64)); screenshot_bytes.set(Some(bytes.clone()));
+                                                                // Move base64 encoding to background thread
+                                                                let bytes_clone = bytes.clone();
+                                                                let b64 = tokio::task::spawn_blocking(move || {
+                                                                    base64_encode(&bytes_clone)
+                                                                }).await.unwrap_or_else(|_| "".to_string());
+                                                                screenshot_data.set(Some(b64)); screenshot_bytes.set(Some(bytes));
                                                                 screenshot_status.set(format!("✅ Swiped ({},{}) -> ({},{}) - Screenshot #{} ({}ms)", sx0, sy0, ex, ey, counter_val, duration_ms));
                                                                 is_loading_screenshot.set(false);
                                                             } else {

@@ -15,6 +15,10 @@ static USE_RUST_IMPL: OnceLock<bool> = OnceLock::new();
 // Global state to store the debug mode choice
 static DEBUG_MODE: OnceLock<bool> = OnceLock::new();
 
+pub fn is_debug_mode() -> bool {
+    *DEBUG_MODE.get().unwrap_or(&false)
+}
+
 pub fn run_gui(use_rust_impl: bool, debug_mode: bool) {
     USE_RUST_IMPL
         .set(use_rust_impl)
@@ -107,54 +111,103 @@ fn App() -> Element {
         (device_x.min(screen_x - 1), device_y.min(screen_y - 1))
     }
 
-    // Initialize ADB connection on first render
+    // Initialize ADB connection on first render - fully async with progressive UI updates
     use_effect(move || {
         let use_rust_impl = *USE_RUST_IMPL.get().unwrap_or(&true);
         spawn(async move {
-            match AdbBackend::connect_first(use_rust_impl).await {
-                Ok(client) => {
-                    let (sx, sy) = client.screen_dimensions();
-                    device_info.set(Some((
-                        client.device_name().to_string(),
-                        client.transport_id(),
-                        sx,
-                        sy,
-                    )));
-                    status.set(format!(
-                        "Connected via {}",
-                        if use_rust_impl { "rust" } else { "shell" }
-                    ));
-                    
-                    // Take initial screenshot in a separate async task to avoid blocking UI
-                    spawn(async move {
-                        is_loading_screenshot.set(true);
-                        screenshot_status.set("📸 Taking initial screenshot...".to_string());
-                        let start = std::time::Instant::now();
-                        match client.screen_capture_bytes().await {
-                            Ok(bytes) => {
-                                let duration_ms = start.elapsed().as_millis();
-                                let counter_val = screenshot_counter.with_mut(|c| {
-                                    *c += 1;
-                                    *c
-                                });
-                                let base64_string = base64_encode(&bytes);
-                                screenshot_data.set(Some(base64_string));
-                                screenshot_bytes.set(Some(bytes.clone()));
-                                screenshot_status.set(format!(
-                                    "✅ Initial screenshot #{} ({}ms)",
-                                    counter_val, duration_ms
-                                ));
-                                is_loading_screenshot.set(false);
-                            }
-                            Err(e) => {
-                                screenshot_status.set(format!("❌ Initial screenshot failed: {}", e));
-                                is_loading_screenshot.set(false);
-                            }
-                        }
-                    });
+            // Step 1: Look for devices (fast operation)
+            status.set("🔍 Looking for devices...".to_string());
+            
+            let devices = match AdbBackend::list_devices(use_rust_impl).await {
+                Ok(devices) if !devices.is_empty() => devices,
+                Ok(_) => {
+                    status.set("❌ No devices found".to_string());
+                    return;
                 }
-                Err(e) => status.set(format!("Error: {e}")),
-            }
+                Err(e) => {
+                    status.set(format!("❌ Error listing devices: {e}"));
+                    return;
+                }
+            };
+            
+            let first_device = &devices[0];
+            
+            // Step 2: Update GUI immediately with found device info
+            status.set(format!("📱 Found device: {}", first_device.name));
+            
+            // Small delay to let UI update
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            
+            // Step 3: Start connection process
+            status.set(format!("🔌 Connecting to {}...", first_device.name));
+            
+            // Step 4: Connect to device in background, update GUI when ready
+            spawn({
+                let device_name = first_device.name.clone();
+                let use_rust_impl = use_rust_impl;
+                async move {
+                    match AdbBackend::new_with_device(&device_name, use_rust_impl).await {
+                        Ok(client) => {
+                            // Step 4: Connection successful, update device info immediately
+                            let (sx, sy) = client.screen_dimensions();
+                            device_info.set(Some((
+                                client.device_name().to_string(),
+                                client.transport_id(),
+                                sx,
+                                sy,
+                            )));
+                            status.set(format!(
+                                "✅ Connected via {}",
+                                if use_rust_impl { "rust" } else { "shell" }
+                            ));
+                            
+                            // Step 5: Take initial screenshot in background, don't block UI
+                            spawn(async move {
+                                is_loading_screenshot.set(true);
+                                screenshot_status.set("📸 Taking initial screenshot...".to_string());
+                                let start = std::time::Instant::now();
+                                
+                                match client.screen_capture_bytes().await {
+                                    Ok(bytes) => {
+                                        // Move heavy base64 encoding to background thread
+                                        let bytes_clone = bytes.clone();
+                                        let base64_result = tokio::task::spawn_blocking(move || {
+                                            base64_encode(&bytes_clone)
+                                        }).await;
+                                        
+                                        match base64_result {
+                                            Ok(base64_string) => {
+                                                let duration_ms = start.elapsed().as_millis();
+                                                let counter_val = screenshot_counter.with_mut(|c| {
+                                                    *c += 1;
+                                                    *c
+                                                });
+                                                screenshot_data.set(Some(base64_string));
+                                                screenshot_bytes.set(Some(bytes));
+                                                screenshot_status.set(format!(
+                                                    "✅ Initial screenshot #{} ({}ms)",
+                                                    counter_val, duration_ms
+                                                ));
+                                            }
+                                            Err(_) => {
+                                                screenshot_status.set("❌ Failed to encode screenshot".to_string());
+                                            }
+                                        }
+                                        is_loading_screenshot.set(false);
+                                    }
+                                    Err(e) => {
+                                        screenshot_status.set(format!("❌ Initial screenshot failed: {}", e));
+                                        is_loading_screenshot.set(false);
+                                    }
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            status.set(format!("❌ Connection failed: {e}"));
+                        }
+                    }
+                }
+            });
         });
     });
 
@@ -202,7 +255,11 @@ fn App() -> Element {
                                 *c += 1;
                                 *c
                             });
-                            let base64_string = base64_encode(&bytes);
+                            // Move base64 encoding to background thread for automation screenshots too
+                            let bytes_clone = bytes.clone();
+                            let base64_string = tokio::task::spawn_blocking(move || {
+                                base64_encode(&bytes_clone)
+                            }).await.unwrap_or_else(|_| "".to_string());
                             screenshot_data_clone.set(Some(base64_string));
                             screenshot_bytes_clone.set(Some(bytes));
                             screenshot_status_clone.set(format!(

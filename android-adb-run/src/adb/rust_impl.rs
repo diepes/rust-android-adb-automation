@@ -17,25 +17,32 @@ pub struct RustAdb {
 impl RustAdb {
 
     async fn get_screen_size_with(&self) -> Result<(u32, u32), String> {
-        // Use device shell_command instead of external adb binary
-        let mut out: Vec<u8> = Vec::new();
-        {
-            let mut dev = self.server_device.lock().await;
-            // wm size returns text
-            dev.shell_command(&["wm", "size"], &mut out)
-                .map_err(|e| format!("RustAdb: wm size failed: {e}"))?;
-        }
-        let stdout = String::from_utf8_lossy(&out);
-        for line in stdout.lines() {
-            if let Some(size_str) = line.strip_prefix("Physical size: ") {
-                let parts: Vec<&str> = size_str.trim().split('x').collect();
-                if parts.len() == 2
-                    && let (Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
-                        return Ok((x, y));
-                    }
+        // Use device shell_command instead of external adb binary with timeout
+        let screen_size_future = async {
+            let mut out: Vec<u8> = Vec::new();
+            {
+                let mut dev = self.server_device.lock().await;
+                // wm size returns text
+                dev.shell_command(&["wm", "size"], &mut out)
+                    .map_err(|e| format!("RustAdb: wm size failed: {e}"))?;
             }
-        }
-        Err("RustAdb: could not parse screen size".into())
+            let stdout = String::from_utf8_lossy(&out);
+            for line in stdout.lines() {
+                if let Some(size_str) = line.strip_prefix("Physical size: ") {
+                    let parts: Vec<&str> = size_str.trim().split('x').collect();
+                    if parts.len() == 2
+                        && let (Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                            return Ok((x, y));
+                        }
+                }
+            }
+            Err("RustAdb: could not parse screen size".into())
+        };
+        
+        // Add a 5 second timeout to prevent hanging
+        tokio::time::timeout(std::time::Duration::from_secs(5), screen_size_future)
+            .await
+            .map_err(|_| "RustAdb: screen size detection timed out after 5 seconds".to_string())?
     }
 
     async fn capture_screen_bytes_internal(&self) -> Result<Vec<u8>, String> {
@@ -48,15 +55,17 @@ impl RustAdb {
                 match self.framebuffer_to_png(framebuffer_data).await {
                     Ok(png_data) => return Ok(png_data),
                     Err(e) => {
-                        #[cfg(debug_assertions)]
-                        eprintln!("Framebuffer conversion failed: {}, falling back to screencap", e);
+                        if crate::gui::dioxus_app::is_debug_mode() {
+                            eprintln!("Framebuffer conversion failed: {}, falling back to screencap", e);
+                        }
                         // Continue to fallback method below
                     }
                 }
             },
             Err(e) => {
-                #[cfg(debug_assertions)]
-                eprintln!("Framebuffer capture failed: {}, falling back to screencap", e);
+                if crate::gui::dioxus_app::is_debug_mode() {
+                    eprintln!("Framebuffer capture failed: {}, falling back to screencap", e);
+                }
                 // Continue to fallback method below
             }
         }
@@ -76,9 +85,8 @@ impl RustAdb {
         let pixel_count = (self.screen_x * self.screen_y) as usize;
         let data_len = framebuffer_data.len();
         
-        // Print debug info to understand the framebuffer format (only in debug builds)
-        #[cfg(debug_assertions)]
-        {
+        // Print debug info to understand the framebuffer format (only when --debug flag is used)
+        if crate::gui::dioxus_app::is_debug_mode() {
             eprintln!("DEBUG: Framebuffer analysis:");
             eprintln!("  Screen dimensions: {}x{} = {} pixels", self.screen_x, self.screen_y, pixel_count);
             eprintln!("  Data length: {} bytes", data_len);
@@ -89,15 +97,17 @@ impl RustAdb {
         if data_len < pixel_count {
             // Check if the data is already in PNG format
             if framebuffer_data.len() >= 8 && &framebuffer_data[0..8] == b"\x89PNG\r\n\x1a\n" {
-                #[cfg(debug_assertions)]
-                eprintln!("DEBUG: Framebuffer data is already PNG format, returning as-is");
+                if crate::gui::dioxus_app::is_debug_mode() {
+                    eprintln!("DEBUG: Framebuffer data is already PNG format, returning as-is");
+                }
                 return Ok(framebuffer_data);
             }
             
             // Check if the data is in JPEG format
             if framebuffer_data.len() >= 2 && framebuffer_data[0] == 0xFF && framebuffer_data[1] == 0xD8 {
-                #[cfg(debug_assertions)]
-                eprintln!("DEBUG: Framebuffer data is JPEG format, converting to PNG");
+                if crate::gui::dioxus_app::is_debug_mode() {
+                    eprintln!("DEBUG: Framebuffer data is JPEG format, converting to PNG");
+                }
                 return self.jpeg_to_png(framebuffer_data).await;
             }
             
