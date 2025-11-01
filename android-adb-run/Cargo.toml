@@ -10,6 +10,8 @@ serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1.0", features = ["time", "process", "fs", "rt", "rt-multi-thread", "macros"] }
 # https://crates.io/crates/adb_client
 adb_client = "2.1.17"
+# Image processing for framebuffer to PNG conversion
+image = { version = "0.25", features = ["png", "jpeg"] }
 
 [profile]
 

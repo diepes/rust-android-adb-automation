@@ -124,30 +124,34 @@ fn App() -> Element {
                         "Connected via {}",
                         if use_rust_impl { "rust" } else { "shell" }
                     ));
-                    is_loading_screenshot.set(true);
-                    screenshot_status.set("📸 Taking initial screenshot...".to_string());
-                    let start = std::time::Instant::now();
-                    match client.screen_capture_bytes().await {
-                        Ok(bytes) => {
-                            let duration_ms = start.elapsed().as_millis();
-                            let counter_val = screenshot_counter.with_mut(|c| {
-                                *c += 1;
-                                *c
-                            });
-                            let base64_string = base64_encode(&bytes);
-                            screenshot_data.set(Some(base64_string));
-                            screenshot_bytes.set(Some(bytes.clone()));
-                            screenshot_status.set(format!(
-                                "✅ Initial screenshot #{} ({}ms)",
-                                counter_val, duration_ms
-                            ));
-                            is_loading_screenshot.set(false);
+                    
+                    // Take initial screenshot in a separate async task to avoid blocking UI
+                    spawn(async move {
+                        is_loading_screenshot.set(true);
+                        screenshot_status.set("📸 Taking initial screenshot...".to_string());
+                        let start = std::time::Instant::now();
+                        match client.screen_capture_bytes().await {
+                            Ok(bytes) => {
+                                let duration_ms = start.elapsed().as_millis();
+                                let counter_val = screenshot_counter.with_mut(|c| {
+                                    *c += 1;
+                                    *c
+                                });
+                                let base64_string = base64_encode(&bytes);
+                                screenshot_data.set(Some(base64_string));
+                                screenshot_bytes.set(Some(bytes.clone()));
+                                screenshot_status.set(format!(
+                                    "✅ Initial screenshot #{} ({}ms)",
+                                    counter_val, duration_ms
+                                ));
+                                is_loading_screenshot.set(false);
+                            }
+                            Err(e) => {
+                                screenshot_status.set(format!("❌ Initial screenshot failed: {}", e));
+                                is_loading_screenshot.set(false);
+                            }
                         }
-                        Err(e) => {
-                            screenshot_status.set(format!("❌ Initial screenshot failed: {}", e));
-                            is_loading_screenshot.set(false);
-                        }
-                    }
+                    });
                 }
                 Err(e) => status.set(format!("Error: {e}")),
             }
