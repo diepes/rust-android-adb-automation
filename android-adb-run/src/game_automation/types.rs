@@ -16,6 +16,7 @@ pub enum AutomationCommand {
     Stop,
     TakeScreenshot,
     UpdateInterval(u64), // seconds
+    TestImageRecognition, // Test current screenshot for template matches
     Shutdown,
 }
 
