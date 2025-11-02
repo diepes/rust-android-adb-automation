@@ -278,6 +278,14 @@ fn App() -> Element {
                         AutomationEvent::IntervalUpdate(seconds) => {
                             automation_interval_clone.set(seconds);
                         }
+                        AutomationEvent::TemplatesUpdated(templates) => {
+                            if debug_mode {
+                                println!("🔄 Templates updated: {} files found: {:?}", templates.len(), templates);
+                            }
+                            screenshot_status_clone.set(format!(
+                                "🔄 Templates updated: {} files found", templates.len()
+                            ));
+                        }
                     }
                 }
             });

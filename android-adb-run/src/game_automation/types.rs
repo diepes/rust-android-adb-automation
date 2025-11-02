@@ -17,6 +17,7 @@ pub enum AutomationCommand {
     TakeScreenshot,
     UpdateInterval(u64), // seconds
     TestImageRecognition, // Test current screenshot for template matches
+    RescanTemplates, // Rescan directory for new template files
     Shutdown,
 }
 
@@ -26,4 +27,5 @@ pub enum AutomationEvent {
     StateChanged(GameState),
     Error(String),
     IntervalUpdate(u64),
+    TemplatesUpdated(Vec<String>), // List of template files found
 }

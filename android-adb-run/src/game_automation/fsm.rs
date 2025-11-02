@@ -17,19 +17,15 @@ macro_rules! debug_print {
 // Configuration for image recognition
 #[derive(Debug, Clone)]
 pub struct ImageRecognitionConfig {
-    template_path: String,
+    template_paths: Vec<String>,
     confidence_threshold: f32,
-    template_width: u32,
-    template_height: u32,
 }
 
 impl Default for ImageRecognitionConfig {
     fn default() -> Self {
         Self {
-            template_path: "img-[300,1682,50,50].png".to_string(),
+            template_paths: Vec::new(), // Will be populated by scanning for *.png files
             confidence_threshold: 0.8,
-            template_width: 50,
-            template_height: 50,
         }
     }
 }
@@ -57,27 +53,66 @@ mod image_recognition {
         pub x: u32,
         pub y: u32,
         pub confidence: f32,
+        pub template_path: String,
+        pub template_width: u32,
+        pub template_height: u32,
     }
     
-    pub fn find_template_in_image(
+    /// Find templates in image, checking all provided template paths
+    pub fn find_templates_in_image(
         screenshot_bytes: &[u8], 
-        template_path: &str,
+        template_paths: &[String],
         threshold: f32,
     ) -> Result<MatchResult, String> {
         // Load the screenshot from PNG bytes
         let screenshot = image::load_from_memory(screenshot_bytes)
             .map_err(|e| format!("Failed to load screenshot: {e}"))?;
+        let screenshot_gray = screenshot.to_luma8();
         
+        let mut best_match = MatchResult {
+            found: false,
+            x: 0,
+            y: 0,
+            confidence: 0.0,
+            template_path: String::new(),
+            template_width: 0,
+            template_height: 0,
+        };
+        
+        // Try each template and find the best match across all
+        for template_path in template_paths {
+            match process_single_template(&screenshot_gray, template_path, threshold) {
+                Ok(mut result) => {
+                    if result.found && result.confidence > best_match.confidence {
+                        result.template_path = template_path.clone();
+                        best_match = result;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("⚠️ Failed to process template {}: {}", template_path, e);
+                    continue;
+                }
+            }
+        }
+        
+        Ok(best_match)
+    }
+    
+    fn process_single_template(
+        screenshot_gray: &image::ImageBuffer<image::Luma<u8>, Vec<u8>>,
+        template_path: &str,
+        threshold: f32,
+    ) -> Result<MatchResult, String> {
         // Load the template image
         let template = image::open(template_path)
             .map_err(|e| format!("Failed to load template {}: {e}", template_path))?;
         
-        // Convert to grayscale for template matching
-        let screenshot_gray = screenshot.to_luma8();
         let template_gray = template.to_luma8();
+        let template_width = template_gray.width();
+        let template_height = template_gray.height();
         
         // Perform template matching using normalized cross correlation
-        let result = match_template(&screenshot_gray, &template_gray, MatchTemplateMethod::CrossCorrelationNormalized);
+        let result = match_template(screenshot_gray, &template_gray, MatchTemplateMethod::CrossCorrelationNormalized);
         
         // Find the best match
         let mut max_score = 0.0f32;
@@ -98,7 +133,40 @@ mod image_recognition {
             x: best_x,
             y: best_y,
             confidence: max_score,
+            template_path: template_path.to_string(),
+            template_width,
+            template_height,
         })
+    }
+    
+    /// Scan current directory for PNG template files
+    pub fn scan_template_files() -> Result<Vec<String>, String> {
+        let mut template_paths = Vec::new();
+        
+        let current_dir = std::env::current_dir()
+            .map_err(|e| format!("Failed to get current directory: {}", e))?;
+            
+        let entries = std::fs::read_dir(&current_dir)
+            .map_err(|e| format!("Failed to read directory: {}", e))?;
+            
+        for entry in entries {
+            if let Ok(entry) = entry {
+                if let Some(file_name) = entry.file_name().to_str() {
+                    if file_name.ends_with(".png") && entry.path().is_file() {
+                        template_paths.push(file_name.to_string());
+                    }
+                }
+            }
+        }
+        
+        // Sort for consistent ordering
+        template_paths.sort();
+        
+        if template_paths.is_empty() {
+            return Err("No PNG template files found in current directory".to_string());
+        }
+        
+        Ok(template_paths)
     }
 }
 
@@ -108,6 +176,19 @@ impl GameAutomation {
         event_tx: mpsc::Sender<AutomationEvent>,
         debug_enabled: bool,
     ) -> Self {
+        let mut image_config = ImageRecognitionConfig::default();
+        
+        // Scan for template files on initialization  
+        match image_recognition::scan_template_files() {
+            Ok(template_paths) => {
+                image_config.template_paths = template_paths;
+            }
+            Err(e) => {
+                eprintln!("⚠️ Failed to scan template files: {}", e);
+                // Continue with empty template list, will be handled during initialization
+            }
+        }
+        
         Self {
             state: GameState::Idle,
             screenshot_interval: Duration::from_secs(30),
@@ -118,19 +199,36 @@ impl GameAutomation {
             should_exit: false,
             debug_enabled,
             latest_screenshot: None,
-            image_config: ImageRecognitionConfig::default(),
+            image_config,
         }
     }
 
     pub async fn initialize_adb(&mut self, use_rust_impl: bool) -> Result<(), String> {
-        // Validate template file exists
-        if !std::path::Path::new(&self.image_config.template_path).exists() {
-            let error = format!("Template image not found: {}", self.image_config.template_path);
-            debug_print!(self.debug_enabled, "❌ {}", error);
-            let _ = self.event_tx.send(AutomationEvent::Error(error.clone())).await;
-            return Err(error);
+        // Rescan template files in case new ones were added
+        match image_recognition::scan_template_files() {
+            Ok(template_paths) => {
+                self.image_config.template_paths = template_paths.clone();
+                debug_print!(self.debug_enabled, "✅ Found {} template files: {:?}", template_paths.len(), template_paths);
+                // Notify GUI about initial template discovery
+                let _ = self.event_tx.send(AutomationEvent::TemplatesUpdated(template_paths)).await;
+            }
+            Err(e) => {
+                let error = format!("No template images found: {}", e);
+                debug_print!(self.debug_enabled, "❌ {}", error);
+                let _ = self.event_tx.send(AutomationEvent::Error(error.clone())).await;
+                return Err(error);
+            }
         }
-        debug_print!(self.debug_enabled, "✅ Template image found: {}", self.image_config.template_path);
+
+        // Validate that template files exist
+        for template_path in &self.image_config.template_paths {
+            if !std::path::Path::new(template_path).exists() {
+                let error = format!("Template image not found: {}", template_path);
+                debug_print!(self.debug_enabled, "❌ {}", error);
+                let _ = self.event_tx.send(AutomationEvent::Error(error.clone())).await;
+                return Err(error);
+            }
+        }
 
         match AdbBackend::connect_first(use_rust_impl).await {
             Ok(client) => {
@@ -222,6 +320,12 @@ impl GameAutomation {
             AutomationCommand::TestImageRecognition => {
                 debug_print!(self.debug_enabled, "🧪 Manual image recognition test requested");
                 if let Err(e) = self.test_image_recognition().await {
+                    let _ = self.event_tx.send(AutomationEvent::Error(e)).await;
+                }
+            }
+            AutomationCommand::RescanTemplates => {
+                debug_print!(self.debug_enabled, "🔄 Template rescan requested");
+                if let Err(e) = self.rescan_templates().await {
                     let _ = self.event_tx.send(AutomationEvent::Error(e)).await;
                 }
             }
@@ -322,21 +426,39 @@ impl GameAutomation {
     }
 
     /// Update image recognition configuration
-    pub fn update_image_config(&mut self, template_path: String, threshold: f32, width: u32, height: u32) {
+    pub fn update_image_config(&mut self, template_paths: Vec<String>, threshold: f32) {
         self.image_config = ImageRecognitionConfig {
-            template_path,
+            template_paths: template_paths.clone(),
             confidence_threshold: threshold,
-            template_width: width,
-            template_height: height,
         };
         debug_print!(
             self.debug_enabled,
-            "🔧 Image config updated: {} ({}x{}) threshold={:.2}",
-            self.image_config.template_path,
-            width,
-            height,
+            "🔧 Image config updated: {} templates, threshold={:.2}",
+            template_paths.len(),
             threshold
         );
+    }
+
+    /// Rescan template files and update configuration
+    pub async fn rescan_templates(&mut self) -> Result<(), String> {
+        match image_recognition::scan_template_files() {
+            Ok(template_paths) => {
+                self.image_config.template_paths = template_paths.clone();
+                debug_print!(
+                    self.debug_enabled,
+                    "🔄 Rescanned templates: found {} files: {:?}",
+                    template_paths.len(),
+                    template_paths
+                );
+                // Notify GUI about template update
+                let _ = self.event_tx.send(AutomationEvent::TemplatesUpdated(template_paths)).await;
+                Ok(())
+            }
+            Err(e) => {
+                debug_print!(self.debug_enabled, "❌ Template rescan failed: {}", e);
+                Err(e)
+            }
+        }
     }
 
     /// Get current image recognition configuration
@@ -371,27 +493,36 @@ impl GameAutomation {
 
     /// Analyze the current screenshot for patterns and perform actions if found
     async fn analyze_and_act(&self, screenshot_bytes: &[u8]) -> Result<bool, String> {
-        debug_print!(self.debug_enabled, "🔍 Analyzing screenshot for template matches...");
+        if self.image_config.template_paths.is_empty() {
+            return Err("No template images configured for matching".to_string());
+        }
+
+        debug_print!(
+            self.debug_enabled, 
+            "🔍 Analyzing screenshot for template matches across {} templates...", 
+            self.image_config.template_paths.len()
+        );
         
-        // Perform template matching
-        match image_recognition::find_template_in_image(
+        // Perform template matching across all templates
+        match image_recognition::find_templates_in_image(
             screenshot_bytes, 
-            &self.image_config.template_path, 
+            &self.image_config.template_paths, 
             self.image_config.confidence_threshold
         ) {
             Ok(match_result) => {
                 if match_result.found {
                     debug_print!(
                         self.debug_enabled, 
-                        "🎯 Template found at ({}, {}) with confidence {:.3}", 
+                        "🎯 Template '{}' found at ({}, {}) with confidence {:.3}", 
+                        match_result.template_path,
                         match_result.x, 
                         match_result.y, 
                         match_result.confidence
                     );
                     
                     // Calculate tap coordinates at the center of the matched template
-                    let tap_x = match_result.x + (self.image_config.template_width / 2);
-                    let tap_y = match_result.y + (self.image_config.template_height / 2);
+                    let tap_x = match_result.x + (match_result.template_width / 2);
+                    let tap_y = match_result.y + (match_result.template_height / 2);
                     
                     // Validate tap coordinates are within screen bounds
                     if let Some(client) = &self.adb_client {
@@ -410,9 +541,10 @@ impl GameAutomation {
                             Ok(()) => {
                                 debug_print!(
                                     self.debug_enabled,
-                                    "✅ Tap executed at ({}, {})", 
+                                    "✅ Tap executed at ({}, {}) for template '{}'", 
                                     tap_x, 
-                                    tap_y
+                                    tap_y,
+                                    match_result.template_path
                                 );
                                 return Ok(true); // Action was taken
                             }
@@ -426,7 +558,7 @@ impl GameAutomation {
                 } else {
                     debug_print!(
                         self.debug_enabled, 
-                        "👀 Template not found (best match: {:.3} < {:.3})", 
+                        "👀 No templates matched (best confidence: {:.3} < {:.3})", 
                         match_result.confidence, 
                         self.image_config.confidence_threshold
                     );
