@@ -15,7 +15,6 @@ pub struct RustAdb {
 }
 
 impl RustAdb {
-
     async fn get_screen_size_with(&self) -> Result<(u32, u32), String> {
         // Use device shell_command instead of external adb binary with timeout
         let screen_size_future = async {
@@ -31,14 +30,15 @@ impl RustAdb {
                 if let Some(size_str) = line.strip_prefix("Physical size: ") {
                     let parts: Vec<&str> = size_str.trim().split('x').collect();
                     if parts.len() == 2
-                        && let (Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
-                            return Ok((x, y));
-                        }
+                        && let (Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+                    {
+                        return Ok((x, y));
+                    }
                 }
             }
             Err("RustAdb: could not parse screen size".into())
         };
-        
+
         // Add a 5 second timeout to prevent hanging
         tokio::time::timeout(std::time::Duration::from_secs(5), screen_size_future)
             .await
@@ -47,7 +47,7 @@ impl RustAdb {
 
     async fn capture_screen_bytes_internal(&self) -> Result<Vec<u8>, String> {
         let mut dev = self.server_device.lock().await;
-        
+
         // Try the faster framebuffer_bytes() method first
         match dev.framebuffer_bytes() {
             Ok(framebuffer_data) => {
@@ -56,20 +56,26 @@ impl RustAdb {
                     Ok(png_data) => return Ok(png_data),
                     Err(e) => {
                         if crate::gui::dioxus_app::is_debug_mode() {
-                            eprintln!("Framebuffer conversion failed: {}, falling back to screencap", e);
+                            eprintln!(
+                                "Framebuffer conversion failed: {}, falling back to screencap",
+                                e
+                            );
                         }
                         // Continue to fallback method below
                     }
                 }
-            },
+            }
             Err(e) => {
                 if crate::gui::dioxus_app::is_debug_mode() {
-                    eprintln!("Framebuffer capture failed: {}, falling back to screencap", e);
+                    eprintln!(
+                        "Framebuffer capture failed: {}, falling back to screencap",
+                        e
+                    );
                 }
                 // Continue to fallback method below
             }
         }
-        
+
         // Fallback to shell screencap method
         let mut dev = self.server_device.lock().await;
         let mut out: Vec<u8> = Vec::new();
@@ -77,22 +83,28 @@ impl RustAdb {
             .map_err(|e| format!("RustAdb: screencap fallback failed: {e}"))?;
         Ok(out)
     }
-    
+
     async fn framebuffer_to_png(&self, framebuffer_data: Vec<u8>) -> Result<Vec<u8>, String> {
         use image::{ImageBuffer, codecs::png::PngEncoder};
         use std::io::Cursor;
-        
+
         let pixel_count = (self.screen_x * self.screen_y) as usize;
         let data_len = framebuffer_data.len();
-        
+
         // Print debug info to understand the framebuffer format (only when --debug flag is used)
         if crate::gui::dioxus_app::is_debug_mode() {
             eprintln!("DEBUG: Framebuffer analysis:");
-            eprintln!("  Screen dimensions: {}x{} = {} pixels", self.screen_x, self.screen_y, pixel_count);
+            eprintln!(
+                "  Screen dimensions: {}x{} = {} pixels",
+                self.screen_x, self.screen_y, pixel_count
+            );
             eprintln!("  Data length: {} bytes", data_len);
-            eprintln!("  Ratio: {:.2} bytes per pixel", data_len as f64 / pixel_count as f64);
+            eprintln!(
+                "  Ratio: {:.2} bytes per pixel",
+                data_len as f64 / pixel_count as f64
+            );
         }
-        
+
         // Check if this might be compressed data or a different format
         if data_len < pixel_count {
             // Check if the data is already in PNG format
@@ -102,37 +114,44 @@ impl RustAdb {
                 }
                 return Ok(framebuffer_data);
             }
-            
+
             // Check if the data is in JPEG format
-            if framebuffer_data.len() >= 2 && framebuffer_data[0] == 0xFF && framebuffer_data[1] == 0xD8 {
+            if framebuffer_data.len() >= 2
+                && framebuffer_data[0] == 0xFF
+                && framebuffer_data[1] == 0xD8
+            {
                 if crate::gui::dioxus_app::is_debug_mode() {
                     eprintln!("DEBUG: Framebuffer data is JPEG format, converting to PNG");
                 }
                 return self.jpeg_to_png(framebuffer_data).await;
             }
-            
+
             return Err(format!(
                 "Framebuffer data appears to be compressed or in unsupported format: {} bytes for {} pixels ({:.2} bytes/pixel)",
-                data_len, pixel_count, data_len as f64 / pixel_count as f64
+                data_len,
+                pixel_count,
+                data_len as f64 / pixel_count as f64
             ));
         }
-        
+
         // Handle case where framebuffer data doesn't perfectly divide by pixel count
         // This can happen when there's header information or padding
         if data_len < pixel_count * 2 {
             return Err(format!(
                 "Framebuffer data too small for raw format: {} bytes for {} pixels (minimum {} bytes for RGB565)",
-                data_len, pixel_count, pixel_count * 2
+                data_len,
+                pixel_count,
+                pixel_count * 2
             ));
         }
-        
+
         // Try to determine format based on data size relative to pixel count
         let (bytes_per_pixel, actual_data) = if data_len >= pixel_count * 4 {
             // Likely RGBA format, but might have extra data - use only what we need
             let start_offset = data_len - (pixel_count * 4);
             (4, &framebuffer_data[start_offset..])
         } else if data_len >= pixel_count * 3 {
-            // Likely RGB format, but might have extra data - use only what we need  
+            // Likely RGB format, but might have extra data - use only what we need
             let start_offset = data_len - (pixel_count * 3);
             (3, &framebuffer_data[start_offset..])
         } else if data_len >= pixel_count * 2 {
@@ -145,95 +164,111 @@ impl RustAdb {
                 data_len, pixel_count
             ));
         };
-        
+
         // Determine format based on bytes per pixel
         let png_data = match bytes_per_pixel {
             4 => {
                 // RGBA format (most common)
                 let img = ImageBuffer::<image::Rgba<u8>, _>::from_raw(
-                    self.screen_x, self.screen_y, actual_data.to_vec()
-                ).ok_or("Failed to create RGBA image from framebuffer data")?;
-                
+                    self.screen_x,
+                    self.screen_y,
+                    actual_data.to_vec(),
+                )
+                .ok_or("Failed to create RGBA image from framebuffer data")?;
+
                 let mut data = Vec::new();
                 let mut cursor = Cursor::new(&mut data);
                 let encoder = PngEncoder::new(&mut cursor);
                 img.write_with_encoder(encoder)
                     .map_err(|e| format!("Failed to encode RGBA PNG: {e}"))?;
                 data
-            },
+            }
             3 => {
                 // RGB format
                 let img = ImageBuffer::<image::Rgb<u8>, _>::from_raw(
-                    self.screen_x, self.screen_y, actual_data.to_vec()
-                ).ok_or("Failed to create RGB image from framebuffer data")?;
-                
+                    self.screen_x,
+                    self.screen_y,
+                    actual_data.to_vec(),
+                )
+                .ok_or("Failed to create RGB image from framebuffer data")?;
+
                 let mut data = Vec::new();
                 let mut cursor = Cursor::new(&mut data);
                 let encoder = PngEncoder::new(&mut cursor);
                 img.write_with_encoder(encoder)
                     .map_err(|e| format!("Failed to encode RGB PNG: {e}"))?;
                 data
-            },
+            }
             2 => {
                 // RGB565 format - convert to RGB
                 if actual_data.len() != pixel_count * 2 {
-                    return Err(format!("Invalid RGB565 data length: expected {}, got {}", pixel_count * 2, actual_data.len()));
+                    return Err(format!(
+                        "Invalid RGB565 data length: expected {}, got {}",
+                        pixel_count * 2,
+                        actual_data.len()
+                    ));
                 }
-                
+
                 let mut rgb_data = Vec::with_capacity(pixel_count * 3);
                 for chunk in actual_data.chunks_exact(2) {
                     let pixel = u16::from_le_bytes([chunk[0], chunk[1]]);
                     let r = ((pixel >> 11) & 0x1F) as u8;
                     let g = ((pixel >> 5) & 0x3F) as u8;
                     let b = (pixel & 0x1F) as u8;
-                    
+
                     // Convert to 8-bit values
                     rgb_data.push((r << 3) | (r >> 2));
                     rgb_data.push((g << 2) | (g >> 4));
                     rgb_data.push((b << 3) | (b >> 2));
                 }
-                
+
                 let img = ImageBuffer::<image::Rgb<u8>, _>::from_raw(
-                    self.screen_x, self.screen_y, rgb_data
-                ).ok_or("Failed to create RGB image from RGB565 data")?;
-                
+                    self.screen_x,
+                    self.screen_y,
+                    rgb_data,
+                )
+                .ok_or("Failed to create RGB image from RGB565 data")?;
+
                 let mut data = Vec::new();
                 let mut cursor = Cursor::new(&mut data);
                 let encoder = PngEncoder::new(&mut cursor);
                 img.write_with_encoder(encoder)
                     .map_err(|e| format!("Failed to encode RGB565 PNG: {e}"))?;
                 data
-            },
+            }
             _ => {
                 return Err(format!(
                     "Unsupported framebuffer format: {} bytes per pixel (total data: {}, actual data: {}, pixels: {}, screen: {}x{})",
-                    bytes_per_pixel, data_len, actual_data.len(), pixel_count, self.screen_x, self.screen_y
+                    bytes_per_pixel,
+                    data_len,
+                    actual_data.len(),
+                    pixel_count,
+                    self.screen_x,
+                    self.screen_y
                 ));
             }
         };
-        
+
         Ok(png_data)
     }
-    
+
     async fn jpeg_to_png(&self, jpeg_data: Vec<u8>) -> Result<Vec<u8>, String> {
         use image::{ImageFormat, codecs::png::PngEncoder};
         use std::io::Cursor;
-        
+
         // Decode JPEG
         let img = image::load_from_memory_with_format(&jpeg_data, ImageFormat::Jpeg)
             .map_err(|e| format!("Failed to decode JPEG: {e}"))?;
-        
+
         // Encode as PNG
         let mut data = Vec::new();
         let mut cursor = Cursor::new(&mut data);
         let encoder = PngEncoder::new(&mut cursor);
         img.write_with_encoder(encoder)
             .map_err(|e| format!("Failed to encode JPEG as PNG: {e}"))?;
-        
+
         Ok(data)
     }
-
-
 }
 
 impl AdbClient for RustAdb {

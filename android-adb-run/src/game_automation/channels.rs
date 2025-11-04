@@ -1,6 +1,6 @@
 // Communication channels for game automation
-use tokio::sync::mpsc;
 use super::types::{AutomationCommand, AutomationEvent};
+use tokio::sync::mpsc;
 
 /// Helper function to create automation channels
 pub fn create_automation_channels() -> (

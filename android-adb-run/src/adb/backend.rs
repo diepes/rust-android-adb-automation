@@ -1,6 +1,6 @@
-use super::types::{AdbClient, Device, ImageCapture};
 use super::rust_impl::RustAdb;
 use super::shell::AdbShell;
+use super::types::{AdbClient, Device, ImageCapture};
 
 pub enum AdbBackend {
     Shell(AdbShell),

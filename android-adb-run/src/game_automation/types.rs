@@ -15,9 +15,9 @@ pub enum AutomationCommand {
     Resume,
     Stop,
     TakeScreenshot,
-    UpdateInterval(u64), // seconds
+    UpdateInterval(u64),  // seconds
     TestImageRecognition, // Test current screenshot for template matches
-    RescanTemplates, // Rescan directory for new template files
+    RescanTemplates,      // Rescan directory for new template files
     Shutdown,
 }
 

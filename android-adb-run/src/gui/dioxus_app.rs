@@ -1,5 +1,7 @@
 use crate::adb::AdbBackend;
-use crate::game_automation::{create_automation_channels, GameAutomation, AutomationCommand, AutomationEvent, GameState};
+use crate::game_automation::{
+    AutomationCommand, AutomationEvent, GameAutomation, GameState, create_automation_channels,
+};
 use crate::gui::components::interaction_info::InteractionInfo;
 use crate::gui::components::{
     actions::Actions, device_info::DeviceInfo, header::Header, screenshot_panel::screenshot_panel,
@@ -117,7 +119,7 @@ fn App() -> Element {
         spawn(async move {
             // Step 1: Look for devices (fast operation)
             status.set("🔍 Looking for devices...".to_string());
-            
+
             let devices = match AdbBackend::list_devices(use_rust_impl).await {
                 Ok(devices) if !devices.is_empty() => devices,
                 Ok(_) => {
@@ -129,18 +131,18 @@ fn App() -> Element {
                     return;
                 }
             };
-            
+
             let first_device = &devices[0];
-            
+
             // Step 2: Update GUI immediately with found device info
             status.set(format!("📱 Found device: {}", first_device.name));
-            
+
             // Small delay to let UI update
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            
+
             // Step 3: Start connection process
             status.set(format!("🔌 Connecting to {}...", first_device.name));
-            
+
             // Step 4: Connect to device in background, update GUI when ready
             spawn({
                 let device_name = first_device.name.clone();
@@ -160,28 +162,32 @@ fn App() -> Element {
                                 "✅ Connected via {}",
                                 if use_rust_impl { "rust" } else { "shell" }
                             ));
-                            
+
                             // Step 5: Take initial screenshot in background, don't block UI
                             spawn(async move {
                                 is_loading_screenshot.set(true);
-                                screenshot_status.set("📸 Taking initial screenshot...".to_string());
+                                screenshot_status
+                                    .set("📸 Taking initial screenshot...".to_string());
                                 let start = std::time::Instant::now();
-                                
+
                                 match client.screen_capture_bytes().await {
                                     Ok(bytes) => {
                                         // Move heavy base64 encoding to background thread
                                         let bytes_clone = bytes.clone();
-                                        let base64_result = tokio::task::spawn_blocking(move || {
-                                            base64_encode(&bytes_clone)
-                                        }).await;
-                                        
+                                        let base64_result =
+                                            tokio::task::spawn_blocking(move || {
+                                                base64_encode(&bytes_clone)
+                                            })
+                                            .await;
+
                                         match base64_result {
                                             Ok(base64_string) => {
                                                 let duration_ms = start.elapsed().as_millis();
-                                                let counter_val = screenshot_counter.with_mut(|c| {
-                                                    *c += 1;
-                                                    *c
-                                                });
+                                                let counter_val =
+                                                    screenshot_counter.with_mut(|c| {
+                                                        *c += 1;
+                                                        *c
+                                                    });
                                                 screenshot_data.set(Some(base64_string));
                                                 screenshot_bytes.set(Some(bytes));
                                                 screenshot_status.set(format!(
@@ -190,13 +196,16 @@ fn App() -> Element {
                                                 ));
                                             }
                                             Err(_) => {
-                                                screenshot_status.set("❌ Failed to encode screenshot".to_string());
+                                                screenshot_status.set(
+                                                    "❌ Failed to encode screenshot".to_string(),
+                                                );
                                             }
                                         }
                                         is_loading_screenshot.set(false);
                                     }
                                     Err(e) => {
-                                        screenshot_status.set(format!("❌ Initial screenshot failed: {}", e));
+                                        screenshot_status
+                                            .set(format!("❌ Initial screenshot failed: {}", e));
                                         is_loading_screenshot.set(false);
                                     }
                                 }
@@ -223,14 +232,14 @@ fn App() -> Element {
         let mut screenshot_data_clone = screenshot_data.clone();
         let mut screenshot_bytes_clone = screenshot_bytes.clone();
         let mut screenshot_status_clone = screenshot_status.clone();
-        
+
         spawn(async move {
             // Create automation channels
             let (cmd_tx, cmd_rx, event_tx, mut event_rx) = create_automation_channels();
-            
+
             // Store command sender for GUI controls
             automation_command_tx_clone.set(Some(cmd_tx));
-            
+
             // Start automation task
             let mut automation = GameAutomation::new(cmd_rx, event_tx, debug_mode);
             if let Err(e) = automation.initialize_adb(use_rust_impl).await {
@@ -239,12 +248,12 @@ fn App() -> Element {
                 }
                 return;
             }
-            
+
             // Spawn automation FSM loop
             let _automation_task = spawn(async move {
                 automation.run().await;
             });
-            
+
             // Event listener loop
             spawn(async move {
                 while let Some(event) = event_rx.recv().await {
@@ -257,14 +266,14 @@ fn App() -> Element {
                             });
                             // Move base64 encoding to background thread for automation screenshots too
                             let bytes_clone = bytes.clone();
-                            let base64_string = tokio::task::spawn_blocking(move || {
-                                base64_encode(&bytes_clone)
-                            }).await.unwrap_or_else(|_| "".to_string());
+                            let base64_string =
+                                tokio::task::spawn_blocking(move || base64_encode(&bytes_clone))
+                                    .await
+                                    .unwrap_or_else(|_| "".to_string());
                             screenshot_data_clone.set(Some(base64_string));
                             screenshot_bytes_clone.set(Some(bytes));
-                            screenshot_status_clone.set(format!(
-                                "🤖 Automation screenshot #{}", counter_val
-                            ));
+                            screenshot_status_clone
+                                .set(format!("🤖 Automation screenshot #{}", counter_val));
                         }
                         AutomationEvent::StateChanged(new_state) => {
                             automation_state_clone.set(new_state);
@@ -280,10 +289,15 @@ fn App() -> Element {
                         }
                         AutomationEvent::TemplatesUpdated(templates) => {
                             if debug_mode {
-                                println!("🔄 Templates updated: {} files found: {:?}", templates.len(), templates);
+                                println!(
+                                    "🔄 Templates updated: {} files found: {:?}",
+                                    templates.len(),
+                                    templates
+                                );
                             }
                             screenshot_status_clone.set(format!(
-                                "🔄 Templates updated: {} files found", templates.len()
+                                "🔄 Templates updated: {} files found",
+                                templates.len()
                             ));
                         }
                     }
@@ -331,15 +345,15 @@ fn App() -> Element {
                             // Device metadata panel
                             DeviceInfo { name: name.clone(), transport_id: transport_id_opt, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string() }
                             // Action buttons (screenshot, save, exit, etc)
-                            Actions { 
-                                name: name.clone(), 
-                                is_loading: is_loading_screenshot, 
-                                screenshot_status: screenshot_status, 
-                                screenshot_data: screenshot_data, 
-                                screenshot_bytes: screenshot_bytes, 
-                                auto_update_on_touch: auto_update_on_touch, 
-                                select_box: select_box, 
-                                use_rust_impl: *USE_RUST_IMPL.get().unwrap_or(&true), 
+                            Actions {
+                                name: name.clone(),
+                                is_loading: is_loading_screenshot,
+                                screenshot_status: screenshot_status,
+                                screenshot_data: screenshot_data,
+                                screenshot_bytes: screenshot_bytes,
+                                auto_update_on_touch: auto_update_on_touch,
+                                select_box: select_box,
+                                use_rust_impl: *USE_RUST_IMPL.get().unwrap_or(&true),
                                 screenshot_counter: screenshot_counter,
                                 automation_state: automation_state,
                                 automation_command_tx: automation_command_tx,

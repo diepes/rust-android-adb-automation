@@ -85,9 +85,10 @@ impl AdbShell {
             if let Some(size_str) = line.strip_prefix("Physical size: ") {
                 let parts: Vec<&str> = size_str.trim().split('x').collect();
                 if parts.len() == 2
-                    && let (Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
-                        return Ok((x, y));
-                    }
+                    && let (Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+                {
+                    return Ok((x, y));
+                }
             }
         }
         Err("Could not parse screen size".into())

@@ -1,9 +1,10 @@
 // Finite State Machine implementation for game automation
+use super::match_image::{GameStateDetector, MatchConfig, create_default_config};
+use super::types::{AutomationCommand, AutomationEvent, GameState};
 use crate::adb::AdbBackend;
-use super::types::{GameState, AutomationCommand, AutomationEvent};
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
-use tokio::time::{sleep, Duration, Instant};
+use tokio::sync::{Mutex, mpsc};
+use tokio::time::{Duration, Instant, sleep};
 
 // Macro for debug output
 macro_rules! debug_print {
@@ -12,22 +13,6 @@ macro_rules! debug_print {
             println!($($arg)*);
         }
     };
-}
-
-// Configuration for image recognition
-#[derive(Debug, Clone)]
-pub struct ImageRecognitionConfig {
-    template_paths: Vec<String>,
-    confidence_threshold: f32,
-}
-
-impl Default for ImageRecognitionConfig {
-    fn default() -> Self {
-        Self {
-            template_paths: Vec::new(), // Will be populated by scanning for *.png files
-            confidence_threshold: 0.8,
-        }
-    }
 }
 
 pub struct GameAutomation {
@@ -39,135 +24,9 @@ pub struct GameAutomation {
     is_running: bool,
     should_exit: bool,
     debug_enabled: bool,
-    // Image recognition
+    // New image matching system
     latest_screenshot: Option<Vec<u8>>, // Raw PNG bytes
-    image_config: ImageRecognitionConfig,
-}
-
-// Image recognition module
-mod image_recognition {
-    use imageproc::template_matching::{match_template, MatchTemplateMethod};
-    
-    pub struct MatchResult {
-        pub found: bool,
-        pub x: u32,
-        pub y: u32,
-        pub confidence: f32,
-        pub template_path: String,
-        pub template_width: u32,
-        pub template_height: u32,
-    }
-    
-    /// Find templates in image, checking all provided template paths
-    pub fn find_templates_in_image(
-        screenshot_bytes: &[u8], 
-        template_paths: &[String],
-        threshold: f32,
-    ) -> Result<MatchResult, String> {
-        // Load the screenshot from PNG bytes
-        let screenshot = image::load_from_memory(screenshot_bytes)
-            .map_err(|e| format!("Failed to load screenshot: {e}"))?;
-        let screenshot_gray = screenshot.to_luma8();
-        
-        let mut best_match = MatchResult {
-            found: false,
-            x: 0,
-            y: 0,
-            confidence: 0.0,
-            template_path: String::new(),
-            template_width: 0,
-            template_height: 0,
-        };
-        
-        // Try each template and find the best match across all
-        for template_path in template_paths {
-            match process_single_template(&screenshot_gray, template_path, threshold) {
-                Ok(mut result) => {
-                    if result.found && result.confidence > best_match.confidence {
-                        result.template_path = template_path.clone();
-                        best_match = result;
-                    }
-                }
-                Err(e) => {
-                    eprintln!("⚠️ Failed to process template {}: {}", template_path, e);
-                    continue;
-                }
-            }
-        }
-        
-        Ok(best_match)
-    }
-    
-    fn process_single_template(
-        screenshot_gray: &image::ImageBuffer<image::Luma<u8>, Vec<u8>>,
-        template_path: &str,
-        threshold: f32,
-    ) -> Result<MatchResult, String> {
-        // Load the template image
-        let template = image::open(template_path)
-            .map_err(|e| format!("Failed to load template {}: {e}", template_path))?;
-        
-        let template_gray = template.to_luma8();
-        let template_width = template_gray.width();
-        let template_height = template_gray.height();
-        
-        // Perform template matching using normalized cross correlation
-        let result = match_template(screenshot_gray, &template_gray, MatchTemplateMethod::CrossCorrelationNormalized);
-        
-        // Find the best match
-        let mut max_score = 0.0f32;
-        let mut best_x = 0u32;
-        let mut best_y = 0u32;
-        
-        for (x, y, pixel) in result.enumerate_pixels() {
-            let score = pixel[0] as f32 / 255.0; // Normalize to 0.0-1.0 range
-            if score > max_score {
-                max_score = score;
-                best_x = x;
-                best_y = y;
-            }
-        }
-        
-        Ok(MatchResult {
-            found: max_score >= threshold,
-            x: best_x,
-            y: best_y,
-            confidence: max_score,
-            template_path: template_path.to_string(),
-            template_width,
-            template_height,
-        })
-    }
-    
-    /// Scan current directory for PNG template files
-    pub fn scan_template_files() -> Result<Vec<String>, String> {
-        let mut template_paths = Vec::new();
-        
-        let current_dir = std::env::current_dir()
-            .map_err(|e| format!("Failed to get current directory: {}", e))?;
-            
-        let entries = std::fs::read_dir(&current_dir)
-            .map_err(|e| format!("Failed to read directory: {}", e))?;
-            
-        for entry in entries {
-            if let Ok(entry) = entry {
-                if let Some(file_name) = entry.file_name().to_str() {
-                    if file_name.ends_with(".png") && entry.path().is_file() {
-                        template_paths.push(file_name.to_string());
-                    }
-                }
-            }
-        }
-        
-        // Sort for consistent ordering
-        template_paths.sort();
-        
-        if template_paths.is_empty() {
-            return Err("No PNG template files found in current directory".to_string());
-        }
-        
-        Ok(template_paths)
-    }
+    game_detector: GameStateDetector,
 }
 
 impl GameAutomation {
@@ -176,19 +35,10 @@ impl GameAutomation {
         event_tx: mpsc::Sender<AutomationEvent>,
         debug_enabled: bool,
     ) -> Self {
-        let mut image_config = ImageRecognitionConfig::default();
-        
-        // Scan for template files on initialization  
-        match image_recognition::scan_template_files() {
-            Ok(template_paths) => {
-                image_config.template_paths = template_paths;
-            }
-            Err(e) => {
-                eprintln!("⚠️ Failed to scan template files: {}", e);
-                // Continue with empty template list, will be handled during initialization
-            }
-        }
-        
+        // Create default detector (will be updated with screen dimensions later)
+        let config = create_default_config();
+        let game_detector = GameStateDetector::new(1080, 2400, config); // Default dimensions
+
         Self {
             state: GameState::Idle,
             screenshot_interval: Duration::from_secs(30),
@@ -199,46 +49,56 @@ impl GameAutomation {
             should_exit: false,
             debug_enabled,
             latest_screenshot: None,
-            image_config,
+            game_detector,
         }
     }
 
     pub async fn initialize_adb(&mut self, use_rust_impl: bool) -> Result<(), String> {
-        // Rescan template files in case new ones were added
-        match image_recognition::scan_template_files() {
-            Ok(template_paths) => {
-                self.image_config.template_paths = template_paths.clone();
-                debug_print!(self.debug_enabled, "✅ Found {} template files: {:?}", template_paths.len(), template_paths);
-                // Notify GUI about initial template discovery
-                let _ = self.event_tx.send(AutomationEvent::TemplatesUpdated(template_paths)).await;
-            }
-            Err(e) => {
-                let error = format!("No template images found: {}", e);
-                debug_print!(self.debug_enabled, "❌ {}", error);
-                let _ = self.event_tx.send(AutomationEvent::Error(error.clone())).await;
-                return Err(error);
-            }
-        }
-
-        // Validate that template files exist
-        for template_path in &self.image_config.template_paths {
-            if !std::path::Path::new(template_path).exists() {
-                let error = format!("Template image not found: {}", template_path);
-                debug_print!(self.debug_enabled, "❌ {}", error);
-                let _ = self.event_tx.send(AutomationEvent::Error(error.clone())).await;
-                return Err(error);
-            }
-        }
-
         match AdbBackend::connect_first(use_rust_impl).await {
             Ok(client) => {
+                let (screen_width, screen_height) = client.screen_dimensions();
+
+                // Update detector with actual screen dimensions
+                let mut config = create_default_config();
+                config.debug_enabled = self.debug_enabled;
+                self.game_detector = GameStateDetector::new(screen_width, screen_height, config);
+
+                // Load templates from current directory
+                match self.game_detector.load_templates(".") {
+                    Ok(count) => {
+                        debug_print!(
+                            self.debug_enabled,
+                            "✅ Loaded {} templates for game state detection",
+                            count
+                        );
+                        // Create template names for GUI notification
+                        let template_names: Vec<String> =
+                            (0..count).map(|i| format!("template_{}", i)).collect();
+                        let _ = self
+                            .event_tx
+                            .send(AutomationEvent::TemplatesUpdated(template_names))
+                            .await;
+                    }
+                    Err(e) => {
+                        debug_print!(self.debug_enabled, "⚠️ Template loading warning: {}", e);
+                    }
+                }
+
                 self.adb_client = Some(Arc::new(Mutex::new(client)));
-                debug_print!(self.debug_enabled, "🤖 Game automation ADB client initialized");
+                debug_print!(
+                    self.debug_enabled,
+                    "🤖 Game automation initialized ({}x{})",
+                    screen_width,
+                    screen_height
+                );
                 Ok(())
             }
             Err(e) => {
                 let error = format!("Failed to initialize ADB for automation: {}", e);
-                let _ = self.event_tx.send(AutomationEvent::Error(error.clone())).await;
+                let _ = self
+                    .event_tx
+                    .send(AutomationEvent::Error(error.clone()))
+                    .await;
                 Err(error)
             }
         }
@@ -246,9 +106,17 @@ impl GameAutomation {
 
     async fn change_state(&mut self, new_state: GameState) {
         if self.state != new_state {
-            debug_print!(self.debug_enabled, "🎮 Game automation state: {:?} -> {:?}", self.state, new_state);
+            debug_print!(
+                self.debug_enabled,
+                "🎮 Game automation state: {:?} -> {:?}",
+                self.state,
+                new_state
+            );
             self.state = new_state.clone();
-            let _ = self.event_tx.send(AutomationEvent::StateChanged(new_state)).await;
+            let _ = self
+                .event_tx
+                .send(AutomationEvent::StateChanged(new_state))
+                .await;
         }
     }
 
@@ -257,17 +125,27 @@ impl GameAutomation {
             let client_guard = client.lock().await;
             match client_guard.screen_capture_bytes().await {
                 Ok(bytes) => {
-                    debug_print!(self.debug_enabled, "📸 Game automation captured screenshot ({} bytes)", bytes.len());
-                    
+                    debug_print!(
+                        self.debug_enabled,
+                        "📸 Game automation captured screenshot ({} bytes)",
+                        bytes.len()
+                    );
+
                     // Store the latest screenshot for image recognition
                     self.latest_screenshot = Some(bytes.clone());
-                    
-                    let _ = self.event_tx.send(AutomationEvent::ScreenshotReady(bytes.clone())).await;
+
+                    let _ = self
+                        .event_tx
+                        .send(AutomationEvent::ScreenshotReady(bytes.clone()))
+                        .await;
                     Ok(bytes)
                 }
                 Err(e) => {
                     let error = format!("Screenshot failed: {}", e);
-                    let _ = self.event_tx.send(AutomationEvent::Error(error.clone())).await;
+                    let _ = self
+                        .event_tx
+                        .send(AutomationEvent::Error(error.clone()))
+                        .await;
                     Err(error)
                 }
             }
@@ -277,16 +155,31 @@ impl GameAutomation {
     }
 
     async fn process_command(&mut self, command: AutomationCommand) {
-        debug_print!(self.debug_enabled, "🤖 Processing automation command: {:?}", command);
+        debug_print!(
+            self.debug_enabled,
+            "🤖 Processing automation command: {:?}",
+            command
+        );
         match command {
             AutomationCommand::Start => {
-                debug_print!(self.debug_enabled, "🤖 Start command received. Current is_running: {}", self.is_running);
+                debug_print!(
+                    self.debug_enabled,
+                    "🤖 Start command received. Current is_running: {}",
+                    self.is_running
+                );
                 if !self.is_running {
                     self.is_running = true;
                     self.change_state(GameState::WaitingForScreenshot).await;
-                    debug_print!(self.debug_enabled, "🚀 Game automation started (interval: {}s)", self.screenshot_interval.as_secs());
+                    debug_print!(
+                        self.debug_enabled,
+                        "🚀 Game automation started (interval: {}s)",
+                        self.screenshot_interval.as_secs()
+                    );
                 } else {
-                    debug_print!(self.debug_enabled, "🤖 Automation already running, ignoring start command");
+                    debug_print!(
+                        self.debug_enabled,
+                        "🤖 Automation already running, ignoring start command"
+                    );
                 }
             }
             AutomationCommand::Pause => {
@@ -314,11 +207,21 @@ impl GameAutomation {
             }
             AutomationCommand::UpdateInterval(seconds) => {
                 self.screenshot_interval = Duration::from_secs(seconds);
-                let _ = self.event_tx.send(AutomationEvent::IntervalUpdate(seconds)).await;
-                debug_print!(self.debug_enabled, "⏱️ Screenshot interval updated to {}s", seconds);
+                let _ = self
+                    .event_tx
+                    .send(AutomationEvent::IntervalUpdate(seconds))
+                    .await;
+                debug_print!(
+                    self.debug_enabled,
+                    "⏱️ Screenshot interval updated to {}s",
+                    seconds
+                );
             }
             AutomationCommand::TestImageRecognition => {
-                debug_print!(self.debug_enabled, "🧪 Manual image recognition test requested");
+                debug_print!(
+                    self.debug_enabled,
+                    "🧪 Manual image recognition test requested"
+                );
                 if let Err(e) = self.test_image_recognition().await {
                     let _ = self.event_tx.send(AutomationEvent::Error(e)).await;
                 }
@@ -383,20 +286,33 @@ impl GameAutomation {
                     self.change_state(GameState::Acting).await;
                 }
                 GameState::Acting => {
-                    debug_print!(self.debug_enabled, "🎮 Entering Acting state - performing image recognition...");
-                    
+                    debug_print!(
+                        self.debug_enabled,
+                        "🎮 Entering Acting state - performing image recognition..."
+                    );
+
                     // Perform image recognition and actions
                     if let Some(screenshot_bytes) = &self.latest_screenshot {
-                        debug_print!(self.debug_enabled, "📸 Screenshot available ({} bytes), analyzing...", screenshot_bytes.len());
-                        
+                        debug_print!(
+                            self.debug_enabled,
+                            "📸 Screenshot available ({} bytes), analyzing...",
+                            screenshot_bytes.len()
+                        );
+
                         match self.analyze_and_act(screenshot_bytes).await {
                             Ok(action_taken) => {
                                 if action_taken {
-                                    debug_print!(self.debug_enabled, "🎯 Game action executed successfully!");
+                                    debug_print!(
+                                        self.debug_enabled,
+                                        "🎯 Game action executed successfully!"
+                                    );
                                     // Wait a bit after taking action before next screenshot
                                     sleep(Duration::from_millis(1000)).await;
                                 } else {
-                                    debug_print!(self.debug_enabled, "👀 No matching patterns found, continuing scan...");
+                                    debug_print!(
+                                        self.debug_enabled,
+                                        "👀 No matching patterns found, continuing scan..."
+                                    );
                                     // No action needed, wait shorter time
                                     sleep(Duration::from_millis(500)).await;
                                 }
@@ -407,10 +323,13 @@ impl GameAutomation {
                             }
                         }
                     } else {
-                        debug_print!(self.debug_enabled, "⚠️ No screenshot available for analysis");
+                        debug_print!(
+                            self.debug_enabled,
+                            "⚠️ No screenshot available for analysis"
+                        );
                         sleep(Duration::from_millis(500)).await;
                     }
-                    
+
                     // Return to waiting for next screenshot
                     self.change_state(GameState::WaitingForScreenshot).await;
                 }
@@ -425,55 +344,58 @@ impl GameAutomation {
         debug_print!(self.debug_enabled, "🎮 Game automation FSM loop ended");
     }
 
-    /// Update image recognition configuration
-    pub fn update_image_config(&mut self, template_paths: Vec<String>, threshold: f32) {
-        self.image_config = ImageRecognitionConfig {
-            template_paths: template_paths.clone(),
-            confidence_threshold: threshold,
-        };
+    /// Update detector configuration
+    pub fn update_match_config(&mut self, config: MatchConfig) {
+        let threshold = config.confidence_threshold;
+        let multiscale = config.enable_multiscale;
+        self.game_detector.update_config(config);
         debug_print!(
             self.debug_enabled,
-            "🔧 Image config updated: {} templates, threshold={:.2}",
-            template_paths.len(),
-            threshold
+            "🔧 Match config updated: threshold={:.2}, multiscale={}",
+            threshold,
+            multiscale
         );
     }
 
-    /// Rescan template files and update configuration
+    /// Reload templates
     pub async fn rescan_templates(&mut self) -> Result<(), String> {
-        match image_recognition::scan_template_files() {
-            Ok(template_paths) => {
-                self.image_config.template_paths = template_paths.clone();
-                debug_print!(
-                    self.debug_enabled,
-                    "🔄 Rescanned templates: found {} files: {:?}",
-                    template_paths.len(),
-                    template_paths
-                );
-                // Notify GUI about template update
-                let _ = self.event_tx.send(AutomationEvent::TemplatesUpdated(template_paths)).await;
+        match self.game_detector.reload_templates(".") {
+            Ok(count) => {
+                debug_print!(self.debug_enabled, "🔄 Reloaded {} templates", count);
+                let template_paths: Vec<String> =
+                    (0..count).map(|i| format!("template_{}", i)).collect();
+                let _ = self
+                    .event_tx
+                    .send(AutomationEvent::TemplatesUpdated(template_paths))
+                    .await;
                 Ok(())
             }
             Err(e) => {
-                debug_print!(self.debug_enabled, "❌ Template rescan failed: {}", e);
+                debug_print!(self.debug_enabled, "❌ Template reload failed: {}", e);
                 Err(e)
             }
         }
     }
 
-    /// Get current image recognition configuration
-    pub fn get_image_config(&self) -> &ImageRecognitionConfig {
-        &self.image_config
+    /// Get current match configuration
+    pub fn get_match_config(&self) -> &MatchConfig {
+        self.game_detector.get_config()
     }
 
     /// Manual test of image recognition (for debugging)
     pub async fn test_image_recognition(&self) -> Result<(), String> {
         if let Some(screenshot_bytes) = &self.latest_screenshot {
-            debug_print!(self.debug_enabled, "🧪 Testing image recognition with current screenshot...");
+            debug_print!(
+                self.debug_enabled,
+                "🧪 Testing image recognition with current screenshot..."
+            );
             match self.analyze_and_act(screenshot_bytes).await {
                 Ok(action_taken) => {
                     if action_taken {
-                        debug_print!(self.debug_enabled, "✅ Test completed - action would be taken");
+                        debug_print!(
+                            self.debug_enabled,
+                            "✅ Test completed - action would be taken"
+                        );
                     } else {
                         debug_print!(self.debug_enabled, "ℹ️ Test completed - no action needed");
                     }
@@ -493,81 +415,68 @@ impl GameAutomation {
 
     /// Analyze the current screenshot for patterns and perform actions if found
     async fn analyze_and_act(&self, screenshot_bytes: &[u8]) -> Result<bool, String> {
-        if self.image_config.template_paths.is_empty() {
-            return Err("No template images configured for matching".to_string());
-        }
+        debug_print!(self.debug_enabled, "🔍 Starting game state analysis...");
+
+        // Use the new detector system
+        let detection_result = self.game_detector.analyze_screenshot(screenshot_bytes)?;
 
         debug_print!(
-            self.debug_enabled, 
-            "🔍 Analyzing screenshot for template matches across {} templates...", 
-            self.image_config.template_paths.len()
+            self.debug_enabled,
+            "🎯 Analysis complete: {} matches found (confidence: {:.3}, time: {}ms)",
+            detection_result.matches.len(),
+            detection_result.confidence_score,
+            detection_result.processing_time_ms
         );
-        
-        // Perform template matching across all templates
-        match image_recognition::find_templates_in_image(
-            screenshot_bytes, 
-            &self.image_config.template_paths, 
-            self.image_config.confidence_threshold
-        ) {
-            Ok(match_result) => {
-                if match_result.found {
-                    debug_print!(
-                        self.debug_enabled, 
-                        "🎯 Template '{}' found at ({}, {}) with confidence {:.3}", 
-                        match_result.template_path,
-                        match_result.x, 
-                        match_result.y, 
-                        match_result.confidence
-                    );
-                    
-                    // Calculate tap coordinates at the center of the matched template
-                    let tap_x = match_result.x + (match_result.template_width / 2);
-                    let tap_y = match_result.y + (match_result.template_height / 2);
-                    
-                    // Validate tap coordinates are within screen bounds
-                    if let Some(client) = &self.adb_client {
-                        let client_guard = client.lock().await;
-                        let (screen_width, screen_height) = client_guard.screen_dimensions();
-                        
-                        if tap_x >= screen_width || tap_y >= screen_height {
-                            return Err(format!(
-                                "Tap coordinates ({}, {}) are outside screen bounds ({}x{})", 
-                                tap_x, tap_y, screen_width, screen_height
-                            ));
+
+        // Act on the best match if available
+        if let Some(best_match) = detection_result.best_match() {
+            let (tap_x, tap_y) = best_match.get_tap_coordinates();
+
+            debug_print!(
+                self.debug_enabled,
+                "🎯 Best match: '{}' at ({},{}) with {:.3} confidence",
+                best_match.template.name,
+                best_match.x,
+                best_match.y,
+                best_match.confidence
+            );
+
+            // Perform the tap action
+            if let Some(client) = &self.adb_client {
+                let client_guard = client.lock().await;
+
+                match client_guard.tap(tap_x, tap_y).await {
+                    Ok(()) => {
+                        debug_print!(
+                            self.debug_enabled,
+                            "✅ Tapped '{}' at ({}, {})",
+                            best_match.template.name,
+                            tap_x,
+                            tap_y
+                        );
+
+                        // Update game state based on detection result
+                        if let Some(suggested_state) = detection_result.suggested_state {
+                            // Don't change state here to avoid recursive state changes
+                            debug_print!(
+                                self.debug_enabled,
+                                "💡 Suggested next state: {:?}",
+                                suggested_state
+                            );
                         }
-                        
-                        // Perform the tap action
-                        match client_guard.tap(tap_x, tap_y).await {
-                            Ok(()) => {
-                                debug_print!(
-                                    self.debug_enabled,
-                                    "✅ Tap executed at ({}, {}) for template '{}'", 
-                                    tap_x, 
-                                    tap_y,
-                                    match_result.template_path
-                                );
-                                return Ok(true); // Action was taken
-                            }
-                            Err(e) => {
-                                return Err(format!("Failed to tap at ({}, {}): {}", tap_x, tap_y, e));
-                            }
-                        }
-                    } else {
-                        return Err("ADB client not available for tap action".to_string());
+
+                        return Ok(true);
                     }
-                } else {
-                    debug_print!(
-                        self.debug_enabled, 
-                        "👀 No templates matched (best confidence: {:.3} < {:.3})", 
-                        match_result.confidence, 
-                        self.image_config.confidence_threshold
-                    );
-                    return Ok(false); // No action taken
+                    Err(e) => {
+                        return Err(format!("Failed to tap at ({}, {}): {}", tap_x, tap_y, e));
+                    }
                 }
+            } else {
+                return Err("ADB client not available for tap action".to_string());
             }
-            Err(e) => {
-                return Err(format!("Image analysis failed: {}", e));
-            }
+        } else {
+            debug_print!(self.debug_enabled, "👀 No actionable matches found");
+            return Ok(false);
         }
     }
 }

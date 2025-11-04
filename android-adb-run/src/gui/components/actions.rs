@@ -35,7 +35,7 @@ pub fn Actions(props: ActionsProps) -> Element {
     let automation_state = props.automation_state;
     let automation_command_tx = props.automation_command_tx;
     let mut automation_interval = props.automation_interval;
-    
+
     // Toggle between Manual and Auto modes
     let mut mode_is_auto = use_signal(|| false);
     rsx! {
@@ -44,19 +44,19 @@ pub fn Actions(props: ActionsProps) -> Element {
             div { style: "display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px;",
                 h2 { style: "margin: 0; color: #87ceeb; font-size: 1.1em;", "🎮 Controls" }
                 div { style: "display: flex; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.3);",
-                    button { 
+                    button {
                         style: if !*mode_is_auto.read() { "background: linear-gradient(45deg, #28a745, #20c997); color: white; padding: 6px 16px; border: none; cursor: pointer; font-size: 0.9em; font-weight: bold;" } else { "background: rgba(255,255,255,0.1); color: #ccc; padding: 6px 16px; border: none; cursor: pointer; font-size: 0.9em;" },
                         onclick: move |_| mode_is_auto.set(false),
                         "📱 Manual"
                     }
-                    button { 
+                    button {
                         style: if *mode_is_auto.read() { "background: linear-gradient(45deg, #6f42c1, #563d7c); color: white; padding: 6px 16px; border: none; cursor: pointer; font-size: 0.9em; font-weight: bold;" } else { "background: rgba(255,255,255,0.1); color: #ccc; padding: 6px 16px; border: none; cursor: pointer; font-size: 0.9em;" },
                         onclick: move |_| mode_is_auto.set(true),
                         "🤖 Auto"
                     }
                 }
             }
-            
+
             // Content based on mode
             if !*mode_is_auto.read() {
                 // Manual Mode Controls
@@ -99,7 +99,7 @@ pub fn Actions(props: ActionsProps) -> Element {
                         },
                         if *is_loading.read() { "📸 Taking..." } else { "📸 Screenshot" }
                     }
-                    
+
                     // Compact options row
                     div { style: "display: flex; gap: 15px; align-items: center; justify-content: center; flex-wrap: wrap;",
                         div { style: "display: flex; align-items: center; gap: 6px;",
@@ -131,29 +131,29 @@ pub fn Actions(props: ActionsProps) -> Element {
                             label { r#for: "select-box-checkbox", style: "font-size: 0.85em; cursor: pointer; user-select: none;", "🟦 Select box" }
                         }
                     }
-                    
+
                     // Action buttons row
                     div { style: "display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;",
-                        if screenshot_bytes.read().is_some() { 
+                        if screenshot_bytes.read().is_some() {
                             button { style: "background: linear-gradient(45deg, #6f42c1, #563d7c); color: white; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9em; font-weight: bold;",
-                                onclick: move |_| { 
-                                    if let Some(bytes) = screenshot_bytes.read().clone() { 
-                                        spawn(async move { 
-                                            let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(); 
-                                            let filename = format!("screenshot_{}.png", ts); 
-                                            match tokio::fs::write(&filename, &bytes).await { 
-                                                Ok(_) => screenshot_status.set(format!("✅ Screenshot saved to {}", filename)), 
-                                                Err(e) => screenshot_status.set(format!("❌ Failed to save: {}", e)), 
-                                            } 
-                                        }); 
-                                    } 
-                                }, 
-                                "💾 Save" 
-                            } 
+                                onclick: move |_| {
+                                    if let Some(bytes) = screenshot_bytes.read().clone() {
+                                        spawn(async move {
+                                            let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                                            let filename = format!("screenshot_{}.png", ts);
+                                            match tokio::fs::write(&filename, &bytes).await {
+                                                Ok(_) => screenshot_status.set(format!("✅ Screenshot saved to {}", filename)),
+                                                Err(e) => screenshot_status.set(format!("❌ Failed to save: {}", e)),
+                                            }
+                                        });
+                                    }
+                                },
+                                "💾 Save"
+                            }
                         }
-                        button { style: "background: linear-gradient(45deg, #dc3545, #e74c3c); color: white; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9em; font-weight: bold;", 
-                            onclick: move |_| { std::thread::spawn(|| std::process::exit(0)); }, 
-                            "🚪 Exit" 
+                        button { style: "background: linear-gradient(45deg, #dc3545, #e74c3c); color: white; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9em; font-weight: bold;",
+                            onclick: move |_| { std::thread::spawn(|| std::process::exit(0)); },
+                            "🚪 Exit"
                         }
                     }
                 }
@@ -163,7 +163,7 @@ pub fn Actions(props: ActionsProps) -> Element {
                     // Status and control buttons
                     div { style: "display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: center;",
                         // Automation state indicator
-                        div { 
+                        div {
                             style: match *automation_state.read() {
                                 GameState::Idle => "background: #666; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;",
                                 GameState::WaitingForScreenshot => "background: #17a2b8; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;",
@@ -173,7 +173,7 @@ pub fn Actions(props: ActionsProps) -> Element {
                             },
                             {format!("{:?}", *automation_state.read())}
                         }
-                        
+
                         // Control buttons
                         if *automation_state.read() == GameState::Idle || *automation_state.read() == GameState::Paused {
                             button { style: "background: linear-gradient(45deg, #28a745, #20c997); color: white; padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: bold;",
@@ -231,11 +231,11 @@ pub fn Actions(props: ActionsProps) -> Element {
                             "📸 Shot"
                         }
                     }
-                    
+
                     // Interval control
                     div { style: "display: flex; gap: 8px; align-items: center; justify-content: center;",
                         label { style: "font-size: 0.85em; color: #ccc;", "Interval:" }
-                        input { 
+                        input {
                             r#type: "number",
                             min: "5",
                             max: "300",
@@ -255,12 +255,12 @@ pub fn Actions(props: ActionsProps) -> Element {
                         }
                         span { style: "font-size: 0.85em; color: #ccc;", "sec" }
                     }
-                    
+
                     // Exit button
                     div { style: "display: flex; justify-content: center;",
-                        button { style: "background: linear-gradient(45deg, #dc3545, #e74c3c); color: white; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9em; font-weight: bold;", 
-                            onclick: move |_| { std::thread::spawn(|| std::process::exit(0)); }, 
-                            "🚪 Exit" 
+                        button { style: "background: linear-gradient(45deg, #dc3545, #e74c3c); color: white; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9em; font-weight: bold;",
+                            onclick: move |_| { std::thread::spawn(|| std::process::exit(0)); },
+                            "🚪 Exit"
                         }
                     }
                 }

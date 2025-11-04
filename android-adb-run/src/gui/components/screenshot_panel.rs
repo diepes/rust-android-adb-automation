@@ -72,9 +72,7 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
 
     // Rectangle (not square) overlay state derived from selection signals
     let overlay_rect: Option<(i32, i32, i32, i32)> = if *select_box.read() {
-        if let (Some(start), Some(end)) =
-            (*selection_start.read(), *selection_end.read())
-        {
+        if let (Some(start), Some(end)) = (*selection_start.read(), *selection_end.read()) {
             let (left, top, w, h) = adjust_overlay(start, end);
             Some((
                 left.round() as i32,
@@ -250,14 +248,14 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                         if loading { div { style: "position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255, 68, 68, 0.95); color: white; padding: 15px 25px; border-radius: 25px; font-size: 1.2em; font-weight: bold; border: 2px solid white; box-shadow: 0 4px 20px rgba(0,0,0,0.5); z-index: 20;", "📸 LOADING..." } }
                     }
                 }
-            } else { 
+            } else {
                 div { style: "display:flex; justify-content:center; align-items:center; min-height:300px;",
                     if loading {
                         div { style: "text-align:center; background: rgba(0, 123, 255, 0.95); color: white; padding: 25px 35px; border-radius: 20px; font-size: 1.1em; font-weight: bold; border: 3px solid white; box-shadow: 0 8px 25px rgba(0,0,0,0.4); transition: all 0.3s ease;",
                             "📸 Loading initial screenshot..."
                         }
                     } else {
-                        div { style: "text-align:center; opacity:0.6; font-size:0.9em; color: #666;", 
+                        div { style: "text-align:center; opacity:0.6; font-size:0.9em; color: #666;",
                             "📱 No screenshot available yet"
                         }
                     }
