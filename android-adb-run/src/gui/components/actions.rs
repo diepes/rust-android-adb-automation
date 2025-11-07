@@ -19,6 +19,7 @@ pub struct ActionsProps {
     pub automation_state: Signal<GameState>,
     pub automation_command_tx: Signal<Option<mpsc::Sender<AutomationCommand>>>,
     pub automation_interval: Signal<u64>,
+    pub timed_tap_countdown: Signal<Option<(String, u64)>>, // (id, seconds_remaining)
 }
 
 #[component]
@@ -35,6 +36,7 @@ pub fn Actions(props: ActionsProps) -> Element {
     let automation_state = props.automation_state;
     let automation_command_tx = props.automation_command_tx;
     let mut automation_interval = props.automation_interval;
+    let timed_tap_countdown = props.timed_tap_countdown;
 
     // Toggle between Manual and Auto modes
     let mut mode_is_auto = use_signal(|| false);
@@ -229,6 +231,35 @@ pub fn Actions(props: ActionsProps) -> Element {
                                 }
                             },
                             "📸 Shot"
+                        }
+                    }
+
+                    // Timed Tap Countdown Display
+                    if let Some((tap_id, seconds_remaining)) = timed_tap_countdown.read().clone() {
+                        div { style: "background: rgba(0,0,0,0.2); border-radius: 8px; padding: 8px 12px; border: 1px solid rgba(255,255,255,0.2);",
+                            div { style: "display: flex; align-items: center; justify-content: space-between; gap: 10px;",
+                                div { style: "display: flex; align-items: center; gap: 6px;",
+                                    span { style: "font-size: 0.85em; color: #87ceeb;", "🕒 Next Tap:" }
+                                    span { style: "font-size: 0.8em; color: #ccc;", "{tap_id}" }
+                                }
+                                div { style: "font-family: monospace; font-weight: bold; color: #ffd857;",
+                                    if seconds_remaining < 60 {
+                                        span { style: "font-size: 0.9em;", "{seconds_remaining}s" }
+                                    } else {
+                                        span { style: "font-size: 0.9em;", "{seconds_remaining / 60}m {seconds_remaining % 60}s" }
+                                    }
+                                }
+                            }
+                            if seconds_remaining <= 10 {
+                                div { style: "margin-top: 4px; height: 2px; background: linear-gradient(to right, #ff4444, #ff8888); border-radius: 1px; animation: pulse 1s infinite;",
+                                }
+                            } else if seconds_remaining <= 60 {
+                                div { style: "margin-top: 4px; height: 2px; background: linear-gradient(to right, #ffaa00, #ffdd44); border-radius: 1px;",
+                                }
+                            } else {
+                                div { style: "margin-top: 4px; height: 2px; background: linear-gradient(to right, #28a745, #48ff9b); border-radius: 1px;",
+                                }
+                            }
                         }
                     }
 

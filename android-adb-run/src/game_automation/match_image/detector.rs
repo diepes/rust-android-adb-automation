@@ -364,6 +364,11 @@ impl GameStateDetector {
         self.template_manager.count()
     }
 
+    /// Get screen dimensions
+    pub fn get_screen_dimensions(&self) -> (u32, u32) {
+        (self.screen_width, self.screen_height)
+    }
+
     /// Load template image and crop it to the region specified in the filename
     /// For files like "img-[300,1682,50,50].png", this extracts the 50x50 region 
     /// at coordinates (300,1682) from the full screenshot stored in the file

@@ -63,6 +63,7 @@ fn App() -> Element {
     let automation_state = use_signal(|| GameState::Idle);
     let automation_command_tx = use_signal(|| None::<mpsc::Sender<AutomationCommand>>);
     let automation_interval = use_signal(|| 30u64);
+    let timed_tap_countdown = use_signal(|| None::<(String, u64)>); // (id, seconds_remaining)
 
     let selection_start = use_signal(|| None::<dioxus::html::geometry::ElementPoint>);
     let selection_end = use_signal(|| None::<dioxus::html::geometry::ElementPoint>);
@@ -232,6 +233,7 @@ fn App() -> Element {
         let mut screenshot_data_clone = screenshot_data.clone();
         let mut screenshot_bytes_clone = screenshot_bytes.clone();
         let mut screenshot_status_clone = screenshot_status.clone();
+        let mut timed_tap_countdown_clone = timed_tap_countdown.clone();
 
         spawn(async move {
             // Create automation channels
@@ -300,6 +302,36 @@ fn App() -> Element {
                                 templates.len()
                             ));
                         }
+                        AutomationEvent::TimedTapExecuted(id, x, y) => {
+                            if debug_mode {
+                                println!("🕒 GUI: Timed tap '{}' executed at ({},{})", id, x, y);
+                            }
+                            screenshot_status_clone.set(format!(
+                                "🕒 Timed tap '{}' executed at ({},{})",
+                                id, x, y
+                            ));
+                        }
+                        AutomationEvent::TimedTapsListed(taps) => {
+                            if debug_mode {
+                                println!("📋 GUI: Listed {} timed taps", taps.len());
+                                for tap in &taps {
+                                    println!("  - {}: ({},{}) every {}min", 
+                                        tap.id, tap.x, tap.y, tap.interval.as_secs() / 60);
+                                }
+                            }
+                            screenshot_status_clone.set(format!(
+                                "📋 {} timed taps configured",
+                                taps.len()
+                            ));
+                        }
+                        AutomationEvent::TimedTapCountdown(id, seconds) => {
+                            // Update countdown signal for GUI display
+                            timed_tap_countdown_clone.set(Some((id.clone(), seconds)));
+                            
+                            if debug_mode && seconds % 30 == 0 { // Only show every 30 seconds to avoid spam
+                                println!("🕒 Countdown: {} in {}s ({:.1}min)", id, seconds, seconds as f32 / 60.0);
+                            }
+                        }
                     }
                 }
             });
@@ -357,7 +389,8 @@ fn App() -> Element {
                                 screenshot_counter: screenshot_counter,
                                 automation_state: automation_state,
                                 automation_command_tx: automation_command_tx,
-                                automation_interval: automation_interval
+                                automation_interval: automation_interval,
+                                timed_tap_countdown: timed_tap_countdown
                             }
                             // Interaction info (tap/swipe coordinates, status)
                             InteractionInfo { device_coords: device_coords, screenshot_status: screenshot_status }
