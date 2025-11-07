@@ -306,31 +306,50 @@ fn App() -> Element {
                             if debug_mode {
                                 println!("🕒 GUI: Timed tap '{}' executed at ({},{})", id, x, y);
                             }
-                            screenshot_status_clone.set(format!(
-                                "🕒 Timed tap '{}' executed at ({},{})",
-                                id, x, y
-                            ));
+                            screenshot_status_clone
+                                .set(format!("🕒 Timed tap '{}' executed at ({},{})", id, x, y));
                         }
                         AutomationEvent::TimedTapsListed(taps) => {
                             if debug_mode {
                                 println!("📋 GUI: Listed {} timed taps", taps.len());
                                 for tap in &taps {
-                                    println!("  - {}: ({},{}) every {}min", 
-                                        tap.id, tap.x, tap.y, tap.interval.as_secs() / 60);
+                                    println!(
+                                        "  - {}: ({},{}) every {}min",
+                                        tap.id,
+                                        tap.x,
+                                        tap.y,
+                                        tap.interval.as_secs() / 60
+                                    );
                                 }
                             }
-                            screenshot_status_clone.set(format!(
-                                "📋 {} timed taps configured",
-                                taps.len()
-                            ));
+                            screenshot_status_clone
+                                .set(format!("📋 {} timed taps configured", taps.len()));
                         }
                         AutomationEvent::TimedTapCountdown(id, seconds) => {
                             // Update countdown signal for GUI display
                             timed_tap_countdown_clone.set(Some((id.clone(), seconds)));
-                            
-                            if debug_mode && seconds % 30 == 0 { // Only show every 30 seconds to avoid spam
-                                println!("🕒 Countdown: {} in {}s ({:.1}min)", id, seconds, seconds as f32 / 60.0);
+
+                            if debug_mode && seconds % 30 == 0 {
+                                // Only show every 30 seconds to avoid spam
+                                println!(
+                                    "🕒 Countdown: {} in {}s ({:.1}min)",
+                                    id,
+                                    seconds,
+                                    seconds as f32 / 60.0
+                                );
                             }
+                        }
+                        AutomationEvent::TimedEventExecuted(id) => {
+                            if debug_mode {
+                                println!("⚡ GUI: Timed event '{}' executed", id);
+                            }
+                            // Could add more GUI feedback here if needed
+                        }
+                        AutomationEvent::NextTimedEvent(id, seconds) => {
+                            if debug_mode {
+                                println!("⏱️ GUI: Next event '{}' in {}s", id, seconds);
+                            }
+                            // Could use this for a general event countdown if needed
                         }
                     }
                 }

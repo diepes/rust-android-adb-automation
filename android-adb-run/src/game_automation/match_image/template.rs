@@ -52,22 +52,26 @@ impl Template {
 
     /// Calculate the actual template dimensions after cropping (if applicable)
     fn calculate_template_dimensions(
-        filename: &str, 
-        image: &image::DynamicImage
+        filename: &str,
+        image: &image::DynamicImage,
     ) -> Result<(u32, u32), String> {
         // Check if filename contains region coordinates [x,y,width,height]
         if let Some(region_coords) = Self::extract_region_from_filename(filename) {
             let (crop_x, crop_y, crop_w, crop_h) = region_coords;
-            
+
             // Validate crop region bounds
             if crop_x + crop_w > image.width() || crop_y + crop_h > image.height() {
                 return Err(format!(
                     "Template crop region [{},{},{},{}] exceeds image bounds ({}x{})",
-                    crop_x, crop_y, crop_w, crop_h, 
-                    image.width(), image.height()
+                    crop_x,
+                    crop_y,
+                    crop_w,
+                    crop_h,
+                    image.width(),
+                    image.height()
                 ));
             }
-            
+
             // Return cropped dimensions
             Ok((crop_w, crop_h))
         } else {

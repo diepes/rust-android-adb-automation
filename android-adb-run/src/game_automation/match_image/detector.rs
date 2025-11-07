@@ -77,13 +77,22 @@ impl GameStateDetector {
         // Process each template
         for (i, template) in self.template_manager.get_templates().iter().enumerate() {
             if self.config.debug_enabled {
-                println!("🔍 Processing template {}/{}: {}", i + 1, self.template_manager.get_templates().len(), template.name);
+                println!(
+                    "🔍 Processing template {}/{}: {}",
+                    i + 1,
+                    self.template_manager.get_templates().len(),
+                    template.name
+                );
             }
-            
+
             match self.match_template_in_region(&screenshot_gray, template) {
                 Ok(matches) => {
                     if self.config.debug_enabled && !matches.is_empty() {
-                        println!("✅ Found {} matches for template '{}'", matches.len(), template.name);
+                        println!(
+                            "✅ Found {} matches for template '{}'",
+                            matches.len(),
+                            template.name
+                        );
                     }
                     result.matches.extend(matches);
                 }
@@ -124,15 +133,16 @@ impl GameStateDetector {
         template: &Template,
     ) -> Result<Vec<TemplateMatch>, String> {
         if self.config.debug_enabled {
-            println!("🔍 Loading template: {} (search region at {},{} {}x{})", 
-                template.name, 
+            println!(
+                "🔍 Loading template: {} (search region at {},{} {}x{})",
+                template.name,
                 template.search_region.x,
                 template.search_region.y,
                 template.search_region.width,
                 template.search_region.height
             );
         }
-        
+
         // Load and crop template image to the region specified in filename
         let template_gray = self.load_and_crop_template(template)?;
 
@@ -221,9 +231,13 @@ impl GameStateDetector {
             || scaled_template.height() > cropped_screenshot.height()
         {
             if self.config.debug_enabled {
-                println!("⚠️ Skipping template - too large for region: {}x{} > {}x{}", 
-                    scaled_template.width(), scaled_template.height(),
-                    cropped_screenshot.width(), cropped_screenshot.height());
+                println!(
+                    "⚠️ Skipping template - too large for region: {}x{} > {}x{}",
+                    scaled_template.width(),
+                    scaled_template.height(),
+                    cropped_screenshot.width(),
+                    cropped_screenshot.height()
+                );
             }
             return Ok(matches);
         }
@@ -231,20 +245,28 @@ impl GameStateDetector {
         // Additional safety check for very large templates that could cause hangs
         let template_pixels = scaled_template.width() as u64 * scaled_template.height() as u64;
         let search_pixels = cropped_screenshot.width() as u64 * cropped_screenshot.height() as u64;
-        
+
         if template_pixels > 1_000_000 || search_pixels > 5_000_000 {
             if self.config.debug_enabled {
-                println!("⚠️ Skipping large template matching to prevent hang: template={}x{}, search={}x{}", 
-                    scaled_template.width(), scaled_template.height(),
-                    cropped_screenshot.width(), cropped_screenshot.height());
+                println!(
+                    "⚠️ Skipping large template matching to prevent hang: template={}x{}, search={}x{}",
+                    scaled_template.width(),
+                    scaled_template.height(),
+                    cropped_screenshot.width(),
+                    cropped_screenshot.height()
+                );
             }
             return Ok(matches);
         }
 
         if self.config.debug_enabled {
-            println!("🔍 Performing template matching: {}x{} in {}x{} region", 
-                scaled_template.width(), scaled_template.height(),
-                cropped_screenshot.width(), cropped_screenshot.height());
+            println!(
+                "🔍 Performing template matching: {}x{} in {}x{} region",
+                scaled_template.width(),
+                scaled_template.height(),
+                cropped_screenshot.width(),
+                cropped_screenshot.height()
+            );
         }
 
         // Perform template matching
@@ -278,7 +300,7 @@ impl GameStateDetector {
     /// Determine game state based on detected matches
     fn determine_game_state(&self, matches: &[TemplateMatch]) -> Option<GameState> {
         if matches.is_empty() {
-            return Some(GameState::WaitingForScreenshot);
+            return Some(GameState::Running);
         }
 
         // Analyze matches to suggest game state
@@ -290,12 +312,12 @@ impl GameStateDetector {
         match best_match.template.category {
             TemplateCategory::Button => {
                 if best_match.confidence > 0.9 {
-                    Some(GameState::Acting)
+                    Some(GameState::Running)
                 } else {
-                    Some(GameState::Analyzing)
+                    Some(GameState::Running)
                 }
             }
-            _ => Some(GameState::Analyzing),
+            _ => Some(GameState::Running),
         }
     }
 
@@ -370,7 +392,7 @@ impl GameStateDetector {
     }
 
     /// Load template image and crop it to the region specified in the filename
-    /// For files like "img-[300,1682,50,50].png", this extracts the 50x50 region 
+    /// For files like "img-[300,1682,50,50].png", this extracts the 50x50 region
     /// at coordinates (300,1682) from the full screenshot stored in the file
     fn load_and_crop_template(
         &self,
@@ -379,61 +401,80 @@ impl GameStateDetector {
         // Load the full template image (which may be a full screenshot)
         let template_image = image::open(&template.path)
             .map_err(|e| format!("Failed to load template {}: {e}", template.path))?;
-        
+
         // Check if filename contains region coordinates [x,y,width,height]
         if let Some(region_coords) = self.extract_template_region_from_filename(&template.name) {
             if self.config.debug_enabled {
-                println!("📐 Cropping template '{}' from full image ({}x{}) to region: [{},{},{},{}]", 
+                println!(
+                    "📐 Cropping template '{}' from full image ({}x{}) to region: [{},{},{},{}]",
                     template.name,
-                    template_image.width(), 
+                    template_image.width(),
                     template_image.height(),
-                    region_coords.0, region_coords.1, region_coords.2, region_coords.3
+                    region_coords.0,
+                    region_coords.1,
+                    region_coords.2,
+                    region_coords.3
                 );
             }
-            
+
             // Validate crop region bounds
             let (crop_x, crop_y, crop_w, crop_h) = region_coords;
-            if crop_x + crop_w > template_image.width() || crop_y + crop_h > template_image.height() {
+            if crop_x + crop_w > template_image.width() || crop_y + crop_h > template_image.height()
+            {
                 return Err(format!(
                     "Template crop region [{},{},{},{}] exceeds image bounds ({}x{})",
-                    crop_x, crop_y, crop_w, crop_h, 
-                    template_image.width(), template_image.height()
+                    crop_x,
+                    crop_y,
+                    crop_w,
+                    crop_h,
+                    template_image.width(),
+                    template_image.height()
                 ));
             }
-            
+
             // Crop the template to the specified region
-            let cropped = image::imageops::crop_imm(&template_image, crop_x, crop_y, crop_w, crop_h);
+            let cropped =
+                image::imageops::crop_imm(&template_image, crop_x, crop_y, crop_w, crop_h);
             let cropped_dynamic = image::DynamicImage::ImageRgba8(cropped.to_image());
             let cropped_gray = cropped_dynamic.to_luma8();
-            
+
             if self.config.debug_enabled {
-                println!("✂️ Template '{}' cropped to {}x{} (was {}x{})", 
-                    template.name, 
-                    cropped_gray.width(), cropped_gray.height(),
-                    template_image.width(), template_image.height()
+                println!(
+                    "✂️ Template '{}' cropped to {}x{} (was {}x{})",
+                    template.name,
+                    cropped_gray.width(),
+                    cropped_gray.height(),
+                    template_image.width(),
+                    template_image.height()
                 );
             }
-            
+
             Ok(cropped_gray)
         } else {
             // No region specified in filename, use full image
             let template_gray = template_image.to_luma8();
-            
+
             // Still warn if template is very large
             if template_gray.width() > 500 || template_gray.height() > 500 {
                 if self.config.debug_enabled {
-                    println!("⚠️ Large template detected: {}x{} - this may be slow!", 
-                        template_gray.width(), template_gray.height());
+                    println!(
+                        "⚠️ Large template detected: {}x{} - this may be slow!",
+                        template_gray.width(),
+                        template_gray.height()
+                    );
                 }
             }
-            
+
             Ok(template_gray)
         }
     }
 
     /// Extract template region coordinates from filename
     /// Returns (x, y, width, height) if found, None otherwise
-    fn extract_template_region_from_filename(&self, filename: &str) -> Option<(u32, u32, u32, u32)> {
+    fn extract_template_region_from_filename(
+        &self,
+        filename: &str,
+    ) -> Option<(u32, u32, u32, u32)> {
         // Look for pattern [x,y,width,height] in filename
         if let Some(start) = filename.find('[') {
             if let Some(end) = filename.find(']') {

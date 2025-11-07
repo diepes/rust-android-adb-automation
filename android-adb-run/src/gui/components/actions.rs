@@ -168,9 +168,7 @@ pub fn Actions(props: ActionsProps) -> Element {
                         div {
                             style: match *automation_state.read() {
                                 GameState::Idle => "background: #666; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;",
-                                GameState::WaitingForScreenshot => "background: #17a2b8; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;",
-                                GameState::Analyzing => "background: #ffc107; color: black; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;",
-                                GameState::Acting => "background: #28a745; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;",
+                                GameState::Running => "background: #28a745; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;",
                                 GameState::Paused => "background: #fd7e14; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;",
                             },
                             {format!("{:?}", *automation_state.read())}
@@ -195,7 +193,7 @@ pub fn Actions(props: ActionsProps) -> Element {
                                 if *automation_state.read() == GameState::Paused { "▶️ Resume" } else { "🚀 Start" }
                             }
                         }
-                        if matches!(*automation_state.read(), GameState::WaitingForScreenshot | GameState::Analyzing | GameState::Acting) {
+                        if *automation_state.read() == GameState::Running {
                             button { style: "background: linear-gradient(45deg, #fd7e14, #f39c12); color: white; padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: bold;",
                                 onclick: move |_| {
                                     if let Some(tx) = automation_command_tx.read().as_ref() {
@@ -236,28 +234,42 @@ pub fn Actions(props: ActionsProps) -> Element {
 
                     // Timed Tap Countdown Display
                     if let Some((tap_id, seconds_remaining)) = timed_tap_countdown.read().clone() {
-                        div { style: "background: rgba(0,0,0,0.2); border-radius: 8px; padding: 8px 12px; border: 1px solid rgba(255,255,255,0.2);",
+                        div { style: "background: rgba(0,0,0,0.2); border-radius: 8px; padding: 10px 12px; border: 1px solid rgba(255,255,255,0.2);",
                             div { style: "display: flex; align-items: center; justify-content: space-between; gap: 10px;",
-                                div { style: "display: flex; align-items: center; gap: 6px;",
-                                    span { style: "font-size: 0.85em; color: #87ceeb;", "🕒 Next Tap:" }
-                                    span { style: "font-size: 0.8em; color: #ccc;", "{tap_id}" }
-                                }
-                                div { style: "font-family: monospace; font-weight: bold; color: #ffd857;",
-                                    if seconds_remaining < 60 {
-                                        span { style: "font-size: 0.9em;", "{seconds_remaining}s" }
+                                div { style: "display: flex; flex-direction: column; gap: 2px;",
+                                    div { style: "display: flex; align-items: center; gap: 6px;",
+                                        span { style: "font-size: 0.8em; color: #87ceeb; font-weight: bold;", "🕒 Next Tap:" }
+                                        span { style: "font-size: 0.9em; color: #ffd857; font-weight: bold;", "{tap_id}" }
+                                    }
+                                    if seconds_remaining > 60 {
+                                        span { style: "font-size: 0.75em; color: #ccc; margin-left: 16px;", "in {seconds_remaining / 60}m {seconds_remaining % 60}s" }
                                     } else {
-                                        span { style: "font-size: 0.9em;", "{seconds_remaining / 60}m {seconds_remaining % 60}s" }
+                                        span { style: "font-size: 0.75em; color: #ccc; margin-left: 16px;", "in {seconds_remaining}s" }
                                     }
                                 }
-                            }
-                            if seconds_remaining <= 10 {
-                                div { style: "margin-top: 4px; height: 2px; background: linear-gradient(to right, #ff4444, #ff8888); border-radius: 1px; animation: pulse 1s infinite;",
-                                }
-                            } else if seconds_remaining <= 60 {
-                                div { style: "margin-top: 4px; height: 2px; background: linear-gradient(to right, #ffaa00, #ffdd44); border-radius: 1px;",
-                                }
-                            } else {
-                                div { style: "margin-top: 4px; height: 2px; background: linear-gradient(to right, #28a745, #48ff9b); border-radius: 1px;",
+                                div { style: "display: flex; flex-direction: column; align-items: center; gap: 2px;",
+                                    div { style: "font-family: monospace; font-weight: bold;",
+                                        if seconds_remaining < 60 {
+                                            span { style: "font-size: 1.1em; color: #ff6b6b;", "{seconds_remaining}s" }
+                                        } else if seconds_remaining < 300 {  // Less than 5 minutes
+                                            span { style: "font-size: 1.0em; color: #ffd857;", "{seconds_remaining / 60}m" }
+                                        } else {
+                                            span { style: "font-size: 0.9em; color: #48ff9b;", "{seconds_remaining / 60}m" }
+                                        }
+                                    }
+                                    // Progress bar showing time remaining
+                                    div { style: "width: 60px; height: 3px; background: rgba(255,255,255,0.2); border-radius: 2px; overflow: hidden;",
+                                        if seconds_remaining <= 10 {
+                                            div { style: "height: 100%; background: linear-gradient(to right, #ff4444, #ff8888); border-radius: 2px; animation: pulse 0.5s infinite alternate;",
+                                            }
+                                        } else if seconds_remaining <= 60 {
+                                            div { style: "height: 100%; background: linear-gradient(to right, #ffaa00, #ffdd44); border-radius: 2px;",
+                                            }
+                                        } else {
+                                            div { style: "height: 100%; background: linear-gradient(to right, #28a745, #48ff9b); border-radius: 2px;",
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
