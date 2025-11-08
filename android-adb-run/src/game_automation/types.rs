@@ -23,6 +23,7 @@ pub struct TimedEvent {
     pub last_executed: Option<Instant>,
     pub enabled: bool,
     pub repeating: bool,
+    pub execution_count: u64, // Counter for number of times this event has been executed
 }
 
 // Custom PartialEq implementation since Instant doesn't implement PartialEq
@@ -33,6 +34,7 @@ impl PartialEq for TimedEvent {
             && self.interval == other.interval
             && self.enabled == other.enabled
             && self.repeating == other.repeating
+            && self.execution_count == other.execution_count
             // Intentionally skip last_executed for comparison since Instant doesn't implement PartialEq
     }
 }
@@ -46,6 +48,7 @@ impl TimedEvent {
             last_executed: None,
             enabled: true,
             repeating: true,
+            execution_count: 0,
         }
     }
 
@@ -57,6 +60,7 @@ impl TimedEvent {
             last_executed: None,
             enabled: true,
             repeating: true,
+            execution_count: 0,
         }
     }
 
@@ -68,6 +72,7 @@ impl TimedEvent {
             last_executed: None,
             enabled: true,
             repeating: true,
+            execution_count: 0,
         }
     }
 
@@ -84,6 +89,7 @@ impl TimedEvent {
 
     pub fn mark_executed(&mut self) {
         self.last_executed = Some(Instant::now());
+        self.execution_count += 1;
     }
 
     pub fn time_until_next(&self) -> Option<Duration> {

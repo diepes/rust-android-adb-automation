@@ -168,6 +168,11 @@ pub fn Actions(props: ActionsProps) -> Element {
                                                     style: "font-size: 0.8em; color: #87ceeb;",
                                                     {event.id.clone()}
                                                 }
+                                                // Execution counter
+                                                span {
+                                                    style: "font-size: 0.7em; color: #ffd700; background: rgba(255,215,0,0.1); padding: 1px 4px; border-radius: 8px; font-weight: bold;",
+                                                    "({event.execution_count})"
+                                                }
                                             }
                                             
                                             // Control buttons row
