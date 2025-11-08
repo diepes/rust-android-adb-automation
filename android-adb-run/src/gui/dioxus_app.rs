@@ -242,7 +242,7 @@ fn App() -> Element {
             let (cmd_tx, cmd_rx, event_tx, mut event_rx) = create_automation_channels();
 
             // Store command sender for GUI controls
-            automation_command_tx_clone.set(Some(cmd_tx));
+            automation_command_tx_clone.set(Some(cmd_tx.clone()));
 
             // Start automation task
             let mut automation = GameAutomation::new(cmd_rx, event_tx, debug_mode);
@@ -256,6 +256,14 @@ fn App() -> Element {
             // Spawn automation FSM loop
             let _automation_task = spawn(async move {
                 automation.run().await;
+            });
+
+            // Auto-start automation when initialized
+            let auto_start_tx = cmd_tx.clone();
+            spawn(async move {
+                // Small delay to ensure automation FSM is ready
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                let _ = auto_start_tx.send(AutomationCommand::Start).await;
             });
 
             // Event listener loop

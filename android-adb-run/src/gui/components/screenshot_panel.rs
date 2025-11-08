@@ -92,6 +92,13 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
             if let Some(image_data) = screenshot_data.read().as_ref() {
                 div { style: "display:flex; justify-content:center;",
                     div { style: "position:relative; width:fit-content;",
+                        // Coordinate display overlay
+                        if let Some((device_x, device_y)) = *device_coords.read() {
+                            div {
+                                style: "position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 10; background: rgba(0,0,0,0.8); color: white; padding: 4px 8px; border-radius: 6px; font-size: 0.8em; font-weight: bold; pointer-events: none; border: 1px solid rgba(255,255,255,0.3);",
+                                "({device_x}, {device_y})"
+                            }
+                        }
                         img { src: "data:image/png;base64,{image_data}",
                             style: if loading { "max-width:100%; max-height:600px; border-radius:10px; cursor:crosshair; border:8px solid #ff4444; box-shadow:0 0 40px rgba(255,68,68,0.8); user-select:none;" } else { "max-width:100%; max-height:600px; border-radius:10px; cursor:crosshair; border:8px solid rgba(255,255,255,0.2); box-shadow:0 4px 15px rgba(0,0,0,0.3); user-select:none;" },
                             onmousemove: move |evt| {

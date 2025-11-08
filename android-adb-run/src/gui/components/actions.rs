@@ -170,33 +170,67 @@ pub fn Actions(props: ActionsProps) -> Element {
                                                 }
                                             }
                                             
-                                            // Status indicator (clickable toggle)
-                                            button {
-                                                style: if event.enabled { 
-                                                    "background: #28a745; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.7em; font-weight: bold; border: none; cursor: pointer; transition: all 0.2s ease;"
-                                                } else {
-                                                    "background: #6c757d; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.7em; font-weight: bold; border: none; cursor: pointer; transition: all 0.2s ease;"
-                                                },
-                                                onclick: {
-                                                    let event_id = event.id.clone();
-                                                    let is_enabled = event.enabled;
-                                                    move |_| {
-                                                        if let Some(tx) = automation_command_tx.read().as_ref() {
-                                                            let tx = tx.clone();
-                                                            let event_id = event_id.clone();
-                                                            spawn(async move {
-                                                                let cmd = if is_enabled {
-                                                                    AutomationCommand::DisableTimedEvent(event_id)
-                                                                } else {
-                                                                    AutomationCommand::EnableTimedEvent(event_id)
-                                                                };
-                                                                let _ = tx.send(cmd).await;
-                                                            });
+                                            // Control buttons row
+                                            div { style: "display: flex; align-items: center; gap: 4px;",
+                                                // Status indicator (clickable toggle)
+                                                button {
+                                                    style: if event.enabled { 
+                                                        "background: #28a745; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.7em; font-weight: bold; border: none; cursor: pointer; transition: all 0.2s ease;"
+                                                    } else {
+                                                        "background: #6c757d; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.7em; font-weight: bold; border: none; cursor: pointer; transition: all 0.2s ease;"
+                                                    },
+                                                    onclick: {
+                                                        let event_id = event.id.clone();
+                                                        let is_enabled = event.enabled;
+                                                        move |_| {
+                                                            if let Some(tx) = automation_command_tx.read().as_ref() {
+                                                                let tx = tx.clone();
+                                                                let event_id = event_id.clone();
+                                                                spawn(async move {
+                                                                    let cmd = if is_enabled {
+                                                                        AutomationCommand::DisableTimedEvent(event_id)
+                                                                    } else {
+                                                                        AutomationCommand::EnableTimedEvent(event_id)
+                                                                    };
+                                                                    let _ = tx.send(cmd).await;
+                                                                });
+                                                            }
                                                         }
-                                                    }
-                                                },
-                                                title: if event.enabled { "Click to disable this event" } else { "Click to enable this event" },
-                                                if event.enabled { "ON" } else { "OFF" }
+                                                    },
+                                                    title: if event.enabled { "Click to disable this event" } else { "Click to enable this event" },
+                                                    if event.enabled { "ON" } else { "OFF" }
+                                                }
+                                                
+                                                // Fire immediately button
+                                                button {
+                                                    style: if event.enabled {
+                                                        "background: #dc3545; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.7em; font-weight: bold; border: none; cursor: pointer; transition: all 0.2s ease; min-width: 24px;"
+                                                    } else {
+                                                        "background: #6c757d; color: #999; padding: 2px 6px; border-radius: 10px; font-size: 0.7em; font-weight: bold; border: none; cursor: not-allowed; transition: all 0.2s ease; min-width: 24px;"
+                                                    },
+                                                    disabled: !event.enabled,
+                                                    onclick: {
+                                                        let event_id = event.id.clone();
+                                                        let is_enabled = event.enabled;
+                                                        move |_| {
+                                                            if is_enabled {
+                                                                if let Some(tx) = automation_command_tx.read().as_ref() {
+                                                                    let tx = tx.clone();
+                                                                    let event_id = event_id.clone();
+                                                                    spawn(async move {
+                                                                        let _ = tx.send(AutomationCommand::TriggerTimedEvent(event_id)).await;
+                                                                    });
+                                                                }
+                                                            }
+                                                        }
+                                                    },
+                                                    title: if event.enabled { 
+                                                        "Click to trigger this event immediately" 
+                                                    } else { 
+                                                        "Enable event first to trigger it" 
+                                                    },
+                                                    "🔫"
+                                                }
                                             }
                                         }
                                         

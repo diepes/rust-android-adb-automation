@@ -130,6 +130,7 @@ pub enum AutomationCommand {
     RemoveTimedEvent(String),  // Remove timed event by ID
     EnableTimedEvent(String),  // Enable timed event by ID
     DisableTimedEvent(String), // Disable timed event by ID
+    TriggerTimedEvent(String), // Trigger timed event immediately by ID
     ListTimedEvents,           // List all configured timed events
     Shutdown,
 }

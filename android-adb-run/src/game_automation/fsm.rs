@@ -55,8 +55,8 @@ impl GameAutomation {
 
         // Define all timed taps in a list for easier management
         let tap_definitions = vec![
-            ("claim_5d_tap", 110, 1270, 2), // 5 minutes
-            ("restart_tap", 800, 1000, 9),  // 9 minutes
+            ("claim_5d_tap", 110, 1300, 2), // 5 minutes
+            ("restart_tap", 110, 1600, 3),  // 9 minutes
                                             // Add more taps here as needed
         ];
 
@@ -368,6 +368,47 @@ impl GameAutomation {
                     debug_print!(
                         self.debug_enabled,
                         "⚠️ Timed event '{}' not found for disabling",
+                        id
+                    );
+                }
+            }
+            AutomationCommand::TriggerTimedEvent(id) => {
+                if let Some(event) = self.timed_events.get(&id) {
+                    if event.enabled {
+                        debug_print!(self.debug_enabled, "🔫 Triggering timed event '{}' immediately", id);
+                        // Execute the event immediately
+                        match event.event_type {
+                            TimedEventType::Screenshot => {
+                                let _ = self.take_screenshot().await;
+                            }
+                            TimedEventType::Tap { x, y } => {
+                                if let Some(adb_client) = &self.adb_client {
+                                    let client = adb_client.lock().await;
+                                    if let Err(e) = client.tap(x, y).await {
+                                        debug_print!(self.debug_enabled, "⚠️ Failed to execute tap ({}, {}): {}", x, y, e);
+                                    } else {
+                                        let _ = self.event_tx.send(AutomationEvent::TimedTapExecuted(id.clone(), x, y)).await;
+                                    }
+                                }
+                            }
+                            TimedEventType::CountdownUpdate => {
+                                // Don't trigger countdown updates manually, they're system events
+                                debug_print!(self.debug_enabled, "⚠️ Cannot manually trigger countdown update event");
+                            }
+                        }
+                        // Mark as executed and send events list update
+                        if let Some(event) = self.timed_events.get_mut(&id) {
+                            event.mark_executed();
+                        }
+                        self.send_timed_events_list().await;
+                        let _ = self.event_tx.send(AutomationEvent::TimedEventExecuted(id)).await;
+                    } else {
+                        debug_print!(self.debug_enabled, "⚠️ Cannot trigger disabled event '{}'", id);
+                    }
+                } else {
+                    debug_print!(
+                        self.debug_enabled,
+                        "⚠️ Timed event '{}' not found for triggering",
                         id
                     );
                 }
