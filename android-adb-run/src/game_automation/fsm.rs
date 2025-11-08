@@ -1,11 +1,11 @@
 // Finite State Machine implementation for game automation - Event Driven Architecture
 use super::match_image::{GameStateDetector, MatchConfig, create_default_config};
-use super::types::{AutomationCommand, AutomationEvent, GameState, TimedTap, TimedEvent, TimedEventType};
+use super::types::{AutomationCommand, AutomationEvent, GameState, TimedEvent, TimedEventType};
 use crate::adb::AdbBackend;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
-use tokio::time::{Duration, sleep};
+use tokio::time::{Duration, timeout};
 
 // Macro for debug output
 macro_rules! debug_print {
@@ -29,8 +29,6 @@ pub struct GameAutomation {
     game_detector: GameStateDetector,
     // Unified timed events system
     timed_events: HashMap<String, TimedEvent>,
-    // Legacy timed taps (for backward compatibility)
-    timed_taps: HashMap<String, TimedTap>,
 }
 
 impl GameAutomation {
@@ -44,31 +42,27 @@ impl GameAutomation {
         let game_detector = GameStateDetector::new(1080, 2400, config); // Default dimensions
 
         let mut timed_events = HashMap::new();
-        let mut timed_taps = HashMap::new();
 
         // Create core system events
         timed_events.insert(
             "screenshot".to_string(),
-            TimedEvent::new_screenshot(30), // Default 30-second interval
+            TimedEvent::new_screenshot(600), // Default 30-second interval
         );
         timed_events.insert(
             "countdown_update".to_string(),
-            TimedEvent::new_countdown_update(5),
+            TimedEvent::new_countdown_update(1),
         );
 
         // Define all timed taps in a list for easier management
         let tap_definitions = vec![
-            ("claim_5d_tap", 150, 1270, 5), // 5 minutes
-            ("restart_tap", 800, 1400, 9),  // 9 minutes
-            // Add more taps here as needed
+            ("claim_5d_tap", 150, 1270, 2), // 5 minutes
+            ("restart_tap", 800, 1000, 9),  // 9 minutes
+                                            // Add more taps here as needed
         ];
 
-        // Create and insert all timed taps (both legacy and as events)
+        // Create and insert all timed tap events
         for (id, x, y, interval_minutes) in tap_definitions {
-            let tap = TimedTap::new(id.to_string(), x, y, interval_minutes);
             let event = TimedEvent::new_tap(id.to_string(), x, y, interval_minutes);
-            
-            timed_taps.insert(id.to_string(), tap);
             timed_events.insert(id.to_string(), event);
         }
 
@@ -80,11 +74,20 @@ impl GameAutomation {
                         println!("  - {}: Screenshot every {}s", id, event.interval.as_secs());
                     }
                     TimedEventType::Tap { x, y } => {
-                        println!("  - {}: Tap at ({},{}) every {}min", 
-                            id, x, y, event.interval.as_secs() / 60);
+                        println!(
+                            "  - {}: Tap at ({},{}) every {}min",
+                            id,
+                            x,
+                            y,
+                            event.interval.as_secs() / 60
+                        );
                     }
                     TimedEventType::CountdownUpdate => {
-                        println!("  - {}: Countdown update every {}s", id, event.interval.as_secs());
+                        println!(
+                            "  - {}: Countdown update every {}s",
+                            id,
+                            event.interval.as_secs()
+                        );
                     }
                 }
             }
@@ -101,7 +104,6 @@ impl GameAutomation {
             latest_screenshot: None,
             game_detector,
             timed_events,
-            timed_taps,
         }
     }
 
@@ -173,22 +175,31 @@ impl GameAutomation {
     }
 
     async fn take_screenshot(&mut self) -> Result<Vec<u8>, String> {
+        let start_time = std::time::Instant::now();
+
         if let Some(client) = &self.adb_client {
             let client_guard = client.lock().await;
             match client_guard.screen_capture_bytes().await {
                 Ok(bytes) => {
+                    let duration_ms = start_time.elapsed().as_millis();
+
                     debug_print!(
                         self.debug_enabled,
-                        "📸 Game automation captured screenshot ({} bytes)",
-                        bytes.len()
+                        "📸 Game automation captured screenshot ({} bytes) in {}ms",
+                        bytes.len(),
+                        duration_ms
                     );
 
                     // Store the latest screenshot for image recognition
                     self.latest_screenshot = Some(bytes.clone());
 
+                    // Send screenshot ready event with timing information
                     let _ = self
                         .event_tx
-                        .send(AutomationEvent::ScreenshotReady(bytes.clone()))
+                        .send(AutomationEvent::ScreenshotTaken(
+                            bytes.clone(),
+                            duration_ms as u64,
+                        ))
                         .await;
                     Ok(bytes)
                 }
@@ -304,76 +315,6 @@ impl GameAutomation {
                     let _ = self.event_tx.send(AutomationEvent::Error(e)).await;
                 }
             }
-            AutomationCommand::AddTimedTap(timed_tap) => {
-                debug_print!(
-                    self.debug_enabled,
-                    "➕ Adding timed tap '{}' at ({},{}) every {}min",
-                    timed_tap.id,
-                    timed_tap.x,
-                    timed_tap.y,
-                    timed_tap.interval.as_secs() / 60
-                );
-                // Add to both legacy and new event systems
-                let event = timed_tap.to_timed_event();
-                self.timed_events.insert(timed_tap.id.clone(), event);
-                self.timed_taps.insert(timed_tap.id.clone(), timed_tap);
-            }
-            AutomationCommand::RemoveTimedTap(id) => {
-                let removed_tap = self.timed_taps.remove(&id).is_some();
-                let removed_event = self.timed_events.remove(&id).is_some();
-                if removed_tap || removed_event {
-                    debug_print!(self.debug_enabled, "➖ Removed timed tap '{}'", id);
-                } else {
-                    debug_print!(
-                        self.debug_enabled,
-                        "⚠️ Timed tap '{}' not found for removal",
-                        id
-                    );
-                }
-            }
-            AutomationCommand::EnableTimedTap(id) => {
-                if let Some(timed_tap) = self.timed_taps.get_mut(&id) {
-                    timed_tap.enabled = true;
-                }
-                if let Some(timed_event) = self.timed_events.get_mut(&id) {
-                    timed_event.enabled = true;
-                }
-                debug_print!(self.debug_enabled, "✅ Enabled timed tap '{}'", id);
-            }
-            AutomationCommand::DisableTimedTap(id) => {
-                if let Some(timed_tap) = self.timed_taps.get_mut(&id) {
-                    timed_tap.enabled = false;
-                }
-                if let Some(timed_event) = self.timed_events.get_mut(&id) {
-                    timed_event.enabled = false;
-                }
-                debug_print!(self.debug_enabled, "❌ Disabled timed tap '{}'", id);
-            }
-            AutomationCommand::ListTimedTaps => {
-                let taps: Vec<TimedTap> = self.timed_taps.values().cloned().collect();
-                debug_print!(self.debug_enabled, "📋 Listing {} timed taps", taps.len());
-                for tap in &taps {
-                    let status = if tap.enabled { "enabled" } else { "disabled" };
-                    let next_time = match tap.time_until_next() {
-                        Some(duration) => format!("{:.1}min", duration.as_secs() as f32 / 60.0),
-                        None => "disabled".to_string(),
-                    };
-                    debug_print!(
-                        self.debug_enabled,
-                        "  - {}: ({},{}) every {}min, {}, next in {}",
-                        tap.id,
-                        tap.x,
-                        tap.y,
-                        tap.interval.as_secs() / 60,
-                        status,
-                        next_time
-                    );
-                }
-                let _ = self
-                    .event_tx
-                    .send(AutomationEvent::TimedTapsListed(taps))
-                    .await;
-            }
             AutomationCommand::AddTimedEvent(event) => {
                 debug_print!(
                     self.debug_enabled,
@@ -419,6 +360,34 @@ impl GameAutomation {
                     );
                 }
             }
+            AutomationCommand::ListTimedEvents => {
+                let events: Vec<TimedEvent> = self.timed_events.values().cloned().collect();
+                debug_print!(
+                    self.debug_enabled,
+                    "📋 Listing {} timed events",
+                    events.len()
+                );
+                for event in &events {
+                    let status = if event.enabled { "enabled" } else { "disabled" };
+                    let next_time = match event.time_until_next() {
+                        Some(duration) => format!("{:.1}s", duration.as_secs_f32()),
+                        None => "disabled".to_string(),
+                    };
+                    debug_print!(
+                        self.debug_enabled,
+                        "  - {}: {:?} every {}s, {}, next in {}",
+                        event.id,
+                        event.event_type,
+                        event.interval.as_secs(),
+                        status,
+                        next_time
+                    );
+                }
+                let _ = self
+                    .event_tx
+                    .send(AutomationEvent::TimedEventsListed(events))
+                    .await;
+            }
             AutomationCommand::Shutdown => {
                 self.should_exit = true;
                 self.is_running = false;
@@ -428,14 +397,26 @@ impl GameAutomation {
         }
     }
 
-    /// New event-driven main loop
+    /// New event-driven main loop with timeout-based command handling
     pub async fn run(&mut self) {
         debug_print!(self.debug_enabled, "🎮 Event-driven automation FSM started");
 
         loop {
-            // Check for commands (non-blocking)
-            if let Ok(command) = self.command_rx.try_recv() {
-                self.process_command(command).await;
+            // Wait for commands with a 1-second timeout for responsive event processing
+            match timeout(Duration::from_secs(1), self.command_rx.recv()).await {
+                Ok(Some(command)) => {
+                    // Process command immediately when received
+                    self.process_command(command).await;
+                }
+                Ok(None) => {
+                    // Channel closed, exit gracefully
+                    debug_print!(self.debug_enabled, "🔌 Command channel closed");
+                    break;
+                }
+                Err(_) => {
+                    // Timeout occurred, continue to process timed events
+                    debug_print!(self.debug_enabled, "⏱️ Command timeout, processing events");
+                }
             }
 
             // Process timed events if automation is running and not paused
@@ -447,9 +428,6 @@ impl GameAutomation {
             if self.should_exit {
                 break;
             }
-
-            // Short sleep to prevent busy waiting
-            sleep(Duration::from_millis(100)).await;
         }
 
         debug_print!(self.debug_enabled, "🎮 Event-driven automation FSM ended");
@@ -487,7 +465,11 @@ impl GameAutomation {
     }
 
     /// Execute a specific timed event
-    async fn execute_timed_event(&mut self, event_id: &str, event_type: &TimedEventType) -> Result<(), String> {
+    async fn execute_timed_event(
+        &mut self,
+        event_id: &str,
+        event_type: &TimedEventType,
+    ) -> Result<(), String> {
         debug_print!(
             self.debug_enabled,
             "⚡ Executing timed event '{}': {:?}",
@@ -519,13 +501,13 @@ impl GameAutomation {
                                 x,
                                 y
                             );
-                            // Also update legacy timed tap
-                            if let Some(tap) = self.timed_taps.get_mut(event_id) {
-                                tap.mark_executed();
-                            }
                             let _ = self
                                 .event_tx
-                                .send(AutomationEvent::TimedTapExecuted(event_id.to_string(), *x, *y))
+                                .send(AutomationEvent::TimedTapExecuted(
+                                    event_id.to_string(),
+                                    *x,
+                                    *y,
+                                ))
                                 .await;
                         }
                         Err(e) => return Err(format!("ADB tap failed: {}", e)),
@@ -550,34 +532,6 @@ impl GameAutomation {
             .await;
 
         Ok(())
-    }
-
-    /// Get information about the next timed event to fire
-    fn get_next_event_info(&self) -> Option<(String, u64)> {
-        let mut next_event: Option<(String, u64)> = None;
-
-        for (id, event) in &self.timed_events {
-            if !event.enabled {
-                continue;
-            }
-
-            if let Some(time_until_next) = event.time_until_next() {
-                let seconds_remaining = time_until_next.as_secs();
-                
-                match &next_event {
-                    None => {
-                        next_event = Some((id.clone(), seconds_remaining));
-                    }
-                    Some((_, current_min_seconds)) => {
-                        if seconds_remaining < *current_min_seconds {
-                            next_event = Some((id.clone(), seconds_remaining));
-                        }
-                    }
-                }
-            }
-        }
-
-        next_event
     }
 
     /// Update detector configuration
@@ -763,14 +717,14 @@ impl GameAutomation {
             if !matches!(event.event_type, TimedEventType::Tap { .. }) {
                 continue;
             }
-            
+
             if !event.enabled {
                 continue;
             }
 
             if let Some(time_until_next) = event.time_until_next() {
                 let seconds_remaining = time_until_next.as_secs();
-                
+
                 match &next_tap {
                     None => {
                         next_tap = Some((id.clone(), seconds_remaining));

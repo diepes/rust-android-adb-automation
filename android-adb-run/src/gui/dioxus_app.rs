@@ -62,7 +62,7 @@ fn App() -> Element {
     // Game automation state
     let automation_state = use_signal(|| GameState::Idle);
     let automation_command_tx = use_signal(|| None::<mpsc::Sender<AutomationCommand>>);
-    let automation_interval = use_signal(|| 30u64);
+    let automation_interval = use_signal(|| 1u64);
     let timed_tap_countdown = use_signal(|| None::<(String, u64)>); // (id, seconds_remaining)
 
     let selection_start = use_signal(|| None::<dioxus::html::geometry::ElementPoint>);
@@ -258,6 +258,7 @@ fn App() -> Element {
 
             // Event listener loop
             spawn(async move {
+                let mut screenshot_count = 0;
                 while let Some(event) = event_rx.recv().await {
                     match event {
                         AutomationEvent::ScreenshotReady(bytes) => {
@@ -276,6 +277,29 @@ fn App() -> Element {
                             screenshot_bytes_clone.set(Some(bytes));
                             screenshot_status_clone
                                 .set(format!("🤖 Automation screenshot #{}", counter_val));
+                        }
+                        AutomationEvent::ScreenshotTaken(screenshot_data, duration_ms) => {
+                            screenshot_count += 1;
+                            if debug_mode {
+                                println!(
+                                    "📸 GUI: Screenshot #{} captured ({} bytes) in {}ms",
+                                    screenshot_count,
+                                    screenshot_data.len(),
+                                    duration_ms
+                                );
+                            }
+
+                            // Update screenshot display with timing information
+                            screenshot_status_clone.set(format!(
+                                "📸 Automated screenshot #{} ({}ms)",
+                                screenshot_count, duration_ms
+                            ));
+
+                            // Update the actual screenshot data
+                            if let Ok(_image) = image::load_from_memory(&screenshot_data) {
+                                screenshot_data_clone.set(Some(base64_encode(&screenshot_data)));
+                                screenshot_bytes_clone.set(Some(screenshot_data));
+                            }
                         }
                         AutomationEvent::StateChanged(new_state) => {
                             automation_state_clone.set(new_state);
@@ -309,21 +333,20 @@ fn App() -> Element {
                             screenshot_status_clone
                                 .set(format!("🕒 Timed tap '{}' executed at ({},{})", id, x, y));
                         }
-                        AutomationEvent::TimedTapsListed(taps) => {
+                        AutomationEvent::TimedEventsListed(events) => {
                             if debug_mode {
-                                println!("📋 GUI: Listed {} timed taps", taps.len());
-                                for tap in &taps {
+                                println!("📋 GUI: Listed {} timed events", events.len());
+                                for event in &events {
                                     println!(
-                                        "  - {}: ({},{}) every {}min",
-                                        tap.id,
-                                        tap.x,
-                                        tap.y,
-                                        tap.interval.as_secs() / 60
+                                        "  - {}: {:?} every {}s",
+                                        event.id,
+                                        event.event_type,
+                                        event.interval.as_secs()
                                     );
                                 }
                             }
                             screenshot_status_clone
-                                .set(format!("📋 {} timed taps configured", taps.len()));
+                                .set(format!("📋 {} timed events configured", events.len()));
                         }
                         AutomationEvent::TimedTapCountdown(id, seconds) => {
                             // Update countdown signal for GUI display
@@ -397,15 +420,10 @@ fn App() -> Element {
                             DeviceInfo { name: name.clone(), transport_id: transport_id_opt, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string() }
                             // Action buttons (screenshot, save, exit, etc)
                             Actions {
-                                name: name.clone(),
-                                is_loading: is_loading_screenshot,
                                 screenshot_status: screenshot_status,
-                                screenshot_data: screenshot_data,
                                 screenshot_bytes: screenshot_bytes,
                                 auto_update_on_touch: auto_update_on_touch,
                                 select_box: select_box,
-                                use_rust_impl: *USE_RUST_IMPL.get().unwrap_or(&true),
-                                screenshot_counter: screenshot_counter,
                                 automation_state: automation_state,
                                 automation_command_tx: automation_command_tx,
                                 automation_interval: automation_interval,
