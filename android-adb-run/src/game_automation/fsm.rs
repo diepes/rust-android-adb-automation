@@ -348,6 +348,8 @@ impl GameAutomation {
                 if let Some(event) = self.timed_events.get_mut(&id) {
                     event.enabled = true;
                     debug_print!(self.debug_enabled, "✅ Enabled timed event '{}'", id);
+                    // Send updated events list to GUI
+                    self.send_timed_events_list().await;
                 } else {
                     debug_print!(
                         self.debug_enabled,
@@ -360,6 +362,8 @@ impl GameAutomation {
                 if let Some(event) = self.timed_events.get_mut(&id) {
                     event.enabled = false;
                     debug_print!(self.debug_enabled, "❌ Disabled timed event '{}'", id);
+                    // Send updated events list to GUI
+                    self.send_timed_events_list().await;
                 } else {
                     debug_print!(
                         self.debug_enabled,

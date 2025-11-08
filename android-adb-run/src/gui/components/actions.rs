@@ -170,13 +170,32 @@ pub fn Actions(props: ActionsProps) -> Element {
                                                 }
                                             }
                                             
-                                            // Status indicator
-                                            div {
+                                            // Status indicator (clickable toggle)
+                                            button {
                                                 style: if event.enabled { 
-                                                    "background: #28a745; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.7em; font-weight: bold;"
+                                                    "background: #28a745; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.7em; font-weight: bold; border: none; cursor: pointer; transition: all 0.2s ease;"
                                                 } else {
-                                                    "background: #6c757d; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.7em; font-weight: bold;"
+                                                    "background: #6c757d; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.7em; font-weight: bold; border: none; cursor: pointer; transition: all 0.2s ease;"
                                                 },
+                                                onclick: {
+                                                    let event_id = event.id.clone();
+                                                    let is_enabled = event.enabled;
+                                                    move |_| {
+                                                        if let Some(tx) = automation_command_tx.read().as_ref() {
+                                                            let tx = tx.clone();
+                                                            let event_id = event_id.clone();
+                                                            spawn(async move {
+                                                                let cmd = if is_enabled {
+                                                                    AutomationCommand::DisableTimedEvent(event_id)
+                                                                } else {
+                                                                    AutomationCommand::EnableTimedEvent(event_id)
+                                                                };
+                                                                let _ = tx.send(cmd).await;
+                                                            });
+                                                        }
+                                                    }
+                                                },
+                                                title: if event.enabled { "Click to disable this event" } else { "Click to enable this event" },
                                                 if event.enabled { "ON" } else { "OFF" }
                                             }
                                         }

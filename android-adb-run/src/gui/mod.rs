@@ -6,7 +6,6 @@ pub mod components {
     pub mod actions;
     pub mod device_info;
     pub mod header;
-    pub mod interaction_info;
     pub mod screenshot_panel; // new panel for interaction status & coords
 }
 pub mod dioxus_app; // renamed from dioxus

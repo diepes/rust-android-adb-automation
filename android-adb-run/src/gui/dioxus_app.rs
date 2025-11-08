@@ -3,7 +3,6 @@ use crate::game_automation::{
     AutomationCommand, AutomationEvent, GameAutomation, GameState, create_automation_channels,
 };
 use crate::game_automation::types::TimedEvent;
-use crate::gui::components::interaction_info::InteractionInfo;
 use crate::gui::components::{
     actions::Actions, device_info::DeviceInfo, header::Header, screenshot_panel::screenshot_panel,
 };
@@ -416,11 +415,11 @@ fn App() -> Element {
             div { style: "flex:1; overflow:auto; padding:8px;",
                 // Horizontal split: left (info/actions), right (screenshot)
                 div { style: "display:flex; gap:14px; align-items:flex-start;",
-                    // Left column: header, device info, actions, interaction info, credits
+                    // Left column: header, device info, actions, credits
                     div { style: "flex:1; min-width:0; display:flex; flex-direction:column; gap:10px;",
                         // App header bar (drag/close)
                         Header { on_drag: move |_| { let _ = desktop.window.drag_window(); }, on_close: move |_| { std::thread::spawn(|| std::process::exit(0)); } }
-                        // Device info, actions, and interaction info (only if device connected)
+                        // Device info and actions (only if device connected)
                         if let Some((name, transport_id_opt, screen_x, screen_y)) = device_info.read().clone() {
                             // Device metadata panel
                             DeviceInfo { name: name.clone(), transport_id: transport_id_opt, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string() }
@@ -436,8 +435,6 @@ fn App() -> Element {
                                 timed_tap_countdown: timed_tap_countdown,
                                 timed_events_list: timed_events_list
                             }
-                            // Interaction info (tap/swipe coordinates, status)
-                            InteractionInfo { device_coords: device_coords, screenshot_status: screenshot_status }
                         } else {
                             // Fallback panel if no device is connected
                             div { style: "background:rgba(255,255,255,0.1); backdrop-filter:blur(10px); padding:20px; border-radius:15px; margin-bottom:20px; border:1px solid rgba(255,255,255,0.2);",
