@@ -25,6 +25,18 @@ pub struct TimedEvent {
     pub repeating: bool,
 }
 
+// Custom PartialEq implementation since Instant doesn't implement PartialEq
+impl PartialEq for TimedEvent {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.event_type == other.event_type
+            && self.interval == other.interval
+            && self.enabled == other.enabled
+            && self.repeating == other.repeating
+            // Intentionally skip last_executed for comparison since Instant doesn't implement PartialEq
+    }
+}
+
 impl TimedEvent {
     pub fn new_screenshot(interval_seconds: u64) -> Self {
         Self {

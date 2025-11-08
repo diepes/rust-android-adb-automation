@@ -1,5 +1,6 @@
 // gui/components/actions.rs
 use crate::game_automation::{AutomationCommand, GameState};
+use crate::game_automation::types::TimedEvent;
 use dioxus::prelude::*;
 use tokio::sync::mpsc;
 
@@ -13,6 +14,7 @@ pub struct ActionsProps {
     pub automation_command_tx: Signal<Option<mpsc::Sender<AutomationCommand>>>,
     pub automation_interval: Signal<u64>,
     pub timed_tap_countdown: Signal<Option<(String, u64)>>, // (id, seconds_remaining)
+    pub timed_events_list: Signal<Vec<TimedEvent>>, // All timed events
 }
 
 #[component]
@@ -24,7 +26,7 @@ pub fn Actions(props: ActionsProps) -> Element {
     let automation_state = props.automation_state;
     let automation_command_tx = props.automation_command_tx;
     let mut automation_interval = props.automation_interval;
-    let timed_tap_countdown = props.timed_tap_countdown;
+    let timed_events_list = props.timed_events_list;
 
     rsx! {
         div { style: "background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 15px; border-radius: 15px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.2);",
@@ -130,41 +132,104 @@ pub fn Actions(props: ActionsProps) -> Element {
                     }
                 }
 
-                // Timed Tap Countdown Display
-                if let Some((tap_id, seconds_remaining)) = timed_tap_countdown.read().clone() {
+                // Timed Events List Display  
+                if !timed_events_list.read().is_empty() {
                     div { style: "background: rgba(0,0,0,0.2); border-radius: 8px; padding: 10px 12px; border: 1px solid rgba(255,255,255,0.2);",
-                        div { style: "display: flex; align-items: center; justify-content: space-between; gap: 10px;",
-                            div { style: "display: flex; flex-direction: column; gap: 2px;",
-                                div { style: "display: flex; align-items: center; gap: 6px;",
-                                    span { style: "font-size: 0.8em; color: #87ceeb; font-weight: bold;", "🕒 Next Tap:" }
-                                    span { style: "font-size: 0.9em; color: #ffd857; font-weight: bold;", "{tap_id}" }
+                        // Filter out system events and count visible events
+                        {
+                            let events = timed_events_list.read();
+                            let visible_events: Vec<_> = events.iter()
+                                .filter(|event| event.id != "countdown_update")
+                                .collect();
+                            
+                            rsx! {
+                                div { style: "display: flex; align-items: center; gap: 6px; margin-bottom: 8px;",
+                                    span { style: "font-size: 0.9em; color: #87ceeb; font-weight: bold;", "🕒 Timed Events" }
+                                    span { style: "font-size: 0.75em; color: #ccc;", "({visible_events.len()} events)" }
                                 }
-                                if seconds_remaining > 60 {
-                                    span { style: "font-size: 0.75em; color: #ccc; margin-left: 16px;", "in {seconds_remaining / 60}m {seconds_remaining % 60}s" }
-                                } else {
-                                    span { style: "font-size: 0.75em; color: #ccc; margin-left: 16px;", "in {seconds_remaining}s" }
-                                }
-                            }
-                            div { style: "display: flex; flex-direction: column; align-items: center; gap: 2px;",
-                                div { style: "font-family: monospace; font-weight: bold;",
-                                    if seconds_remaining < 60 {
-                                        span { style: "font-size: 1.1em; color: #ff6b6b;", "{seconds_remaining}s" }
-                                    } else if seconds_remaining < 300 {  // Less than 5 minutes
-                                        span { style: "font-size: 1.0em; color: #ffd857;", "{seconds_remaining / 60}m" }
-                                    } else {
-                                        span { style: "font-size: 0.9em; color: #48ff9b;", "{seconds_remaining / 60}m" }
-                                    }
-                                }
-                                // Progress bar showing time remaining
-                                div { style: "width: 60px; height: 3px; background: rgba(255,255,255,0.2); border-radius: 2px; overflow: hidden;",
-                                    if seconds_remaining <= 10 {
-                                        div { style: "height: 100%; background: linear-gradient(to right, #ff4444, #ff8888); border-radius: 2px; animation: pulse 0.5s infinite alternate;",
+                                
+                                // Individual event displays
+                                for event in visible_events {
+                                    div { style: "background: rgba(255,255,255,0.05); border-radius: 6px; padding: 8px; margin-bottom: 6px; border: 1px solid rgba(255,255,255,0.1);",
+                                        div { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;",
+                                            // Event name and type
+                                            div { style: "display: flex; align-items: center; gap: 6px;",
+                                                span { 
+                                                    style: "font-size: 0.85em; font-weight: bold;",
+                                                    {
+                                                        match &event.event_type {
+                                                            crate::game_automation::types::TimedEventType::Screenshot => "📸".to_string(),
+                                                            crate::game_automation::types::TimedEventType::Tap { .. } => "👆".to_string(),
+                                                            crate::game_automation::types::TimedEventType::CountdownUpdate => "⏰".to_string(),
+                                                        }
+                                                    }
+                                                }
+                                                span { 
+                                                    style: "font-size: 0.8em; color: #87ceeb;",
+                                                    {event.id.clone()}
+                                                }
+                                            }
+                                            
+                                            // Status indicator
+                                            div {
+                                                style: if event.enabled { 
+                                                    "background: #28a745; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.7em; font-weight: bold;"
+                                                } else {
+                                                    "background: #6c757d; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.7em; font-weight: bold;"
+                                                },
+                                                if event.enabled { "ON" } else { "OFF" }
+                                            }
                                         }
-                                    } else if seconds_remaining <= 60 {
-                                        div { style: "height: 100%; background: linear-gradient(to right, #ffaa00, #ffdd44); border-radius: 2px;",
+                                        
+                                        // Countdown info
+                                        div { style: "display: flex; justify-content: space-between; align-items: center; font-size: 0.75em;",
+                                            div { style: "color: #ccc;",
+                                                "Interval: {event.interval.as_secs()}s"
+                                                {
+                                                    match &event.event_type {
+                                                        crate::game_automation::types::TimedEventType::Tap { x, y } => 
+                                                            format!(" | Tap: ({}, {})", x, y),
+                                                        _ => String::new()
+                                                    }
+                                                }
+                                            }
+                                            
+                                            // Time remaining display  
+                                            div { style: "color: #87ceeb; font-weight: bold;",
+                                                {
+                                                    if let Some(time_until) = event.time_until_next() {
+                                                        let seconds = time_until.as_secs();
+                                                        if seconds == 0 {
+                                                            "Ready Now".to_string()
+                                                        } else if seconds < 60 {
+                                                            format!("{}s", seconds)
+                                                        } else {
+                                                            format!("{}m {}s", seconds / 60, seconds % 60)
+                                                        }
+                                                    } else {
+                                                        "Disabled".to_string()
+                                                    }
+                                                }
+                                            }
                                         }
-                                    } else {
-                                        div { style: "height: 100%; background: linear-gradient(to right, #28a745, #48ff9b); border-radius: 2px;",
+                                        
+                                        // Progress bar
+                                        if event.enabled {
+                                            div { style: "margin-top: 4px; background: rgba(255,255,255,0.1); border-radius: 3px; height: 4px; overflow: hidden;",
+                                                div {
+                                                    style: {
+                                                        let progress = if let Some(time_until) = event.time_until_next() {
+                                                            let total_seconds = event.interval.as_secs() as f64;
+                                                            let remaining_seconds = time_until.as_secs() as f64;
+                                                            let progress = ((total_seconds - remaining_seconds) / total_seconds * 100.0).max(0.0).min(100.0);
+                                                            format!("background: linear-gradient(90deg, #28a745, #20c997); width: {}%; height: 100%; transition: width 0.5s ease;", progress)
+                                                        } else {
+                                                            "background: #6c757d; width: 0%; height: 100%;".to_string()
+                                                        };
+                                                        progress
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }

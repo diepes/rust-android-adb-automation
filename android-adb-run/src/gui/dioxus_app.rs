@@ -2,6 +2,7 @@ use crate::adb::AdbBackend;
 use crate::game_automation::{
     AutomationCommand, AutomationEvent, GameAutomation, GameState, create_automation_channels,
 };
+use crate::game_automation::types::TimedEvent;
 use crate::gui::components::interaction_info::InteractionInfo;
 use crate::gui::components::{
     actions::Actions, device_info::DeviceInfo, header::Header, screenshot_panel::screenshot_panel,
@@ -64,6 +65,7 @@ fn App() -> Element {
     let automation_command_tx = use_signal(|| None::<mpsc::Sender<AutomationCommand>>);
     let automation_interval = use_signal(|| 1u64);
     let timed_tap_countdown = use_signal(|| None::<(String, u64)>); // (id, seconds_remaining)
+    let timed_events_list = use_signal(|| Vec::<TimedEvent>::new()); // All timed events
 
     let selection_start = use_signal(|| None::<dioxus::html::geometry::ElementPoint>);
     let selection_end = use_signal(|| None::<dioxus::html::geometry::ElementPoint>);
@@ -234,6 +236,7 @@ fn App() -> Element {
         let mut screenshot_bytes_clone = screenshot_bytes.clone();
         let mut screenshot_status_clone = screenshot_status.clone();
         let mut timed_tap_countdown_clone = timed_tap_countdown.clone();
+        let mut timed_events_list_clone = timed_events_list.clone();
 
         spawn(async move {
             // Create automation channels
@@ -334,6 +337,9 @@ fn App() -> Element {
                                 .set(format!("🕒 Timed tap '{}' executed at ({},{})", id, x, y));
                         }
                         AutomationEvent::TimedEventsListed(events) => {
+                            // Store the events list for GUI display
+                            timed_events_list_clone.set(events.clone());
+                            
                             if debug_mode {
                                 println!("📋 GUI: Listed {} timed events", events.len());
                                 for event in &events {
@@ -427,7 +433,8 @@ fn App() -> Element {
                                 automation_state: automation_state,
                                 automation_command_tx: automation_command_tx,
                                 automation_interval: automation_interval,
-                                timed_tap_countdown: timed_tap_countdown
+                                timed_tap_countdown: timed_tap_countdown,
+                                timed_events_list: timed_events_list
                             }
                             // Interaction info (tap/swipe coordinates, status)
                             InteractionInfo { device_coords: device_coords, screenshot_status: screenshot_status }

@@ -55,7 +55,7 @@ impl GameAutomation {
 
         // Define all timed taps in a list for easier management
         let tap_definitions = vec![
-            ("claim_5d_tap", 150, 1270, 2), // 5 minutes
+            ("claim_5d_tap", 110, 1270, 2), // 5 minutes
             ("restart_tap", 800, 1000, 9),  // 9 minutes
                                             // Add more taps here as needed
         ];
@@ -256,6 +256,10 @@ impl GameAutomation {
                             );
                         }
                     }
+
+                    // Send initial events list and countdown information to GUI immediately
+                    self.send_timed_events_list().await;
+                    self.send_timed_tap_countdowns().await;
                 } else {
                     debug_print!(
                         self.debug_enabled,
@@ -273,6 +277,10 @@ impl GameAutomation {
                 if self.is_running && self.state == GameState::Paused {
                     self.change_state(GameState::Running).await;
                     debug_print!(self.debug_enabled, "▶️ Game automation resumed");
+                    
+                    // Send current events list and countdown information to GUI immediately after resume
+                    self.send_timed_events_list().await;
+                    self.send_timed_tap_countdowns().await;
                 }
             }
             AutomationCommand::Stop => {
@@ -517,6 +525,7 @@ impl GameAutomation {
                 }
             }
             TimedEventType::CountdownUpdate => {
+                self.send_timed_events_list().await;
                 self.send_timed_tap_countdowns().await;
             }
         }
@@ -706,6 +715,15 @@ impl GameAutomation {
                 ))
                 .await;
         }
+    }
+
+    /// Send current events list to GUI for display
+    async fn send_timed_events_list(&self) {
+        let events: Vec<crate::game_automation::types::TimedEvent> = self.timed_events.values().cloned().collect();
+        let _ = self
+            .event_tx
+            .send(AutomationEvent::TimedEventsListed(events))
+            .await;
     }
 
     /// Get information about the next timed tap to fire (legacy compatibility)
