@@ -370,6 +370,30 @@ impl AdbClient for RustAdb {
         Ok(())
     }
 
+    async fn get_device_ip(&self) -> Result<String, String> {
+        let mut out: Vec<u8> = Vec::new();
+        let mut dev = self.server_device.lock().await;
+        
+        // Execute: ip route | awk '{print $9}' 
+        // Note: We need to use sh -c to handle the pipe and awk
+        dev.shell_command(&["sh", "-c", "ip route | awk '{print $9}'"], &mut out)
+            .map_err(|e| format!("RustAdb: get device IP failed: {e}"))?;
+        
+        let output = String::from_utf8_lossy(&out);
+        let ip = output.trim();
+        
+        if ip.is_empty() {
+            return Err("RustAdb: No IP address found".to_string());
+        }
+        
+        // Validate that it looks like an IP address
+        if ip.split('.').count() == 4 && ip.chars().all(|c| c.is_ascii_digit() || c == '.') {
+            Ok(ip.to_string())
+        } else {
+            Err(format!("RustAdb: Invalid IP format: {}", ip))
+        }
+    }
+
     fn screen_dimensions(&self) -> (u32, u32) {
         (self.screen_x, self.screen_y)
     }

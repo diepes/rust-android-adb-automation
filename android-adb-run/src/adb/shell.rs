@@ -251,6 +251,43 @@ impl AdbShell {
         }
         Ok(())
     }
+
+    pub async fn get_device_ip(&self) -> Result<String, String> {
+        Self::ensure_adb_available()?;
+        
+        let output = Command::new("adb")
+            .arg("shell")
+            .arg("ip")
+            .arg("route")
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run adb shell ip route: {e}"))?;
+            
+        if !output.status.success() {
+            return Err(format!(
+                "adb shell ip route failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        
+        let ip_route_output = String::from_utf8_lossy(&output.stdout);
+        
+        // Parse the output to extract the IP from field 9 (like awk '{print $9}')
+        for line in ip_route_output.lines() {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() >= 9 {
+                let potential_ip = fields[8]; // 0-indexed, so field 9 is index 8
+                
+                // Validate that it looks like an IP address
+                if potential_ip.split('.').count() == 4 && 
+                   potential_ip.chars().all(|c| c.is_ascii_digit() || c == '.') {
+                    return Ok(potential_ip.to_string());
+                }
+            }
+        }
+        
+        Err("No valid IP address found in routing table".to_string())
+    }
 }
 
 impl AdbClient for AdbShell {
@@ -275,6 +312,9 @@ impl AdbClient for AdbShell {
         duration: Option<u32>,
     ) -> Result<(), String> {
         self.swipe(x1, y1, x2, y2, duration).await
+    }
+    async fn get_device_ip(&self) -> Result<String, String> {
+        self.get_device_ip().await
     }
     fn screen_dimensions(&self) -> (u32, u32) {
         (self.screen_x, self.screen_y)

@@ -56,7 +56,7 @@ impl GameAutomation {
         // Define all timed taps in a list for easier management
         let tap_definitions = vec![
             ("claim_5d_tap", 110, 1300, 2), // 5 minutes
-            ("restart_tap", 110, 1600, 3),  // 9 minutes
+            ("restart_tap", 110, 1600, 5),  // 9 minutes
                                             // Add more taps here as needed
         ];
 

@@ -88,6 +88,13 @@ impl AdbBackend {
             AdbBackend::Rust(r) => r.swipe(x1, y1, x2, y2, duration).await,
         }
     }
+
+    pub async fn get_device_ip(&self) -> Result<String, String> {
+        match self {
+            AdbBackend::Shell(s) => s.get_device_ip().await,
+            AdbBackend::Rust(r) => r.get_device_ip().await,
+        }
+    }
 }
 
 impl AdbClient for AdbBackend {
@@ -124,6 +131,10 @@ impl AdbClient for AdbBackend {
         duration: Option<u32>,
     ) -> Result<(), String> {
         self.swipe(x1, y1, x2, y2, duration).await
+    }
+
+    async fn get_device_ip(&self) -> Result<String, String> {
+        self.get_device_ip().await
     }
 
     fn screen_dimensions(&self) -> (u32, u32) {

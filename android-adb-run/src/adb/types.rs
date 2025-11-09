@@ -42,6 +42,7 @@ pub trait AdbClient: Send + Sync {
         y2: u32,
         duration: Option<u32>,
     ) -> Result<(), String>;
+    async fn get_device_ip(&self) -> Result<String, String>;
     fn screen_dimensions(&self) -> (u32, u32);
     fn device_name(&self) -> &str;
     fn transport_id(&self) -> Option<u32>; // new optional shell-specific identifier
