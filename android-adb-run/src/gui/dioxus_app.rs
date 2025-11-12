@@ -62,7 +62,6 @@ fn App() -> Element {
     // Game automation state
     let automation_state = use_signal(|| GameState::Idle);
     let automation_command_tx = use_signal(|| None::<mpsc::Sender<AutomationCommand>>);
-    let automation_interval = use_signal(|| 1u64);
     let timed_tap_countdown = use_signal(|| None::<(String, u64)>); // (id, seconds_remaining)
     let timed_events_list = use_signal(|| Vec::<TimedEvent>::new()); // All timed events
 
@@ -229,7 +228,6 @@ fn App() -> Element {
         // Clone signals for use in async context
         let mut automation_command_tx_clone = automation_command_tx.clone();
         let mut automation_state_clone = automation_state.clone();
-        let mut automation_interval_clone = automation_interval.clone();
         let mut screenshot_counter_clone = screenshot_counter.clone();
         let mut screenshot_data_clone = screenshot_data.clone();
         let mut screenshot_bytes_clone = screenshot_bytes.clone();
@@ -319,9 +317,6 @@ fn App() -> Element {
                                 println!("🤖 Automation error: {}", error);
                             }
                             screenshot_status_clone.set(format!("🤖 Automation error: {}", error));
-                        }
-                        AutomationEvent::IntervalUpdate(seconds) => {
-                            automation_interval_clone.set(seconds);
                         }
                         AutomationEvent::TemplatesUpdated(templates) => {
                             if debug_mode {
@@ -439,7 +434,6 @@ fn App() -> Element {
                                 select_box: select_box,
                                 automation_state: automation_state,
                                 automation_command_tx: automation_command_tx,
-                                automation_interval: automation_interval,
                                 timed_tap_countdown: timed_tap_countdown,
                                 timed_events_list: timed_events_list
                             }

@@ -12,7 +12,6 @@ pub struct ActionsProps {
     pub select_box: Signal<bool>, // new signal for select box
     pub automation_state: Signal<GameState>,
     pub automation_command_tx: Signal<Option<mpsc::Sender<AutomationCommand>>>,
-    pub automation_interval: Signal<u64>,
     pub timed_tap_countdown: Signal<Option<(String, u64)>>, // (id, seconds_remaining)
     pub timed_events_list: Signal<Vec<TimedEvent>>, // All timed events
 }
@@ -25,7 +24,6 @@ pub fn Actions(props: ActionsProps) -> Element {
     let mut select_box = props.select_box;
     let automation_state = props.automation_state;
     let automation_command_tx = props.automation_command_tx;
-    let mut automation_interval = props.automation_interval;
     let timed_events_list = props.timed_events_list;
 
     rsx! {
@@ -326,30 +324,6 @@ pub fn Actions(props: ActionsProps) -> Element {
                         }
                         label { r#for: "select-box-checkbox", style: "font-size: 0.85em; cursor: pointer; user-select: none;", "🟦 Select box" }
                     }
-                }
-
-                // Interval control
-                div { style: "display: flex; gap: 8px; align-items: center; justify-content: center;",
-                    label { style: "font-size: 0.85em; color: #ccc;", "Interval:" }
-                    input {
-                        r#type: "number",
-                        min: "5",
-                        max: "300",
-                        value: "{automation_interval}",
-                        style: "width: 60px; padding: 3px 6px; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; background: rgba(255,255,255,0.1); color: white; font-size: 0.85em;",
-                        onchange: move |evt| {
-                            if let Ok(seconds) = evt.value().parse::<u64>() {
-                                automation_interval.set(seconds);
-                                if let Some(tx) = automation_command_tx.read().as_ref() {
-                                    let tx = tx.clone();
-                                    spawn(async move {
-                                        let _ = tx.send(AutomationCommand::UpdateInterval(seconds)).await;
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    span { style: "font-size: 0.85em; color: #ccc;", "sec" }
                 }
             }
         }

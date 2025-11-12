@@ -293,21 +293,6 @@ impl GameAutomation {
                     let _ = self.take_screenshot().await;
                 }
             }
-            AutomationCommand::UpdateInterval(seconds) => {
-                // Update screenshot event interval
-                if let Some(screenshot_event) = self.timed_events.get_mut("screenshot") {
-                    screenshot_event.interval = Duration::from_secs(seconds);
-                    debug_print!(
-                        self.debug_enabled,
-                        "⏱️ Screenshot interval updated to {}s",
-                        seconds
-                    );
-                }
-                let _ = self
-                    .event_tx
-                    .send(AutomationEvent::IntervalUpdate(seconds))
-                    .await;
-            }
             AutomationCommand::TestImageRecognition => {
                 debug_print!(
                     self.debug_enabled,
