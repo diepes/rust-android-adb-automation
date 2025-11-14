@@ -102,6 +102,7 @@ Runtime enum `AdbBackend` dispatches each call to selected implementation.
 
 ## Moving Forward / TODO
 
+- Pause automation on manual events e.g. `adb shell getevent -lt /dev/input/event3`
 - Improve Rust backend device naming (currently mirrors identifier string).
 - Multi-device selection UI (instead of picking first automatically).
 - Cache single backend instance in GUI to reduce repeated connections.

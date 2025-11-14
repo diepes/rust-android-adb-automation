@@ -210,4 +210,5 @@ pub enum AutomationEvent {
     TimedEventsListed(Vec<TimedEvent>), // Response to ListTimedEvents command
     TimedEventExecuted(String),     // ID of executed timed event
     NextTimedEvent(String, u64),    // ID, seconds until next event
+    ManualActivityDetected(bool),   // True when human touch detected, false when timeout expires
 }

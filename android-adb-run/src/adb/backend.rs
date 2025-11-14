@@ -95,6 +95,27 @@ impl AdbBackend {
             AdbBackend::Rust(r) => r.get_device_ip().await,
         }
     }
+
+    pub async fn is_human_touching(&self) -> bool {
+        match self {
+            AdbBackend::Shell(s) => s.is_human_touching().await,
+            AdbBackend::Rust(r) => r.is_human_touching().await,
+        }
+    }
+
+    pub async fn start_touch_monitoring(&self) -> Result<(), String> {
+        match self {
+            AdbBackend::Shell(s) => s.start_touch_monitoring().await,
+            AdbBackend::Rust(r) => r.start_touch_monitoring().await,
+        }
+    }
+
+    pub async fn stop_touch_monitoring(&self) -> Result<(), String> {
+        match self {
+            AdbBackend::Shell(s) => s.stop_touch_monitoring().await,
+            AdbBackend::Rust(r) => r.stop_touch_monitoring().await,
+        }
+    }
 }
 
 impl AdbClient for AdbBackend {
@@ -135,6 +156,18 @@ impl AdbClient for AdbBackend {
 
     async fn get_device_ip(&self) -> Result<String, String> {
         self.get_device_ip().await
+    }
+    
+    async fn is_human_touching(&self) -> bool {
+        self.is_human_touching().await
+    }
+
+    async fn start_touch_monitoring(&self) -> Result<(), String> {
+        self.start_touch_monitoring().await
+    }
+
+    async fn stop_touch_monitoring(&self) -> Result<(), String> {
+        self.stop_touch_monitoring().await
     }
 
     fn screen_dimensions(&self) -> (u32, u32) {

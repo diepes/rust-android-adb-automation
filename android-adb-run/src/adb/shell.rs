@@ -1,11 +1,16 @@
-use super::types::{AdbClient, Device};
+use super::types::{AdbClient, Device, TouchActivityMonitor, TouchActivityState};
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::process::Command;
+use tokio::sync::{Mutex, RwLock};
 
 pub struct AdbShell {
     pub device: Device,
     pub transport_id: u32,
     pub screen_x: u32,
     pub screen_y: u32,
+    touch_monitor: TouchActivityMonitor,
+    monitoring_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl AdbShell {
@@ -58,6 +63,8 @@ impl AdbShell {
             transport_id,
             screen_x,
             screen_y,
+            touch_monitor: Arc::new(RwLock::new(TouchActivityState::new(30))), // 30 second timeout
+            monitoring_task: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -288,6 +295,148 @@ impl AdbShell {
         
         Err("No valid IP address found in routing table".to_string())
     }
+
+    async fn monitor_touch_activity_loop(
+        touch_monitor: TouchActivityMonitor,
+        device_name: String,
+        transport_id: u32,
+    ) -> Result<(), String> {
+        Self::ensure_adb_available()?;
+        
+        // Try to find an input event device that handles touch events
+        let event_device = Self::find_touch_event_device(&device_name, transport_id).await?;
+        
+        if crate::gui::dioxus_app::is_debug_mode() {
+            println!("🔍 Starting touch monitoring on device: {}", event_device);
+        }
+
+        loop {
+            // Check if monitoring should continue
+            {
+                let monitor = touch_monitor.read().await;
+                if !monitor.is_monitoring {
+                    if crate::gui::dioxus_app::is_debug_mode() {
+                        println!("🛑 Touch monitoring stopped by flag");
+                    }
+                    break;
+                }
+            }
+
+            // Run getevent for a short duration to check for touch activity
+            match Self::check_for_touch_activity(&device_name, transport_id, &event_device).await {
+                Ok(touch_detected) => {
+                    if touch_detected {
+                        let mut monitor = touch_monitor.write().await;
+                        monitor.mark_touch_activity();
+                        if crate::gui::dioxus_app::is_debug_mode() {
+                            println!("👆 Human touch activity detected");
+                        }
+                    }
+                }
+                Err(e) => {
+                    if crate::gui::dioxus_app::is_debug_mode() {
+                        eprintln!("⚠️ Touch activity check failed: {}", e);
+                    }
+                    // Wait a bit before retrying
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            }
+
+            // Small delay to prevent excessive CPU usage
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        Ok(())
+    }
+
+    async fn find_touch_event_device(
+        _device_name: &str,
+        transport_id: u32,
+    ) -> Result<String, String> {
+        // List input devices and find touch device
+        let output = Command::new("adb")
+            .arg("-t")
+            .arg(transport_id.to_string())
+            .arg("shell")
+            .arg("sh")
+            .arg("-c")
+            .arg("ls /dev/input/event* 2>/dev/null | head -5")
+            .output()
+            .await
+            .map_err(|e| format!("Failed to list input devices: {e}"))?;
+        
+        if !output.status.success() {
+            return Err(format!("Failed to list input devices: {}", String::from_utf8_lossy(&output.stderr)));
+        }
+        
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let devices: Vec<&str> = stdout.trim().split('\n').filter(|s| !s.is_empty()).collect();
+        
+        if devices.is_empty() {
+            return Err("No input event devices found".to_string());
+        }
+
+        // Try to find a touch-capable device by checking device capabilities
+        for device in &devices {
+            let cap_output = Command::new("adb")
+                .arg("-t")
+                .arg(transport_id.to_string())
+                .arg("shell")
+                .arg("sh")
+                .arg("-c")
+                .arg(&format!("timeout 1s getevent -lt {} | head -1 2>/dev/null || echo 'timeout'", device))
+                .output()
+                .await;
+                
+            if let Ok(cap_result) = cap_output {
+                let cap_text = String::from_utf8_lossy(&cap_result.stdout);
+                // If we get any output (not timeout), this device is accessible
+                if !cap_text.contains("timeout") && !cap_text.trim().is_empty() {
+                    return Ok(device.to_string());
+                }
+            }
+        }
+
+        // Fallback to first available device
+        Ok(devices[0].to_string())
+    }
+
+    async fn check_for_touch_activity(
+        _device_name: &str,
+        transport_id: u32,
+        event_device: &str,
+    ) -> Result<bool, String> {
+        // Run getevent for a short time to check for any touch input events
+        let output = Command::new("adb")
+            .arg("-t")
+            .arg(transport_id.to_string())
+            .arg("shell")
+            .arg("sh")
+            .arg("-c")
+            .arg(&format!("timeout 0.5s getevent -lt {} 2>/dev/null || true", event_device))
+            .output()
+            .await
+            .map_err(|e| format!("Failed to check touch activity: {e}"))?;
+        
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        
+        // Check if we got any event lines indicating touch activity
+        // Touch events typically contain "ABS_MT" (multi-touch) or "BTN_TOUCH" or coordinate events
+        let touch_detected = stdout.lines().any(|line| {
+            line.contains("ABS_MT") || 
+            line.contains("BTN_TOUCH") || 
+            line.contains("ABS_X") || 
+            line.contains("ABS_Y") ||
+            (line.contains("0003") && (line.contains("0035") || line.contains("0036"))) // Raw touch coordinates
+        });
+
+        if touch_detected && crate::gui::dioxus_app::is_debug_mode() {
+            println!("📱 Touch event detected: {} lines", stdout.lines().count());
+        }
+
+        Ok(touch_detected)
+    }
 }
 
 impl AdbClient for AdbShell {
@@ -316,6 +465,67 @@ impl AdbClient for AdbShell {
     async fn get_device_ip(&self) -> Result<String, String> {
         self.get_device_ip().await
     }
+    
+    async fn is_human_touching(&self) -> bool {
+        let monitor = self.touch_monitor.read().await;
+        let is_active = monitor.is_human_active();
+        
+        if is_active && crate::gui::dioxus_app::is_debug_mode() {
+            println!("👆 is_human_touching: TRUE - Human touch detected, automation should pause");
+        }
+        
+        is_active
+    }
+
+    async fn start_touch_monitoring(&self) -> Result<(), String> {
+        let mut monitor = self.touch_monitor.write().await;
+        
+        if monitor.is_monitoring {
+            return Ok(()); // Already monitoring
+        }
+        
+        monitor.is_monitoring = true;
+        drop(monitor); // Release write lock
+
+        // Clone necessary data for the background task
+        let touch_monitor = Arc::clone(&self.touch_monitor);
+        let device_name = self.device.name.clone();
+        let transport_id = self.transport_id;
+
+        // Start background monitoring task
+        let task = tokio::spawn(async move {
+            if let Err(e) = Self::monitor_touch_activity_loop(touch_monitor.clone(), device_name, transport_id).await {
+                if crate::gui::dioxus_app::is_debug_mode() {
+                    eprintln!("Touch monitoring ended: {}", e);
+                }
+            }
+            
+            // Mark monitoring as stopped when task ends
+            let mut monitor = touch_monitor.write().await;
+            monitor.is_monitoring = false;
+        });
+
+        // Store the task handle
+        let mut task_handle = self.monitoring_task.lock().await;
+        *task_handle = Some(task);
+
+        Ok(())
+    }
+
+    async fn stop_touch_monitoring(&self) -> Result<(), String> {
+        let mut monitor = self.touch_monitor.write().await;
+        monitor.is_monitoring = false;
+        drop(monitor);
+
+        // Cancel the background task
+        let mut task_handle = self.monitoring_task.lock().await;
+        if let Some(task) = task_handle.take() {
+            task.abort();
+        }
+
+        Ok(())
+    }
+
     fn screen_dimensions(&self) -> (u32, u32) {
         (self.screen_x, self.screen_y)
     }

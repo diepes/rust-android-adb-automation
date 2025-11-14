@@ -1,9 +1,9 @@
 // https://crates.io/crates/adb_client
-use super::types::{AdbClient, Device};
-// use tokio::process::Command;
+use super::types::{AdbClient, Device, TouchActivityMonitor, TouchActivityState};
 use adb_client::{ADBDeviceExt, ADBServer, ADBServerDevice};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::time::Duration;
+use tokio::sync::{Mutex, RwLock};
 
 #[allow(dead_code)]
 pub struct RustAdb {
@@ -12,6 +12,8 @@ pub struct RustAdb {
     server_device: Arc<Mutex<ADBServerDevice>>, // underlying connected device
     screen_x: u32,
     screen_y: u32,
+    touch_monitor: TouchActivityMonitor,
+    monitoring_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl RustAdb {
@@ -269,6 +271,121 @@ impl RustAdb {
 
         Ok(data)
     }
+
+    async fn monitor_touch_activity_loop(
+        touch_monitor: TouchActivityMonitor,
+        server_device: Arc<Mutex<ADBServerDevice>>,
+    ) -> Result<(), String> {
+        // Try to find an input event device that handles touch events
+        let event_device = Self::find_touch_event_device(server_device.clone()).await?;
+        
+        if crate::gui::dioxus_app::is_debug_mode() {
+            println!("🔍 Starting touch monitoring on device: {}", event_device);
+        }
+
+        loop {
+            // Check if monitoring should continue
+            {
+                let monitor = touch_monitor.read().await;
+                if !monitor.is_monitoring {
+                    if crate::gui::dioxus_app::is_debug_mode() {
+                        println!("🛑 Touch monitoring stopped by flag");
+                    }
+                    break;
+                }
+            }
+
+            // Run getevent for a short duration to check for touch activity
+            match Self::check_for_touch_activity(server_device.clone(), &event_device).await {
+                Ok(touch_detected) => {
+                    if touch_detected {
+                        let mut monitor = touch_monitor.write().await;
+                        monitor.mark_touch_activity();
+                        if crate::gui::dioxus_app::is_debug_mode() {
+                            println!("👆 Human touch activity detected");
+                        }
+                    }
+                }
+                Err(e) => {
+                    if crate::gui::dioxus_app::is_debug_mode() {
+                        eprintln!("⚠️ Touch activity check failed: {}", e);
+                    }
+                    // Wait a bit before retrying
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            }
+
+            // Small delay to prevent excessive CPU usage
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        Ok(())
+    }
+
+    async fn find_touch_event_device(
+        server_device: Arc<Mutex<ADBServerDevice>>,
+    ) -> Result<String, String> {
+        let mut out: Vec<u8> = Vec::new();
+        let mut dev = server_device.lock().await;
+        
+        // List input devices and find touch device
+        dev.shell_command(&["sh", "-c", "ls /dev/input/event* 2>/dev/null | head -5"], &mut out)
+            .map_err(|e| format!("Failed to list input devices: {e}"))?;
+        
+        let output = String::from_utf8_lossy(&out);
+        let devices: Vec<&str> = output.trim().split('\n').filter(|s| !s.is_empty()).collect();
+        
+        if devices.is_empty() {
+            return Err("No input event devices found".to_string());
+        }
+
+        // Try to find a touch-capable device by checking device capabilities
+        for device in &devices {
+            let mut cap_out: Vec<u8> = Vec::new();
+            if dev.shell_command(&["sh", "-c", &format!("timeout 1s getevent -lt {} | head -1 2>/dev/null || echo 'timeout'", device)], &mut cap_out).is_ok() {
+                let cap_output = String::from_utf8_lossy(&cap_out);
+                // If we get any output (not timeout), this device is accessible
+                if !cap_output.contains("timeout") && !cap_output.trim().is_empty() {
+                    return Ok(device.to_string());
+                }
+            }
+        }
+
+        // Fallback to first available device
+        Ok(devices[0].to_string())
+    }
+
+    async fn check_for_touch_activity(
+        server_device: Arc<Mutex<ADBServerDevice>>,
+        event_device: &str,
+    ) -> Result<bool, String> {
+        let mut out: Vec<u8> = Vec::new();
+        let mut dev = server_device.lock().await;
+        
+        // Run getevent for a short time to check for any touch input events
+        let command = format!("timeout 0.5s getevent -lt {} 2>/dev/null || true", event_device);
+        dev.shell_command(&["sh", "-c", &command], &mut out)
+            .map_err(|e| format!("Failed to check touch activity: {e}"))?;
+        
+        let output = String::from_utf8_lossy(&out);
+        
+        // Check if we got any event lines indicating touch activity
+        // Touch events typically contain "ABS_MT" (multi-touch) or "BTN_TOUCH" or coordinate events
+        let touch_detected = output.lines().any(|line| {
+            line.contains("ABS_MT") || 
+            line.contains("BTN_TOUCH") || 
+            line.contains("ABS_X") || 
+            line.contains("ABS_Y") ||
+            (line.contains("0003") && (line.contains("0035") || line.contains("0036"))) // Raw touch coordinates
+        });
+
+        if touch_detected && crate::gui::dioxus_app::is_debug_mode() {
+            println!("📱 Touch event detected: {} lines", output.lines().count());
+        }
+
+        Ok(touch_detected)
+    }
 }
 
 impl AdbClient for RustAdb {
@@ -315,6 +432,8 @@ impl AdbClient for RustAdb {
             server_device: Arc::new(Mutex::new(dev)),
             screen_x: 0,
             screen_y: 0,
+            touch_monitor: Arc::new(RwLock::new(TouchActivityState::new(30))), // 30 second timeout
+            monitoring_task: Arc::new(Mutex::new(None)),
         };
         let (sx, sy) = tmp.get_screen_size_with().await?;
         Ok(RustAdb {
@@ -392,6 +511,65 @@ impl AdbClient for RustAdb {
         } else {
             Err(format!("RustAdb: Invalid IP format: {}", ip))
         }
+    }
+    
+    async fn is_human_touching(&self) -> bool {
+        let monitor = self.touch_monitor.read().await;
+        let is_active = monitor.is_human_active();
+        
+        if is_active && crate::gui::dioxus_app::is_debug_mode() {
+            println!("👆 is_human_touching: TRUE - Human touch detected, automation should pause");
+        }
+        
+        is_active
+    }
+
+    async fn start_touch_monitoring(&self) -> Result<(), String> {
+        let mut monitor = self.touch_monitor.write().await;
+        
+        if monitor.is_monitoring {
+            return Ok(()); // Already monitoring
+        }
+        
+        monitor.is_monitoring = true;
+        drop(monitor); // Release write lock
+
+        // Clone necessary data for the background task
+        let touch_monitor = Arc::clone(&self.touch_monitor);
+        let server_device = Arc::clone(&self.server_device);
+
+        // Start background monitoring task
+        let task = tokio::spawn(async move {
+            if let Err(e) = Self::monitor_touch_activity_loop(touch_monitor.clone(), server_device).await {
+                if crate::gui::dioxus_app::is_debug_mode() {
+                    eprintln!("Touch monitoring ended: {}", e);
+                }
+            }
+            
+            // Mark monitoring as stopped when task ends
+            let mut monitor = touch_monitor.write().await;
+            monitor.is_monitoring = false;
+        });
+
+        // Store the task handle
+        let mut task_handle = self.monitoring_task.lock().await;
+        *task_handle = Some(task);
+
+        Ok(())
+    }
+
+    async fn stop_touch_monitoring(&self) -> Result<(), String> {
+        let mut monitor = self.touch_monitor.write().await;
+        monitor.is_monitoring = false;
+        drop(monitor);
+
+        // Cancel the background task
+        let mut task_handle = self.monitoring_task.lock().await;
+        if let Some(task) = task_handle.take() {
+            task.abort();
+        }
+
+        Ok(())
     }
 
     fn screen_dimensions(&self) -> (u32, u32) {

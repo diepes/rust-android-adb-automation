@@ -153,6 +153,24 @@ impl GameAutomation {
                 }
 
                 self.adb_client = Some(Arc::new(Mutex::new(client)));
+                
+                // Start touch monitoring for automatic pause/resume
+                if let Some(client_arc) = &self.adb_client {
+                    let client_guard = client_arc.lock().await;
+                    if let Err(e) = client_guard.start_touch_monitoring().await {
+                        debug_print!(
+                            self.debug_enabled,
+                            "⚠️ Failed to start touch monitoring: {}",
+                            e
+                        );
+                    } else {
+                        debug_print!(
+                            self.debug_enabled,
+                            "👆 Touch monitoring started (30s timeout)"
+                        );
+                    }
+                }
+                
                 debug_print!(
                     self.debug_enabled,
                     "🤖 Game automation initialized ({}x{})",
@@ -299,6 +317,21 @@ impl GameAutomation {
             }
             AutomationCommand::Stop => {
                 self.is_running = false;
+                
+                // Stop touch monitoring when automation stops
+                if let Some(client_arc) = &self.adb_client {
+                    let client_guard = client_arc.lock().await;
+                    if let Err(e) = client_guard.stop_touch_monitoring().await {
+                        debug_print!(
+                            self.debug_enabled,
+                            "⚠️ Failed to stop touch monitoring: {}",
+                            e
+                        );
+                    } else {
+                        debug_print!(self.debug_enabled, "👆 Touch monitoring stopped");
+                    }
+                }
+                
                 self.change_state(GameState::Idle).await;
                 debug_print!(self.debug_enabled, "⏹️ Game automation stopped");
             }
@@ -485,8 +518,51 @@ impl GameAutomation {
         debug_print!(self.debug_enabled, "🎮 Event-driven automation FSM ended");
     }
 
-    /// Process all ready timed events
+    /// Process all ready timed events (pauses if human is touching device)
     async fn process_timed_events(&mut self) {
+        // Check if human is currently touching the device
+        if let Some(client) = &self.adb_client {
+            let client_guard = client.lock().await;
+            let human_touching = client_guard.is_human_touching().await;
+            
+            if human_touching {
+                debug_print!(
+                    self.debug_enabled, 
+                    "🚫 AUTOMATION PAUSED: Human touch detected - skipping timed events"
+                );
+                // Send notification that human activity is detected
+                let _ = self.event_tx.send(AutomationEvent::ManualActivityDetected(true)).await;
+                return; // Skip processing timed events while human is touching
+            } else {
+                // Only send "no activity" notification if we haven't sent it recently
+                use std::sync::LazyLock;
+                use std::sync::Mutex as StdMutex;
+                
+                static LAST_NO_ACTIVITY_SENT: LazyLock<StdMutex<std::time::Instant>> = LazyLock::new(|| {
+                    StdMutex::new(std::time::Instant::now())
+                });
+                
+                let should_send = {
+                    let mut last_sent = LAST_NO_ACTIVITY_SENT.lock().unwrap();
+                    let elapsed = last_sent.elapsed().as_secs();
+                    if elapsed > 5 { // Send at most every 5 seconds
+                        *last_sent = std::time::Instant::now();
+                        true
+                    } else {
+                        false
+                    }
+                };
+                
+                if should_send {
+                    debug_print!(
+                        self.debug_enabled, 
+                        "✅ AUTOMATION ACTIVE: No human touch detected - processing events"
+                    );
+                    let _ = self.event_tx.send(AutomationEvent::ManualActivityDetected(false)).await;
+                }
+            }
+        }
+
         let mut events_to_execute = Vec::new();
 
         // Collect ready events

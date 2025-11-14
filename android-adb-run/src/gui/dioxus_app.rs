@@ -64,6 +64,7 @@ fn App() -> Element {
     let automation_command_tx = use_signal(|| None::<mpsc::Sender<AutomationCommand>>);
     let timed_tap_countdown = use_signal(|| None::<(String, u64)>); // (id, seconds_remaining)
     let timed_events_list = use_signal(|| Vec::<TimedEvent>::new()); // All timed events
+    let is_paused_by_touch = use_signal(|| false); // New signal for touch-based pause state
 
     let selection_start = use_signal(|| None::<dioxus::html::geometry::ElementPoint>);
     let selection_end = use_signal(|| None::<dioxus::html::geometry::ElementPoint>);
@@ -234,6 +235,7 @@ fn App() -> Element {
         let mut screenshot_status_clone = screenshot_status.clone();
         let mut timed_tap_countdown_clone = timed_tap_countdown.clone();
         let mut timed_events_list_clone = timed_events_list.clone();
+        let mut is_paused_by_touch_clone = is_paused_by_touch.clone();
 
         spawn(async move {
             // Create automation channels
@@ -382,6 +384,22 @@ fn App() -> Element {
                             }
                             // Could use this for a general event countdown if needed
                         }
+                        AutomationEvent::ManualActivityDetected(is_active) => {
+                            // Update the pause state signal
+                            is_paused_by_touch_clone.set(is_active);
+                            
+                            if debug_mode {
+                                println!("👆 GUI: Manual touch activity: {} - automation {}", 
+                                    if is_active { "DETECTED" } else { "TIMEOUT" },
+                                    if is_active { "PAUSED" } else { "RESUMED" });
+                            }
+                            // Update GUI status to indicate touch activity with more prominent messaging
+                            if is_active {
+                                screenshot_status_clone.set("🚫 PAUSED: Human touch detected".to_string());
+                            } else {
+                                screenshot_status_clone.set("▶️ RESUMED: Touch timeout - automation active".to_string());
+                            }
+                        }
                     }
                 }
             });
@@ -426,6 +444,32 @@ fn App() -> Element {
                         if let Some((name, transport_id_opt, screen_x, screen_y)) = device_info.read().clone() {
                             // Device metadata panel
                             DeviceInfo { name: name.clone(), transport_id: transport_id_opt, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string() }
+                            
+                            // Touch activity pause indicator (prominently displayed)
+                            if is_paused_by_touch.read().clone() {
+                                div { style: "background: linear-gradient(45deg, #ff6b6b, #ff8787); backdrop-filter: blur(10px); padding: 15px; border-radius: 12px; margin-bottom: 15px; border: 2px solid #ff4757; box-shadow: 0 0 20px rgba(255, 71, 87, 0.3);",
+                                    div { style: "display: flex; align-items: center; justify-content: center; gap: 12px;",
+                                        span { style: "font-size: 1.5em;", "🚫" }
+                                        div { style: "text-align: center;",
+                                            h3 { style: "margin: 0; color: white; font-size: 1.1em; font-weight: bold;", "AUTOMATION PAUSED" }
+                                            p { style: "margin: 5px 0 0 0; color: rgba(255,255,255,0.9); font-size: 0.9em;", "Human touch detected - remove finger to resume" }
+                                        }
+                                        span { style: "font-size: 1.5em;", "👆" }
+                                    }
+                                }
+                            } else {
+                                // Show automation active indicator when not paused
+                                div { style: "background: linear-gradient(45deg, #4cd964, #5cb85c); backdrop-filter: blur(10px); padding: 12px; border-radius: 12px; margin-bottom: 15px; border: 1px solid rgba(76, 217, 100, 0.3);",
+                                    div { style: "display: flex; align-items: center; justify-content: center; gap: 10px;",
+                                        span { style: "font-size: 1.2em;", "▶️" }
+                                        div { style: "text-align: center;",
+                                            h4 { style: "margin: 0; color: white; font-size: 0.95em; font-weight: bold;", "AUTOMATION ACTIVE" }
+                                            p { style: "margin: 3px 0 0 0; color: rgba(255,255,255,0.8); font-size: 0.8em;", "Touch screen to pause automation" }
+                                        }
+                                        span { style: "font-size: 1.2em;", "🤖" }
+                                    }
+                                }
+                            }
                             // Action buttons (screenshot, save, exit, etc)
                             Actions {
                                 screenshot_status: screenshot_status,
