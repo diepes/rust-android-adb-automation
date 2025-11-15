@@ -450,20 +450,7 @@ fn App() -> Element {
                             // Device metadata panel
                             DeviceInfo { name: name.clone(), transport_id: transport_id_opt, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string() }
 
-                            // Touch activity pause indicator (prominently displayed)
-                            if is_paused_by_touch.read().clone() {
-                                div { style: "background: linear-gradient(45deg, #ff6b6b, #ff8787); backdrop-filter: blur(10px); padding: 15px; border-radius: 12px; margin-bottom: 15px; border: 2px solid #ff4757; box-shadow: 0 0 20px rgba(255, 71, 87, 0.3);",
-                                    div { style: "display: flex; align-items: center; justify-content: center; gap: 12px;",
-                                        span { style: "font-size: 1.5em;", "🚫" }
-                                        div { style: "text-align: center;",
-                                            h3 { style: "margin: 0; color: white; font-size: 1.1em; font-weight: bold;", "AUTOMATION PAUSED" }
-                                            p { style: "margin: 5px 0 0 0; color: rgba(255,255,255,0.9); font-size: 0.9em;", "Human touch detected - remove finger to resume" }
-                                        }
-                                        span { style: "font-size: 1.5em;", "👆" }
-                                    }
-                                }
-                            }
-                            // Action buttons (screenshot, save, exit, etc)
+                            // Action buttons (screenshot, save, exit, etc) - automation controls will show pause state
                             Actions {
                                 screenshot_status: screenshot_status,
                                 screenshot_bytes: screenshot_bytes,
@@ -472,7 +459,8 @@ fn App() -> Element {
                                 automation_state: automation_state,
                                 automation_command_tx: automation_command_tx,
                                 timed_tap_countdown: timed_tap_countdown,
-                                timed_events_list: timed_events_list
+                                timed_events_list: timed_events_list,
+                                is_paused_by_touch: is_paused_by_touch  // Pass touch pause state to Actions
                             }
                         } else {
                             // Fallback panel if no device is connected

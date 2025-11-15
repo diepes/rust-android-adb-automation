@@ -14,6 +14,7 @@ pub struct ActionsProps {
     pub automation_command_tx: Signal<Option<mpsc::Sender<AutomationCommand>>>,
     pub timed_tap_countdown: Signal<Option<(String, u64)>>, // (id, seconds_remaining)
     pub timed_events_list: Signal<Vec<TimedEvent>>,         // All timed events
+    pub is_paused_by_touch: Signal<bool>,                   // Touch-based pause indicator
 }
 
 #[component]
@@ -25,6 +26,7 @@ pub fn Actions(props: ActionsProps) -> Element {
     let automation_state = props.automation_state;
     let automation_command_tx = props.automation_command_tx;
     let timed_events_list = props.timed_events_list;
+    let is_paused_by_touch = props.is_paused_by_touch;
 
     rsx! {
         div { style: "background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 15px; border-radius: 15px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.2);",
@@ -37,61 +39,86 @@ pub fn Actions(props: ActionsProps) -> Element {
             div { style: "display: flex; flex-direction: column; gap: 12px;",
                 // Status and control buttons
                 div { style: "display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: center;",
-                    // Automation state indicator
-                    div {
-                        style: match *automation_state.read() {
-                            GameState::Idle => "background: #666; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;",
-                            GameState::Running => "background: #28a745; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;",
-                            GameState::Paused => "background: #fd7e14; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;",
-                        },
-                        {format!("{:?}", *automation_state.read())}
+                    // Automation state indicator with touch pause detection
+                    {
+                        let is_touch_paused = is_paused_by_touch.read().clone();
+                        let state = automation_state.read().clone();
+                        let (display_text, style) = if is_touch_paused && state == GameState::Running {
+                            ("Paused 👆", "background: #ff6b6b; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;")
+                        } else {
+                            match state {
+                                GameState::Idle => ("Idle", "background: #666; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;"),
+                                GameState::Running => ("Running", "background: #28a745; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;"),
+                                GameState::Paused => ("Paused", "background: #fd7e14; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;"),
+                            }
+                        };
+                        rsx! {
+                            div { style: "{style}", "{display_text}" }
+                        }
                     }
 
-                    // Control buttons
-                    if *automation_state.read() == GameState::Idle || *automation_state.read() == GameState::Paused {
-                        button { style: "background: linear-gradient(45deg, #28a745, #20c997); color: white; padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: bold;",
-                            onclick: move |_| {
-                                if let Some(tx) = automation_command_tx.read().as_ref() {
-                                    let tx = tx.clone();
-                                    spawn(async move {
-                                        let cmd = if *automation_state.peek() == GameState::Paused {
-                                            AutomationCommand::Resume
-                                        } else {
-                                            AutomationCommand::Start
-                                        };
-                                        let _ = tx.send(cmd).await;
-                                    });
+                    // Control buttons - show Resume when touch paused
+                    {
+                        let is_touch_paused = is_paused_by_touch.read().clone();
+                        let state = automation_state.read().clone();
+                        let effective_state = if is_touch_paused && state == GameState::Running {
+                            GameState::Paused
+                        } else {
+                            state
+                        };
+                        
+                        rsx! {
+                            if effective_state == GameState::Idle || effective_state == GameState::Paused {
+                                button { style: "background: linear-gradient(45deg, #28a745, #20c997); color: white; padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: bold;",
+                                    onclick: {
+                                        let state_for_click = effective_state.clone();
+                                        move |_| {
+                                            if let Some(tx) = automation_command_tx.read().as_ref() {
+                                                let tx = tx.clone();
+                                                let is_paused = state_for_click == GameState::Paused;
+                                                spawn(async move {
+                                                    let cmd = if is_paused {
+                                                        AutomationCommand::Resume
+                                                    } else {
+                                                        AutomationCommand::Start
+                                                    };
+                                                    let _ = tx.send(cmd).await;
+                                                });
+                                            }
+                                        }
+                                    },
+                                    if effective_state == GameState::Paused { "▶️ Resume" } else { "🚀 Start" }
                                 }
-                            },
-                            if *automation_state.read() == GameState::Paused { "▶️ Resume" } else { "🚀 Start" }
+                            }
+                            if effective_state == GameState::Running {
+                                button { style: "background: linear-gradient(45deg, #fd7e14, #f39c12); color: white; padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: bold;",
+                                    onclick: move |_| {
+                                        if let Some(tx) = automation_command_tx.read().as_ref() {
+                                            let tx = tx.clone();
+                                            spawn(async move {
+                                                let _ = tx.send(AutomationCommand::Pause).await;
+                                            });
+                                        }
+                                    },
+                                    "⏸️ Pause"
+                                }
+                            }
+                            if effective_state != GameState::Idle {
+                                button { style: "background: linear-gradient(45deg, #dc3545, #e74c3c); color: white; padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: bold;",
+                                    onclick: move |_| {
+                                        if let Some(tx) = automation_command_tx.read().as_ref() {
+                                            let tx = tx.clone();
+                                            spawn(async move {
+                                                let _ = tx.send(AutomationCommand::Stop).await;
+                                            });
+                                        }
+                                    },
+                                    "⏹️ Stop"
+                                }
+                            }
                         }
                     }
-                    if *automation_state.read() == GameState::Running {
-                        button { style: "background: linear-gradient(45deg, #fd7e14, #f39c12); color: white; padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: bold;",
-                            onclick: move |_| {
-                                if let Some(tx) = automation_command_tx.read().as_ref() {
-                                    let tx = tx.clone();
-                                    spawn(async move {
-                                        let _ = tx.send(AutomationCommand::Pause).await;
-                                    });
-                                }
-                            },
-                            "⏸️ Pause"
-                        }
-                    }
-                    if *automation_state.read() != GameState::Idle {
-                        button { style: "background: linear-gradient(45deg, #dc3545, #e74c3c); color: white; padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: bold;",
-                            onclick: move |_| {
-                                if let Some(tx) = automation_command_tx.read().as_ref() {
-                                    let tx = tx.clone();
-                                    spawn(async move {
-                                        let _ = tx.send(AutomationCommand::Stop).await;
-                                    });
-                                }
-                            },
-                            "⏹️ Stop"
-                        }
-                    }
+
                     button { style: "background: linear-gradient(45deg, #6f42c1, #563d7c); color: white; padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: bold;",
                         onclick: move |_| {
                             if let Some(tx) = automation_command_tx.read().as_ref() {

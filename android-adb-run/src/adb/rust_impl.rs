@@ -324,7 +324,11 @@ impl RustAdb {
         Ok(())
     }
 
-    // Stream touch events continuously and update touch state in real-time
+    /// Stream touch events continuously using real shell streaming
+    /// 
+    /// This implementation uses the shell() method with reader/writer to create
+    /// a persistent shell session that continuously streams getevent output.
+    /// This is much more efficient than running repeated timeout commands.
     async fn stream_touch_events(
         server_device: Arc<Mutex<ADBServerDevice>>,
         event_device: &str,
@@ -332,14 +336,157 @@ impl RustAdb {
     ) -> Result<(), String> {
         if crate::gui::dioxus_app::is_debug_mode() {
             println!(
-                "📡 Starting continuous getevent stream for {}",
+                "📡 Starting real-time getevent stream for {}",
                 event_device
             );
         }
 
-        // For the Rust implementation, we need to use a different approach since we can't
-        // stream from shell_command. We'll use periodic longer checks instead.
-        let check_interval = Duration::from_millis(250); // Check every 250ms
+        // Try the streaming approach first, fall back to polling if it fails
+        match Self::stream_touch_events_with_shell_streaming(
+            server_device.clone(),
+            event_device,
+            touch_monitor.clone(),
+        )
+        .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                if crate::gui::dioxus_app::is_debug_mode() {
+                    eprintln!("⚠️ Shell streaming failed: {}, falling back to polling", e);
+                }
+                Self::stream_touch_events_polling(server_device, event_device, touch_monitor).await
+            }
+        }
+    }
+
+    /// Real streaming implementation using shell() with reader/writer
+    /// 
+    /// The shell() method signature from adb_client is:
+    /// fn shell(&mut self, reader: &mut dyn Read, writer: Box<dyn Write + Send>) -> Result<()>
+    /// 
+    /// Where:
+    /// - reader: receives input commands to send to the shell
+    /// - writer: receives output from the shell
+    async fn stream_touch_events_with_shell_streaming(
+        server_device: Arc<Mutex<ADBServerDevice>>,
+        event_device: &str,
+        touch_monitor: TouchActivityMonitor,
+    ) -> Result<(), String> {
+        use std::io::{Cursor, Write};
+        use std::sync::mpsc;
+        
+        if crate::gui::dioxus_app::is_debug_mode() {
+            println!("🔄 Starting shell streaming for getevent on {}", event_device);
+        }
+
+        let event_device = event_device.to_string();
+        let touch_monitor_clone = Arc::clone(&touch_monitor);
+        
+        // Create a channel to receive output lines
+        let (tx, rx) = mpsc::channel::<String>();
+        
+        // Prepare the command to send to the shell
+        let command = format!("getevent -lt {}\n", event_device);
+        
+        // Spawn a blocking task to handle the shell I/O
+        let handle = tokio::task::spawn_blocking(move || -> Result<(), String> {
+            let mut dev = server_device.blocking_lock();
+            
+            // Create a reader with the command we want to execute
+            let mut command_reader = Cursor::new(command.as_bytes());
+            
+            // Create a writer that will capture the output and send it through the channel
+            struct ChannelWriter {
+                tx: mpsc::Sender<String>,
+                buffer: Vec<u8>,
+            }
+            
+            impl Write for ChannelWriter {
+                fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                    self.buffer.extend_from_slice(buf);
+                    
+                    // Process complete lines
+                    while let Some(pos) = self.buffer.iter().position(|&b| b == b'\n') {
+                        let line_bytes = self.buffer.drain(..=pos).collect::<Vec<u8>>();
+                        if let Ok(line) = String::from_utf8(line_bytes) {
+                            let _ = self.tx.send(line);
+                        }
+                    }
+                    
+                    Ok(buf.len())
+                }
+                
+                fn flush(&mut self) -> std::io::Result<()> {
+                    // Flush any remaining data
+                    if !self.buffer.is_empty() {
+                        if let Ok(line) = String::from_utf8(self.buffer.clone()) {
+                            let _ = self.tx.send(line);
+                        }
+                        self.buffer.clear();
+                    }
+                    Ok(())
+                }
+            }
+            
+            let channel_writer = ChannelWriter {
+                tx: tx.clone(),
+                buffer: Vec::new(),
+            };
+            
+            let boxed_writer: Box<dyn Write + Send> = Box::new(channel_writer);
+            
+            // Call the shell method
+            match dev.shell(&mut command_reader, boxed_writer) {
+                Ok(_) => Ok(()),
+                Err(e) => Err(format!("Shell command failed: {}", e))
+            }
+        });
+
+        // In a separate task, process the lines from the channel
+        let process_handle = tokio::spawn(async move {
+            while let Ok(line) = rx.recv() {
+                // Check if monitoring should continue
+                {
+                    let monitor = touch_monitor_clone.read().await;
+                    if !monitor.is_monitoring {
+                        break;
+                    }
+                }
+                
+                // Check if this is a touch event
+                if Self::is_touch_event_line(&line) {
+                    let mut monitor = touch_monitor_clone.write().await;
+                    monitor.update_activity();
+                    
+                    if crate::gui::dioxus_app::is_debug_mode() {
+                        println!("👆 Touch event: {}", line.trim());
+                    }
+                }
+            }
+        });
+
+        // Wait for the shell task to complete
+        match handle.await {
+            Ok(result) => {
+                // Also wait for processing to finish
+                let _ = process_handle.await;
+                result
+            },
+            Err(e) => Err(format!("Task join error: {}", e)),
+        }
+    }
+
+    /// Optimized polling fallback method
+    async fn stream_touch_events_polling(
+        server_device: Arc<Mutex<ADBServerDevice>>,
+        event_device: &str,
+        touch_monitor: TouchActivityMonitor,
+    ) -> Result<(), String> {
+        if crate::gui::dioxus_app::is_debug_mode() {
+            println!("📊 Using optimized polling for touch detection on {}", event_device);
+        }
+
+        let check_interval = Duration::from_millis(100); // Faster polling
         let mut consecutive_quiet_periods = 0;
 
         loop {
@@ -361,36 +508,17 @@ impl RustAdb {
                 }
             }
 
-            // Perform a longer touch check (1 second window)
+            // Use shorter timeout for better responsiveness
             let mut out: Vec<u8> = Vec::new();
             {
                 let mut dev = server_device.lock().await;
                 let command = format!(
-                    "timeout 1s getevent -lt {} 2>/dev/null || true",
+                    "timeout 0.2s getevent -lt {} 2>/dev/null || true",
                     event_device
                 );
 
-                if crate::gui::dioxus_app::is_debug_mode() {
-                    println!("🔄 Executing getevent command: {}", command);
-                }
-
                 if let Ok(_) = dev.shell_command(&["sh", "-c", &command], &mut out) {
                     let output = String::from_utf8_lossy(&out);
-
-                    // Add debug logging to see what getevent is actually outputting
-                    if crate::gui::dioxus_app::is_debug_mode() {
-                        if !output.is_empty() {
-                            println!("🔍 Raw getevent output ({} lines):", output.lines().count());
-                            for line in output.lines().take(3) {
-                                println!("  📄 {}", line);
-                            }
-                            if output.lines().count() > 3 {
-                                println!("  ... and {} more lines", output.lines().count() - 3);
-                            }
-                        } else {
-                            println!("🔍 No getevent output");
-                        }
-                    }
 
                     // Check for touch events in the output
                     let has_touch_events =
@@ -407,16 +535,16 @@ impl RustAdb {
                         if crate::gui::dioxus_app::is_debug_mode() {
                             let event_count = output.lines().count();
                             println!(
-                                "👆 Touch activity detected - {} events in 1s window",
+                                "👆 Touch activity detected - {} events in 0.2s window",
                                 event_count
                             );
                         }
                     } else {
                         consecutive_quiet_periods += 1;
 
-                        // If we've had many quiet periods, we can increase the check interval slightly
-                        if consecutive_quiet_periods > 10 {
-                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        // Gradually increase check interval during quiet periods
+                        if consecutive_quiet_periods > 20 {
+                            tokio::time::sleep(Duration::from_millis(50)).await;
                         }
                     }
                 }
