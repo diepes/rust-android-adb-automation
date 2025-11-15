@@ -1,6 +1,6 @@
 // gui/components/actions.rs
-use crate::game_automation::{AutomationCommand, GameState};
 use crate::game_automation::types::TimedEvent;
+use crate::game_automation::{AutomationCommand, GameState};
 use dioxus::prelude::*;
 use tokio::sync::mpsc;
 
@@ -13,7 +13,7 @@ pub struct ActionsProps {
     pub automation_state: Signal<GameState>,
     pub automation_command_tx: Signal<Option<mpsc::Sender<AutomationCommand>>>,
     pub timed_tap_countdown: Signal<Option<(String, u64)>>, // (id, seconds_remaining)
-    pub timed_events_list: Signal<Vec<TimedEvent>>, // All timed events
+    pub timed_events_list: Signal<Vec<TimedEvent>>,         // All timed events
 }
 
 #[component]
@@ -130,7 +130,7 @@ pub fn Actions(props: ActionsProps) -> Element {
                     }
                 }
 
-                // Timed Events List Display  
+                // Timed Events List Display
                 if !timed_events_list.read().is_empty() {
                     div { style: "background: rgba(0,0,0,0.2); border-radius: 8px; padding: 10px 12px; border: 1px solid rgba(255,255,255,0.2);",
                         // Filter out system events and count visible events
@@ -139,20 +139,20 @@ pub fn Actions(props: ActionsProps) -> Element {
                             let visible_events: Vec<_> = events.iter()
                                 .filter(|event| event.id != "countdown_update")
                                 .collect();
-                            
+
                             rsx! {
                                 div { style: "display: flex; align-items: center; gap: 6px; margin-bottom: 8px;",
                                     span { style: "font-size: 0.9em; color: #87ceeb; font-weight: bold;", "🕒 Timed Events" }
                                     span { style: "font-size: 0.75em; color: #ccc;", "({visible_events.len()} events)" }
                                 }
-                                
+
                                 // Individual event displays
                                 for event in visible_events {
                                     div { style: "background: rgba(255,255,255,0.05); border-radius: 6px; padding: 8px; margin-bottom: 6px; border: 1px solid rgba(255,255,255,0.1);",
                                         div { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;",
                                             // Event name and type
                                             div { style: "display: flex; align-items: center; gap: 6px;",
-                                                span { 
+                                                span {
                                                     style: "font-size: 0.85em; font-weight: bold;",
                                                     {
                                                         match &event.event_type {
@@ -162,7 +162,7 @@ pub fn Actions(props: ActionsProps) -> Element {
                                                         }
                                                     }
                                                 }
-                                                span { 
+                                                span {
                                                     style: "font-size: 0.8em; color: #87ceeb;",
                                                     {event.id.clone()}
                                                 }
@@ -172,12 +172,12 @@ pub fn Actions(props: ActionsProps) -> Element {
                                                     "({event.execution_count})"
                                                 }
                                             }
-                                            
+
                                             // Control buttons row
                                             div { style: "display: flex; align-items: center; gap: 4px;",
                                                 // Status indicator (clickable toggle)
                                                 button {
-                                                    style: if event.enabled { 
+                                                    style: if event.enabled {
                                                         "background: #28a745; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.7em; font-weight: bold; border: none; cursor: pointer; transition: all 0.2s ease;"
                                                     } else {
                                                         "background: #6c757d; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.7em; font-weight: bold; border: none; cursor: pointer; transition: all 0.2s ease;"
@@ -203,7 +203,7 @@ pub fn Actions(props: ActionsProps) -> Element {
                                                     title: if event.enabled { "Click to disable this event" } else { "Click to enable this event" },
                                                     if event.enabled { "ON" } else { "OFF" }
                                                 }
-                                                
+
                                                 // Fire immediately button
                                                 button {
                                                     style: if event.enabled {
@@ -227,30 +227,30 @@ pub fn Actions(props: ActionsProps) -> Element {
                                                             }
                                                         }
                                                     },
-                                                    title: if event.enabled { 
-                                                        "Click to trigger this event immediately" 
-                                                    } else { 
-                                                        "Enable event first to trigger it" 
+                                                    title: if event.enabled {
+                                                        "Click to trigger this event immediately"
+                                                    } else {
+                                                        "Enable event first to trigger it"
                                                     },
                                                     "🔫"
                                                 }
                                             }
                                         }
-                                        
+
                                         // Countdown info
                                         div { style: "display: flex; justify-content: space-between; align-items: center; font-size: 0.75em;",
                                             div { style: "color: #ccc;",
                                                 "Interval: {event.interval.as_secs()}s"
                                                 {
                                                     match &event.event_type {
-                                                        crate::game_automation::types::TimedEventType::Tap { x, y } => 
+                                                        crate::game_automation::types::TimedEventType::Tap { x, y } =>
                                                             format!(" | Tap: ({}, {})", x, y),
                                                         _ => String::new()
                                                     }
                                                 }
                                             }
-                                            
-                                            // Time remaining display  
+
+                                            // Time remaining display
                                             div { style: "color: #87ceeb; font-weight: bold;",
                                                 {
                                                     if let Some(time_until) = event.time_until_next() {
@@ -268,7 +268,7 @@ pub fn Actions(props: ActionsProps) -> Element {
                                                 }
                                             }
                                         }
-                                        
+
                                         // Progress bar
                                         if event.enabled {
                                             div { style: "margin-top: 4px; background: rgba(255,255,255,0.1); border-radius: 3px; height: 4px; overflow: hidden;",

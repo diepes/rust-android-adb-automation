@@ -27,7 +27,7 @@ impl TouchActivityState {
             timeout_duration: Duration::from_secs(timeout_seconds),
         }
     }
-    
+
     pub fn is_human_active(&self) -> bool {
         if let Some(last_touch) = self.last_touch_time {
             last_touch.elapsed() < self.timeout_duration
@@ -35,15 +35,15 @@ impl TouchActivityState {
             false
         }
     }
-    
+
     pub fn mark_touch_activity(&mut self) {
         self.last_touch_time = Some(Instant::now());
     }
-    
+
     pub fn update_activity(&mut self) {
         self.mark_touch_activity();
     }
-    
+
     pub fn has_activity_expired(&self) -> bool {
         if let Some(last_touch) = self.last_touch_time {
             last_touch.elapsed() >= self.timeout_duration
@@ -91,12 +91,12 @@ pub trait AdbClient: Send + Sync {
         duration: Option<u32>,
     ) -> Result<(), String>;
     async fn get_device_ip(&self) -> Result<String, String>;
-    
+
     // Touch activity monitoring methods
     async fn is_human_touching(&self) -> bool;
     async fn start_touch_monitoring(&self) -> Result<(), String>;
     async fn stop_touch_monitoring(&self) -> Result<(), String>;
-    
+
     fn screen_dimensions(&self) -> (u32, u32);
     fn device_name(&self) -> &str;
     fn transport_id(&self) -> Option<u32>; // new optional shell-specific identifier

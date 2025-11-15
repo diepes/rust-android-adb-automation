@@ -56,10 +56,10 @@ impl GameAutomation {
         // Define timed taps with flexible intervals
         // Format: (id, x, y, interval_type, interval_value)
         let tap_definitions = vec![
-            ("claim_5d_tap", 110, 1300, "minutes", 2),   // Every 2 minutes
-            ("restart_tap", 110, 1600, "minutes", 9),    // Every 9 minutes  
-            ("claim_1d_tap", 350, 628, "seconds", 10),   // Every 90 seconds (1.5 min)
-            // Add more taps here as needed with seconds or minutes
+            ("claim_5d_tap", 110, 1300, "minutes", 2), // Every 2 minutes
+            ("restart_tap", 110, 1600, "minutes", 9),  // Every 9 minutes
+            ("claim_1d_tap", 350, 628, "seconds", 10), // Every 90 seconds (1.5 min)
+                                                       // Add more taps here as needed with seconds or minutes
         ];
 
         // Create and insert all timed tap events with flexible intervals
@@ -153,7 +153,7 @@ impl GameAutomation {
                 }
 
                 self.adb_client = Some(Arc::new(Mutex::new(client)));
-                
+
                 // Start touch monitoring for automatic pause/resume
                 if let Some(client_arc) = &self.adb_client {
                     let client_guard = client_arc.lock().await;
@@ -170,7 +170,7 @@ impl GameAutomation {
                         );
                     }
                 }
-                
+
                 debug_print!(
                     self.debug_enabled,
                     "🤖 Game automation initialized ({}x{})",
@@ -309,7 +309,7 @@ impl GameAutomation {
                 if self.is_running && self.state == GameState::Paused {
                     self.change_state(GameState::Running).await;
                     debug_print!(self.debug_enabled, "▶️ Game automation resumed");
-                    
+
                     // Send current events list and countdown information to GUI immediately after resume
                     self.send_timed_events_list().await;
                     self.send_timed_tap_countdowns().await;
@@ -317,7 +317,7 @@ impl GameAutomation {
             }
             AutomationCommand::Stop => {
                 self.is_running = false;
-                
+
                 // Stop touch monitoring when automation stops
                 if let Some(client_arc) = &self.adb_client {
                     let client_guard = client_arc.lock().await;
@@ -331,7 +331,7 @@ impl GameAutomation {
                         debug_print!(self.debug_enabled, "👆 Touch monitoring stopped");
                     }
                 }
-                
+
                 self.change_state(GameState::Idle).await;
                 debug_print!(self.debug_enabled, "⏹️ Game automation stopped");
             }
@@ -407,7 +407,11 @@ impl GameAutomation {
             AutomationCommand::TriggerTimedEvent(id) => {
                 if let Some(event) = self.timed_events.get(&id) {
                     if event.enabled {
-                        debug_print!(self.debug_enabled, "🔫 Triggering timed event '{}' immediately", id);
+                        debug_print!(
+                            self.debug_enabled,
+                            "🔫 Triggering timed event '{}' immediately",
+                            id
+                        );
                         // Execute the event immediately
                         match event.event_type {
                             TimedEventType::Screenshot => {
@@ -417,15 +421,31 @@ impl GameAutomation {
                                 if let Some(adb_client) = &self.adb_client {
                                     let client = adb_client.lock().await;
                                     if let Err(e) = client.tap(x, y).await {
-                                        debug_print!(self.debug_enabled, "⚠️ Failed to execute tap ({}, {}): {}", x, y, e);
+                                        debug_print!(
+                                            self.debug_enabled,
+                                            "⚠️ Failed to execute tap ({}, {}): {}",
+                                            x,
+                                            y,
+                                            e
+                                        );
                                     } else {
-                                        let _ = self.event_tx.send(AutomationEvent::TimedTapExecuted(id.clone(), x, y)).await;
+                                        let _ = self
+                                            .event_tx
+                                            .send(AutomationEvent::TimedTapExecuted(
+                                                id.clone(),
+                                                x,
+                                                y,
+                                            ))
+                                            .await;
                                     }
                                 }
                             }
                             TimedEventType::CountdownUpdate => {
                                 // Don't trigger countdown updates manually, they're system events
-                                debug_print!(self.debug_enabled, "⚠️ Cannot manually trigger countdown update event");
+                                debug_print!(
+                                    self.debug_enabled,
+                                    "⚠️ Cannot manually trigger countdown update event"
+                                );
                             }
                         }
                         // Mark as executed and send events list update
@@ -433,9 +453,16 @@ impl GameAutomation {
                             event.mark_executed();
                         }
                         self.send_timed_events_list().await;
-                        let _ = self.event_tx.send(AutomationEvent::TimedEventExecuted(id)).await;
+                        let _ = self
+                            .event_tx
+                            .send(AutomationEvent::TimedEventExecuted(id))
+                            .await;
                     } else {
-                        debug_print!(self.debug_enabled, "⚠️ Cannot trigger disabled event '{}'", id);
+                        debug_print!(
+                            self.debug_enabled,
+                            "⚠️ Cannot trigger disabled event '{}'",
+                            id
+                        );
                     }
                 } else {
                     debug_print!(
@@ -524,41 +551,47 @@ impl GameAutomation {
         if let Some(client) = &self.adb_client {
             let client_guard = client.lock().await;
             let human_touching = client_guard.is_human_touching().await;
-            
+
             if human_touching {
                 debug_print!(
-                    self.debug_enabled, 
+                    self.debug_enabled,
                     "🚫 AUTOMATION PAUSED: Human touch detected - skipping timed events"
                 );
                 // Send notification that human activity is detected
-                let _ = self.event_tx.send(AutomationEvent::ManualActivityDetected(true)).await;
+                let _ = self
+                    .event_tx
+                    .send(AutomationEvent::ManualActivityDetected(true))
+                    .await;
                 return; // Skip processing timed events while human is touching
             } else {
                 // Only send "no activity" notification if we haven't sent it recently
                 use std::sync::LazyLock;
                 use std::sync::Mutex as StdMutex;
-                
-                static LAST_NO_ACTIVITY_SENT: LazyLock<StdMutex<std::time::Instant>> = LazyLock::new(|| {
-                    StdMutex::new(std::time::Instant::now())
-                });
-                
+
+                static LAST_NO_ACTIVITY_SENT: LazyLock<StdMutex<std::time::Instant>> =
+                    LazyLock::new(|| StdMutex::new(std::time::Instant::now()));
+
                 let should_send = {
                     let mut last_sent = LAST_NO_ACTIVITY_SENT.lock().unwrap();
                     let elapsed = last_sent.elapsed().as_secs();
-                    if elapsed > 5 { // Send at most every 5 seconds
+                    if elapsed > 5 {
+                        // Send at most every 5 seconds
                         *last_sent = std::time::Instant::now();
                         true
                     } else {
                         false
                     }
                 };
-                
+
                 if should_send {
                     debug_print!(
-                        self.debug_enabled, 
+                        self.debug_enabled,
                         "✅ AUTOMATION ACTIVE: No human touch detected - processing events"
                     );
-                    let _ = self.event_tx.send(AutomationEvent::ManualActivityDetected(false)).await;
+                    let _ = self
+                        .event_tx
+                        .send(AutomationEvent::ManualActivityDetected(false))
+                        .await;
                 }
             }
         }
@@ -839,7 +872,8 @@ impl GameAutomation {
 
     /// Send current events list to GUI for display
     async fn send_timed_events_list(&self) {
-        let events: Vec<crate::game_automation::types::TimedEvent> = self.timed_events.values().cloned().collect();
+        let events: Vec<crate::game_automation::types::TimedEvent> =
+            self.timed_events.values().cloned().collect();
         let _ = self
             .event_tx
             .send(AutomationEvent::TimedEventsListed(events))

@@ -157,7 +157,7 @@ impl AdbClient for AdbBackend {
     async fn get_device_ip(&self) -> Result<String, String> {
         self.get_device_ip().await
     }
-    
+
     async fn is_human_touching(&self) -> bool {
         self.is_human_touching().await
     }

@@ -276,13 +276,17 @@ impl RustAdb {
         touch_monitor: TouchActivityMonitor,
         server_device: Arc<Mutex<ADBServerDevice>>,
     ) -> Result<(), String> {
-        // Try to find an input event device that handles touch events
+        // Find the correct touch input device
         let event_device = Self::find_touch_event_device(server_device.clone()).await?;
-        
+
         if crate::gui::dioxus_app::is_debug_mode() {
-            println!("🔍 Starting touch monitoring on device: {}", event_device);
+            println!(
+                "🔍 Starting continuous touch monitoring on device: {}",
+                event_device
+            );
         }
 
+        // Start a long-running getevent process to continuously stream touch events
         loop {
             // Check if monitoring should continue
             {
@@ -295,32 +299,152 @@ impl RustAdb {
                 }
             }
 
-            // Run getevent for a short duration to check for touch activity
-            match Self::check_for_touch_activity(server_device.clone(), &event_device).await {
-                Ok(touch_detected) => {
-                    if touch_detected {
-                        let mut monitor = touch_monitor.write().await;
-                        monitor.mark_touch_activity();
-                        if crate::gui::dioxus_app::is_debug_mode() {
-                            println!("👆 Human touch activity detected");
-                        }
+            // Start continuous event streaming
+            match Self::stream_touch_events(
+                server_device.clone(),
+                &event_device,
+                touch_monitor.clone(),
+            )
+            .await
+            {
+                Ok(_) => {
+                    if crate::gui::dioxus_app::is_debug_mode() {
+                        println!("📱 Touch event stream ended, restarting...");
                     }
                 }
                 Err(e) => {
                     if crate::gui::dioxus_app::is_debug_mode() {
-                        eprintln!("⚠️ Touch activity check failed: {}", e);
+                        eprintln!("⚠️ Touch monitoring error: {}, retrying in 2s...", e);
                     }
-                    // Wait a bit before retrying
                     tokio::time::sleep(Duration::from_secs(2)).await;
-                    continue;
                 }
             }
-
-            // Small delay to prevent excessive CPU usage
-            tokio::time::sleep(Duration::from_millis(100)).await;
         }
 
         Ok(())
+    }
+
+    // Stream touch events continuously and update touch state in real-time
+    async fn stream_touch_events(
+        server_device: Arc<Mutex<ADBServerDevice>>,
+        event_device: &str,
+        touch_monitor: TouchActivityMonitor,
+    ) -> Result<(), String> {
+        if crate::gui::dioxus_app::is_debug_mode() {
+            println!(
+                "📡 Starting continuous getevent stream for {}",
+                event_device
+            );
+        }
+
+        // For the Rust implementation, we need to use a different approach since we can't
+        // stream from shell_command. We'll use periodic longer checks instead.
+        let check_interval = Duration::from_millis(250); // Check every 250ms
+        let mut consecutive_quiet_periods = 0;
+
+        loop {
+            // Check if monitoring should continue
+            {
+                let monitor = touch_monitor.read().await;
+                if !monitor.is_monitoring {
+                    break;
+                }
+
+                // Check for timeout
+                if monitor.has_activity_expired() && monitor.last_touch_time.is_some() {
+                    drop(monitor);
+                    let mut monitor = touch_monitor.write().await;
+                    monitor.last_touch_time = None;
+                    if crate::gui::dioxus_app::is_debug_mode() {
+                        println!("⏰ Touch activity timeout - marking as inactive");
+                    }
+                }
+            }
+
+            // Perform a longer touch check (1 second window)
+            let mut out: Vec<u8> = Vec::new();
+            {
+                let mut dev = server_device.lock().await;
+                let command = format!(
+                    "timeout 1s getevent -lt {} 2>/dev/null || true",
+                    event_device
+                );
+
+                if crate::gui::dioxus_app::is_debug_mode() {
+                    println!("🔄 Executing getevent command: {}", command);
+                }
+
+                if let Ok(_) = dev.shell_command(&["sh", "-c", &command], &mut out) {
+                    let output = String::from_utf8_lossy(&out);
+
+                    // Add debug logging to see what getevent is actually outputting
+                    if crate::gui::dioxus_app::is_debug_mode() {
+                        if !output.is_empty() {
+                            println!("🔍 Raw getevent output ({} lines):", output.lines().count());
+                            for line in output.lines().take(3) {
+                                println!("  📄 {}", line);
+                            }
+                            if output.lines().count() > 3 {
+                                println!("  ... and {} more lines", output.lines().count() - 3);
+                            }
+                        } else {
+                            println!("🔍 No getevent output");
+                        }
+                    }
+
+                    // Check for touch events in the output
+                    let has_touch_events =
+                        output.lines().any(|line| Self::is_touch_event_line(line));
+
+                    if has_touch_events {
+                        {
+                            let mut monitor = touch_monitor.write().await;
+                            monitor.update_activity();
+                        }
+
+                        consecutive_quiet_periods = 0;
+
+                        if crate::gui::dioxus_app::is_debug_mode() {
+                            let event_count = output.lines().count();
+                            println!(
+                                "👆 Touch activity detected - {} events in 1s window",
+                                event_count
+                            );
+                        }
+                    } else {
+                        consecutive_quiet_periods += 1;
+
+                        // If we've had many quiet periods, we can increase the check interval slightly
+                        if consecutive_quiet_periods > 10 {
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                    }
+                }
+            }
+
+            // Wait before next check
+            tokio::time::sleep(check_interval).await;
+        }
+
+        Ok(())
+    }
+
+    // Check if a getevent line represents a touch event
+    fn is_touch_event_line(line: &str) -> bool {
+        // Look for touch-related events in getevent output
+        let is_touch = line.contains("ABS_MT") ||           // Multi-touch absolute events
+            line.contains("BTN_TOUCH") ||        // Touch button events  
+            line.contains("BTN_TOOL_FINGER") ||  // Finger tool events
+            line.contains("ABS_X") ||            // X coordinate
+            line.contains("ABS_Y") ||            // Y coordinate
+            (line.contains("0003") && (line.contains("0035") || line.contains("0036"))); // Raw coordinate events
+
+        // Add debug logging to see what events we're detecting
+        if is_touch && crate::gui::dioxus_app::is_debug_mode() {
+            println!("🔍 Touch event detected: {}", line.trim());
+        }
+
+        is_touch
     }
 
     async fn find_touch_event_device(
@@ -328,63 +452,161 @@ impl RustAdb {
     ) -> Result<String, String> {
         let mut out: Vec<u8> = Vec::new();
         let mut dev = server_device.lock().await;
-        
-        // List input devices and find touch device
-        dev.shell_command(&["sh", "-c", "ls /dev/input/event* 2>/dev/null | head -5"], &mut out)
-            .map_err(|e| format!("Failed to list input devices: {e}"))?;
-        
+
+        // Use getevent -p to get detailed device information
+        dev.shell_command(&["getevent", "-p"], &mut out)
+            .map_err(|e| format!("Failed to run getevent -p: {e}"))?;
+
         let output = String::from_utf8_lossy(&out);
-        let devices: Vec<&str> = output.trim().split('\n').filter(|s| !s.is_empty()).collect();
-        
-        if devices.is_empty() {
-            return Err("No input event devices found".to_string());
+        if crate::gui::dioxus_app::is_debug_mode() {
+            println!("🔍 Parsing getevent -p output for touch devices...");
         }
 
-        // Try to find a touch-capable device by checking device capabilities
-        for device in &devices {
-            let mut cap_out: Vec<u8> = Vec::new();
-            if dev.shell_command(&["sh", "-c", &format!("timeout 1s getevent -lt {} | head -1 2>/dev/null || echo 'timeout'", device)], &mut cap_out).is_ok() {
-                let cap_output = String::from_utf8_lossy(&cap_out);
-                // If we get any output (not timeout), this device is accessible
-                if !cap_output.contains("timeout") && !cap_output.trim().is_empty() {
-                    return Ok(device.to_string());
+        // Parse the output to find touch-capable devices
+        let mut current_device: Option<String> = None;
+        let mut current_name = String::new();
+        let mut has_touch_events = false;
+        let mut best_device: Option<String> = None;
+        let mut best_score = 0;
+
+        for line in output.lines() {
+            let line = line.trim();
+
+            // New device declaration: "add device N: /dev/input/eventX"
+            if line.starts_with("add device") && line.contains("/dev/input/event") {
+                // Save previous device if it was touch-capable
+                if let Some(ref device) = current_device {
+                    if has_touch_events {
+                        let score = Self::score_touch_device(&current_name);
+                        if crate::gui::dioxus_app::is_debug_mode() {
+                            println!(
+                                "  📱 Found touch device: {} (name: '{}', score: {})",
+                                device, current_name, score
+                            );
+                        }
+                        if score > best_score {
+                            best_device = Some(device.clone());
+                            best_score = score;
+                        }
+                    }
+                }
+
+                // Extract device path
+                if let Some(path_start) = line.find("/dev/input/event") {
+                    current_device = Some(line[path_start..].to_string());
+                    current_name.clear();
+                    has_touch_events = false;
+                }
+            }
+            // Device name: '  name:     "device_name"'
+            else if line.starts_with("name:") {
+                if let Some(name_start) = line.find('"') {
+                    if let Some(name_end) = line.rfind('"') {
+                        if name_start < name_end {
+                            current_name = line[name_start + 1..name_end].to_string();
+                        }
+                    }
+                }
+            }
+            // Look for touch-related ABS events
+            else if line.contains("ABS (0003)") || line.contains("0035") || line.contains("0036")
+            {
+                // ABS events with coordinates 0035 (ABS_MT_POSITION_X) or 0036 (ABS_MT_POSITION_Y)
+                has_touch_events = true;
+            }
+        }
+
+        // Check the last device
+        if let Some(ref device) = current_device {
+            if has_touch_events {
+                let score = Self::score_touch_device(&current_name);
+                if crate::gui::dioxus_app::is_debug_mode() {
+                    println!(
+                        "  📱 Found touch device: {} (name: '{}', score: {})",
+                        device, current_name, score
+                    );
+                }
+                if score > best_score {
+                    best_device = Some(device.clone());
+                    best_score = score;
                 }
             }
         }
 
-        // Fallback to first available device
-        Ok(devices[0].to_string())
+        match best_device {
+            Some(device) => {
+                if crate::gui::dioxus_app::is_debug_mode() {
+                    println!(
+                        "✅ Selected touch device: {} (score: {})",
+                        device, best_score
+                    );
+                }
+                Ok(device)
+            }
+            None => Err("No touch-capable input devices found".to_string()),
+        }
     }
 
-    async fn check_for_touch_activity(
-        server_device: Arc<Mutex<ADBServerDevice>>,
-        event_device: &str,
-    ) -> Result<bool, String> {
-        let mut out: Vec<u8> = Vec::new();
-        let mut dev = server_device.lock().await;
-        
-        // Run getevent for a short time to check for any touch input events
-        let command = format!("timeout 0.5s getevent -lt {} 2>/dev/null || true", event_device);
-        dev.shell_command(&["sh", "-c", &command], &mut out)
-            .map_err(|e| format!("Failed to check touch activity: {e}"))?;
-        
-        let output = String::from_utf8_lossy(&out);
-        
-        // Check if we got any event lines indicating touch activity
-        // Touch events typically contain "ABS_MT" (multi-touch) or "BTN_TOUCH" or coordinate events
-        let touch_detected = output.lines().any(|line| {
-            line.contains("ABS_MT") || 
-            line.contains("BTN_TOUCH") || 
-            line.contains("ABS_X") || 
-            line.contains("ABS_Y") ||
-            (line.contains("0003") && (line.contains("0035") || line.contains("0036"))) // Raw touch coordinates
-        });
+    // Score touch devices to pick the best one (higher score = better)
+    fn score_touch_device(device_name: &str) -> i32 {
+        let name_lower = device_name.to_lowercase();
+        let mut score = 0;
 
-        if touch_detected && crate::gui::dioxus_app::is_debug_mode() {
-            println!("📱 Touch event detected: {} lines", output.lines().count());
+        // Prioritize known touchscreen vendors
+        if name_lower.contains("synaptics") {
+            score += 100;
+        }
+        if name_lower.contains("atmel") {
+            score += 90;
+        }
+        if name_lower.contains("goodix") {
+            score += 90;
+        }
+        if name_lower.contains("focaltech") {
+            score += 90;
+        }
+        if name_lower.contains("ilitek") {
+            score += 90;
+        }
+        if name_lower.contains("cypress") {
+            score += 80;
+        }
+        if name_lower.contains("elan") {
+            score += 80;
         }
 
-        Ok(touch_detected)
+        // Generic touchscreen indicators
+        if name_lower.contains("touch") {
+            score += 50;
+        }
+        if name_lower.contains("screen") {
+            score += 40;
+        }
+        if name_lower.contains("panel") {
+            score += 30;
+        }
+        if name_lower.contains("ts") {
+            score += 20;
+        } // touchscreen abbreviation
+
+        // Avoid non-touch devices
+        if name_lower.contains("button") {
+            score -= 50;
+        }
+        if name_lower.contains("key") {
+            score -= 30;
+        }
+        if name_lower.contains("jack") {
+            score -= 50;
+        }
+        if name_lower.contains("audio") {
+            score -= 50;
+        }
+        if name_lower.contains("gpio") {
+            score -= 30;
+        }
+
+        score
     }
 }
 
@@ -492,19 +714,19 @@ impl AdbClient for RustAdb {
     async fn get_device_ip(&self) -> Result<String, String> {
         let mut out: Vec<u8> = Vec::new();
         let mut dev = self.server_device.lock().await;
-        
-        // Execute: ip route | awk '{print $9}' 
+
+        // Execute: ip route | awk '{print $9}'
         // Note: We need to use sh -c to handle the pipe and awk
         dev.shell_command(&["sh", "-c", "ip route | awk '{print $9}'"], &mut out)
             .map_err(|e| format!("RustAdb: get device IP failed: {e}"))?;
-        
+
         let output = String::from_utf8_lossy(&out);
         let ip = output.trim();
-        
+
         if ip.is_empty() {
             return Err("RustAdb: No IP address found".to_string());
         }
-        
+
         // Validate that it looks like an IP address
         if ip.split('.').count() == 4 && ip.chars().all(|c| c.is_ascii_digit() || c == '.') {
             Ok(ip.to_string())
@@ -512,25 +734,25 @@ impl AdbClient for RustAdb {
             Err(format!("RustAdb: Invalid IP format: {}", ip))
         }
     }
-    
+
     async fn is_human_touching(&self) -> bool {
         let monitor = self.touch_monitor.read().await;
         let is_active = monitor.is_human_active();
-        
+
         if is_active && crate::gui::dioxus_app::is_debug_mode() {
             println!("👆 is_human_touching: TRUE - Human touch detected, automation should pause");
         }
-        
+
         is_active
     }
 
     async fn start_touch_monitoring(&self) -> Result<(), String> {
         let mut monitor = self.touch_monitor.write().await;
-        
+
         if monitor.is_monitoring {
             return Ok(()); // Already monitoring
         }
-        
+
         monitor.is_monitoring = true;
         drop(monitor); // Release write lock
 
@@ -540,12 +762,14 @@ impl AdbClient for RustAdb {
 
         // Start background monitoring task
         let task = tokio::spawn(async move {
-            if let Err(e) = Self::monitor_touch_activity_loop(touch_monitor.clone(), server_device).await {
+            if let Err(e) =
+                Self::monitor_touch_activity_loop(touch_monitor.clone(), server_device).await
+            {
                 if crate::gui::dioxus_app::is_debug_mode() {
                     eprintln!("Touch monitoring ended: {}", e);
                 }
             }
-            
+
             // Mark monitoring as stopped when task ends
             let mut monitor = touch_monitor.write().await;
             monitor.is_monitoring = false;

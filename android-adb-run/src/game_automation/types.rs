@@ -35,7 +35,7 @@ impl PartialEq for TimedEvent {
             && self.enabled == other.enabled
             && self.repeating == other.repeating
             && self.execution_count == other.execution_count
-            // Intentionally skip last_executed for comparison since Instant doesn't implement PartialEq
+        // Intentionally skip last_executed for comparison since Instant doesn't implement PartialEq
     }
 }
 

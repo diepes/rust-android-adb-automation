@@ -102,13 +102,37 @@ Runtime enum `AdbBackend` dispatches each call to selected implementation.
 
 ## Moving Forward / TODO
 
-- Pause automation on manual events e.g. `adb shell getevent -lt /dev/input/event3`
+- ✅ Pause automation on manual events e.g. `adb shell getevent -lt /dev/input/event2` (COMPLETED: Smart touch device detection with `getevent -p` parsing)
 - Improve Rust backend device naming (currently mirrors identifier string).
 - Multi-device selection UI (instead of picking first automatically).
 - Cache single backend instance in GUI to reduce repeated connections.
 - Debounce screenshot auto-refresh.
 - Document env var `ADB_IMPL` in more detail (already set by CLI launcher).
 - Security: replace unsafe `set_var` once stable edition APIs allow.
+
+## Touch Activity Monitoring
+
+The application now includes intelligent touch activity detection that automatically pauses automation when human interaction is detected:
+
+### Smart Device Detection
+Uses `adb shell getevent -p` to intelligently identify the correct touchscreen device:
+- **Vendor Priority**: Synaptics (100), Atmel/Goodix/Focaltech (90), Cypress/Elan (80)
+- **Generic Detection**: "touch" (50), "screen" (40), "panel" (30), "ts" (20)
+- **Device Avoidance**: Excludes buttons, audio jacks, GPIO, and other non-touch devices
+
+Example device selection:
+```
+🔍 Parsing getevent -p output for touch devices...
+  📱 Found touch device: /dev/input/event2 (name: 'synaptics,s3320', score: 100)
+✅ Selected touch device: /dev/input/event2 (score: 100)
+```
+
+### Touch Monitoring Features
+- **Background Monitoring**: Continuous `getevent` monitoring for touch events
+- **30-Second Timeout**: Resumes automation after 30 seconds of no touch activity
+- **Visual Feedback**: GUI shows pause/resume state with prominent indicators
+- **Debug Output**: Comprehensive logging when `--debug` flag is used
+- **Cross-Platform**: Works with both Rust and Shell ADB backends
 
 ## Development Notes
 
