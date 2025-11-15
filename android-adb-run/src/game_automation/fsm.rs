@@ -553,14 +553,17 @@ impl GameAutomation {
             let human_touching = client_guard.is_human_touching().await;
 
             if human_touching {
+                // Get remaining seconds for countdown
+                let remaining_seconds = client_guard.get_touch_timeout_remaining().await;
+                
                 debug_print!(
                     self.debug_enabled,
                     "🚫 AUTOMATION PAUSED: Human touch detected - skipping timed events"
                 );
-                // Send notification that human activity is detected
+                // Send notification that human activity is detected with countdown
                 let _ = self
                     .event_tx
-                    .send(AutomationEvent::ManualActivityDetected(true))
+                    .send(AutomationEvent::ManualActivityDetected(true, remaining_seconds))
                     .await;
                 return; // Skip processing timed events while human is touching
             } else {
@@ -590,7 +593,7 @@ impl GameAutomation {
                     );
                     let _ = self
                         .event_tx
-                        .send(AutomationEvent::ManualActivityDetected(false))
+                        .send(AutomationEvent::ManualActivityDetected(false, None))
                         .await;
                 }
             }

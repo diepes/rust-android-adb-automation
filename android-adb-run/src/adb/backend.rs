@@ -103,6 +103,13 @@ impl AdbBackend {
         }
     }
 
+    pub async fn get_touch_timeout_remaining(&self) -> Option<u64> {
+        match self {
+            AdbBackend::Shell(s) => s.get_touch_timeout_remaining().await,
+            AdbBackend::Rust(r) => r.get_touch_timeout_remaining().await,
+        }
+    }
+
     pub async fn start_touch_monitoring(&self) -> Result<(), String> {
         match self {
             AdbBackend::Shell(s) => s.start_touch_monitoring().await,
@@ -160,6 +167,10 @@ impl AdbClient for AdbBackend {
 
     async fn is_human_touching(&self) -> bool {
         self.is_human_touching().await
+    }
+
+    async fn get_touch_timeout_remaining(&self) -> Option<u64> {
+        self.get_touch_timeout_remaining().await
     }
 
     async fn start_touch_monitoring(&self) -> Result<(), String> {

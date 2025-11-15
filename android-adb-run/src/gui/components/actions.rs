@@ -15,6 +15,7 @@ pub struct ActionsProps {
     pub timed_tap_countdown: Signal<Option<(String, u64)>>, // (id, seconds_remaining)
     pub timed_events_list: Signal<Vec<TimedEvent>>,         // All timed events
     pub is_paused_by_touch: Signal<bool>,                   // Touch-based pause indicator
+    pub touch_timeout_remaining: Signal<Option<u64>>,       // Remaining seconds until touch timeout expires
 }
 
 #[component]
@@ -27,6 +28,7 @@ pub fn Actions(props: ActionsProps) -> Element {
     let automation_command_tx = props.automation_command_tx;
     let timed_events_list = props.timed_events_list;
     let is_paused_by_touch = props.is_paused_by_touch;
+    let touch_timeout_remaining = props.touch_timeout_remaining;
 
     rsx! {
         div { style: "background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 15px; border-radius: 15px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.2);",
@@ -43,14 +45,23 @@ pub fn Actions(props: ActionsProps) -> Element {
                     {
                         let is_touch_paused = is_paused_by_touch.read().clone();
                         let state = automation_state.read().clone();
+                        let remaining_secs = touch_timeout_remaining.read().clone();
+                        
                         let (display_text, style) = if is_touch_paused && state == GameState::Running {
-                            ("Paused 👆", "background: #ff6b6b; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;")
+                            // Show countdown if available
+                            let text = if let Some(secs) = remaining_secs {
+                                format!("Paused - {} sec", secs)
+                            } else {
+                                "Paused - Activity".to_string()
+                            };
+                            (text, "background: #ff6b6b; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;".to_string())
                         } else {
-                            match state {
-                                GameState::Idle => ("Idle", "background: #666; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;"),
-                                GameState::Running => ("Running", "background: #28a745; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;"),
-                                GameState::Paused => ("Paused", "background: #fd7e14; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;"),
-                            }
+                            let (text, style_str) = match state {
+                                GameState::Idle => ("Idle".to_string(), "background: #666; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;"),
+                                GameState::Running => ("Running".to_string(), "background: #28a745; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;"),
+                                GameState::Paused => ("Paused".to_string(), "background: #fd7e14; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; font-weight: 600;"),
+                            };
+                            (text, style_str.to_string())
                         };
                         rsx! {
                             div { style: "{style}", "{display_text}" }
@@ -64,17 +75,26 @@ pub fn Actions(props: ActionsProps) -> Element {
                         let effective_state = if is_touch_paused && state == GameState::Running {
                             GameState::Paused
                         } else {
-                            state
+                            state.clone()
                         };
                         
                         rsx! {
                             if effective_state == GameState::Idle || effective_state == GameState::Paused {
-                                button { style: "background: linear-gradient(45deg, #28a745, #20c997); color: white; padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: bold;",
+                                button { 
+                                    style: "background: linear-gradient(45deg, #28a745, #20c997); color: white; padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: bold;",
                                     onclick: {
                                         let state_for_click = effective_state.clone();
+                                        let actual_state = state.clone();
+                                        let touch_paused = is_touch_paused;
                                         move |_| {
                                             if let Some(tx) = automation_command_tx.read().as_ref() {
                                                 let tx = tx.clone();
+                                                // If touch-paused (effective paused but actual running), don't send command
+                                                // The automation will resume automatically when touch clears
+                                                if touch_paused && actual_state == GameState::Running {
+                                                    // Just return - automation will auto-resume when touch clears
+                                                    return;
+                                                }
                                                 let is_paused = state_for_click == GameState::Paused;
                                                 spawn(async move {
                                                     let cmd = if is_paused {
@@ -87,7 +107,12 @@ pub fn Actions(props: ActionsProps) -> Element {
                                             }
                                         }
                                     },
-                                    if effective_state == GameState::Paused { "▶️ Resume" } else { "🚀 Start" }
+                                    // Always show Resume when paused (either manually or by touch)
+                                    if effective_state == GameState::Paused { 
+                                        "▶️ Resume" 
+                                    } else { 
+                                        "🚀 Start" 
+                                    }
                                 }
                             }
                             if effective_state == GameState::Running {

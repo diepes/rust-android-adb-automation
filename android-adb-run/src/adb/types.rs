@@ -51,6 +51,20 @@ impl TouchActivityState {
             false
         }
     }
+
+    pub fn get_remaining_seconds(&self) -> Option<u64> {
+        if let Some(last_touch) = self.last_touch_time {
+            let elapsed = last_touch.elapsed();
+            if elapsed < self.timeout_duration {
+                let remaining = self.timeout_duration - elapsed;
+                Some(remaining.as_secs())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
 }
 
 // Shared touch activity monitor type
@@ -94,6 +108,7 @@ pub trait AdbClient: Send + Sync {
 
     // Touch activity monitoring methods
     async fn is_human_touching(&self) -> bool;
+    async fn get_touch_timeout_remaining(&self) -> Option<u64>;
     async fn start_touch_monitoring(&self) -> Result<(), String>;
     async fn stop_touch_monitoring(&self) -> Result<(), String>;
 

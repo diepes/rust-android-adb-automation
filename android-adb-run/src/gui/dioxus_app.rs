@@ -65,6 +65,7 @@ fn App() -> Element {
     let timed_tap_countdown = use_signal(|| None::<(String, u64)>); // (id, seconds_remaining)
     let timed_events_list = use_signal(|| Vec::<TimedEvent>::new()); // All timed events
     let is_paused_by_touch = use_signal(|| false); // New signal for touch-based pause state
+    let touch_timeout_remaining = use_signal(|| None::<u64>); // Remaining seconds until touch timeout expires
 
     let selection_start = use_signal(|| None::<dioxus::html::geometry::ElementPoint>);
     let selection_end = use_signal(|| None::<dioxus::html::geometry::ElementPoint>);
@@ -236,6 +237,7 @@ fn App() -> Element {
         let mut timed_tap_countdown_clone = timed_tap_countdown.clone();
         let mut timed_events_list_clone = timed_events_list.clone();
         let mut is_paused_by_touch_clone = is_paused_by_touch.clone();
+        let mut touch_timeout_remaining_clone = touch_timeout_remaining.clone();
 
         spawn(async move {
             // Create automation channels
@@ -384,24 +386,26 @@ fn App() -> Element {
                             }
                             // Could use this for a general event countdown if needed
                         }
-                        AutomationEvent::ManualActivityDetected(is_active) => {
+                        AutomationEvent::ManualActivityDetected(is_active, remaining_seconds) => {
                             // Update the pause state signal
                             is_paused_by_touch_clone.set(is_active);
+                            touch_timeout_remaining_clone.set(remaining_seconds);
 
                             if debug_mode {
                                 println!(
-                                    "👆 GUI: Manual touch activity: {} - automation {}",
+                                    "👆 GUI: Manual touch activity: {} - automation {} (remaining: {:?}s)",
                                     if is_active { "DETECTED" } else { "TIMEOUT" },
-                                    if is_active { "PAUSED" } else { "RESUMED" }
+                                    if is_active { "PAUSED" } else { "RESUMED" },
+                                    remaining_seconds
                                 );
                             }
-                            // Update GUI status to indicate touch activity with more prominent messaging
+                            // Update GUI status to indicate touch activity
                             if is_active {
                                 screenshot_status_clone
-                                    .set("🚫 PAUSED: Human touch detected".to_string());
+                                    .set("🚫 Human activity detected - waiting for touch to clear...".to_string());
                             } else {
                                 screenshot_status_clone.set(
-                                    "▶️ RESUMED: Touch timeout".to_string(),
+                                    "✅ Touch cleared - automation resumed".to_string(),
                                 );
                             }
                         }
@@ -460,7 +464,8 @@ fn App() -> Element {
                                 automation_command_tx: automation_command_tx,
                                 timed_tap_countdown: timed_tap_countdown,
                                 timed_events_list: timed_events_list,
-                                is_paused_by_touch: is_paused_by_touch  // Pass touch pause state to Actions
+                                is_paused_by_touch: is_paused_by_touch,  // Pass touch pause state to Actions
+                                touch_timeout_remaining: touch_timeout_remaining  // Pass countdown timer
                             }
                         } else {
                             // Fallback panel if no device is connected
