@@ -335,6 +335,26 @@ impl GameAutomation {
                 self.change_state(GameState::Idle).await;
                 debug_print!(self.debug_enabled, "⏹️ Game automation stopped");
             }
+            AutomationCommand::ClearTouchActivity => {
+                // Clear touch activity to resume automation immediately
+                if let Some(client_arc) = &self.adb_client {
+                    let client_guard = client_arc.lock().await;
+                    if let Err(e) = client_guard.clear_touch_activity().await {
+                        debug_print!(
+                            self.debug_enabled,
+                            "⚠️ Failed to clear touch activity: {}",
+                            e
+                        );
+                    } else {
+                        debug_print!(self.debug_enabled, "👆 Touch activity cleared - automation resuming");
+                        // Send event to update GUI
+                        let _ = self
+                            .event_tx
+                            .send(AutomationEvent::ManualActivityDetected(false, None))
+                            .await;
+                    }
+                }
+            }
             AutomationCommand::TakeScreenshot => {
                 if self.is_running && self.state != GameState::Paused {
                     let _ = self.take_screenshot().await;

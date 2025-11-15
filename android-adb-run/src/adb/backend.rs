@@ -110,6 +110,13 @@ impl AdbBackend {
         }
     }
 
+    pub async fn clear_touch_activity(&self) -> Result<(), String> {
+        match self {
+            AdbBackend::Shell(s) => s.clear_touch_activity().await,
+            AdbBackend::Rust(r) => r.clear_touch_activity().await,
+        }
+    }
+
     pub async fn start_touch_monitoring(&self) -> Result<(), String> {
         match self {
             AdbBackend::Shell(s) => s.start_touch_monitoring().await,
@@ -171,6 +178,10 @@ impl AdbClient for AdbBackend {
 
     async fn get_touch_timeout_remaining(&self) -> Option<u64> {
         self.get_touch_timeout_remaining().await
+    }
+
+    async fn clear_touch_activity(&self) -> Result<(), String> {
+        self.clear_touch_activity().await
     }
 
     async fn start_touch_monitoring(&self) -> Result<(), String> {

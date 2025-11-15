@@ -89,21 +89,20 @@ pub fn Actions(props: ActionsProps) -> Element {
                                         move |_| {
                                             if let Some(tx) = automation_command_tx.read().as_ref() {
                                                 let tx = tx.clone();
-                                                // If touch-paused (effective paused but actual running), don't send command
-                                                // The automation will resume automatically when touch clears
-                                                if touch_paused && actual_state == GameState::Running {
-                                                    // Just return - automation will auto-resume when touch clears
-                                                    return;
-                                                }
                                                 let is_paused = state_for_click == GameState::Paused;
-                                                spawn(async move {
-                                                    let cmd = if is_paused {
-                                                        AutomationCommand::Resume
-                                                    } else {
-                                                        AutomationCommand::Start
-                                                    };
-                                                    let _ = tx.send(cmd).await;
-                                                });
+                                                let is_idle = actual_state == GameState::Idle;                                spawn(async move {
+                                    // If touch paused but clicking resume, clear the touch activity
+                                    if touch_paused {
+                                        let _ = tx.send(AutomationCommand::ClearTouchActivity).await;
+                                    } else {
+                                        let cmd = if is_paused || !is_idle {
+                                            AutomationCommand::Resume
+                                        } else {
+                                            AutomationCommand::Start
+                                        };
+                                        let _ = tx.send(cmd).await;
+                                    }
+                                });
                                             }
                                         }
                                     },

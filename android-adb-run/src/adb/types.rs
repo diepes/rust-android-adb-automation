@@ -65,6 +65,10 @@ impl TouchActivityState {
             None
         }
     }
+
+    pub fn clear_touch_activity(&mut self) {
+        self.last_touch_time = None;
+    }
 }
 
 // Shared touch activity monitor type
@@ -109,6 +113,7 @@ pub trait AdbClient: Send + Sync {
     // Touch activity monitoring methods
     async fn is_human_touching(&self) -> bool;
     async fn get_touch_timeout_remaining(&self) -> Option<u64>;
+    async fn clear_touch_activity(&self) -> Result<(), String>;
     async fn start_touch_monitoring(&self) -> Result<(), String>;
     async fn stop_touch_monitoring(&self) -> Result<(), String>;
 
