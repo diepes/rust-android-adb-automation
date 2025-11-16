@@ -1,6 +1,7 @@
 use super::rust_impl::RustAdb;
 use super::shell::AdbShell;
 use super::types::{AdbClient, Device, ImageCapture};
+use crate::game_automation::fsm::is_disconnect_error;
 
 pub enum AdbBackend {
     Shell(AdbShell),
@@ -84,8 +85,18 @@ impl AdbBackend {
         duration: Option<u32>,
     ) -> Result<(), String> {
         match self {
-            AdbBackend::Shell(s) => s.swipe(x1, y1, x2, y2, duration).await,
-            AdbBackend::Rust(r) => r.swipe(x1, y1, x2, y2, duration).await,
+            AdbBackend::Shell(s) => s.swipe(x1, y1, x2, y2, duration).await.map_err(|e| {
+                if is_disconnect_error(&e) {
+                    return "AdbBackend: device disconnected".into();
+                }
+                e
+            }),
+            AdbBackend::Rust(r) => r.swipe(x1, y1, x2, y2, duration).await.map_err(|e| {
+                if is_disconnect_error(&e) {
+                    return "AdbBackend: device disconnected".into();
+                }
+                e
+            }),
         }
     }
 

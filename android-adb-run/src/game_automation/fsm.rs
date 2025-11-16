@@ -16,6 +16,22 @@ macro_rules! debug_print {
     };
 }
 
+// Helper function to detect if an error indicates device disconnection
+pub fn is_disconnect_error(error: &str) -> bool {
+    let error_lower = error.to_lowercase();
+    error_lower.contains("device offline")
+        || error_lower.contains("device not found")
+        || error_lower.contains("no devices")
+        || error_lower.contains("emulators found")
+        || error_lower.contains("connection refused")
+        || error_lower.contains("broken pipe")
+        || error_lower.contains("connection reset")
+        || error_lower.contains("transport")
+        || error_lower.contains("closed")
+        || error_lower.contains("not connected")
+        || error_lower.contains("io error")
+}
+
 pub struct GameAutomation {
     state: GameState,
     adb_client: Option<Arc<Mutex<AdbBackend>>>,
@@ -237,10 +253,24 @@ impl GameAutomation {
                 }
                 Err(e) => {
                     let error = format!("Screenshot failed: {}", e);
-                    let _ = self
-                        .event_tx
-                        .send(AutomationEvent::Error(error.clone()))
-                        .await;
+                    
+                    // Check if this is a disconnect error
+                    if is_disconnect_error(&error) {
+                        debug_print!(
+                            self.debug_enabled,
+                            "🔌 Device disconnect detected: {}",
+                            error
+                        );
+                        let _ = self
+                            .event_tx
+                            .send(AutomationEvent::DeviceDisconnected(error.clone()))
+                            .await;
+                    } else {
+                        let _ = self
+                            .event_tx
+                            .send(AutomationEvent::Error(error.clone()))
+                            .await;
+                    }
                     Err(error)
                 }
             }
@@ -448,6 +478,22 @@ impl GameAutomation {
                                             y,
                                             e
                                         );
+                                        
+                                        // Check if this is a disconnect error
+                                        if is_disconnect_error(&e) {
+                                            debug_print!(
+                                                self.debug_enabled,
+                                                "🔌 Device disconnect detected during manual tap trigger: {}",
+                                                e
+                                            );
+                                            let _ = self
+                                                .event_tx
+                                                .send(AutomationEvent::DeviceDisconnected(format!(
+                                                    "Tap trigger failed: {}",
+                                                    e
+                                                )))
+                                                .await;
+                                        }
                                     } else {
                                         let _ = self
                                             .event_tx
@@ -637,13 +683,31 @@ impl GameAutomation {
                     event_id,
                     e
                 );
-                let _ = self
-                    .event_tx
-                    .send(AutomationEvent::Error(format!(
-                        "Timed event '{}' failed: {}",
-                        event_id, e
-                    )))
-                    .await;
+                
+                // Check if this is a disconnect error
+                if is_disconnect_error(&e) {
+                    debug_print!(
+                        self.debug_enabled,
+                        "🔌 Device disconnect detected during timed event: {}",
+                        e
+                    );
+                    let _ = self
+                        .event_tx
+                        .send(AutomationEvent::DeviceDisconnected(format!(
+                            "Timed event '{}' failed: {}",
+                            event_id, e
+                        )))
+                        .await;
+                    return; // Stop processing further events on disconnect
+                } else {
+                    let _ = self
+                        .event_tx
+                        .send(AutomationEvent::Error(format!(
+                            "Timed event '{}' failed: {}",
+                            event_id, e
+                        )))
+                        .await;
+                }
             }
         }
     }
@@ -866,7 +930,22 @@ impl GameAutomation {
                         return Ok(true);
                     }
                     Err(e) => {
-                        return Err(format!("Failed to tap at ({}, {}): {}", tap_x, tap_y, e));
+                        let error_msg = format!("Failed to tap at ({}, {}): {}", tap_x, tap_y, e);
+                        
+                        // Check if this is a disconnect error
+                        if is_disconnect_error(&error_msg) {
+                            debug_print!(
+                                self.debug_enabled,
+                                "🔌 Device disconnect detected during image recognition tap: {}",
+                                error_msg
+                            );
+                            let _ = self
+                                .event_tx
+                                .send(AutomationEvent::DeviceDisconnected(error_msg.clone()))
+                                .await;
+                        }
+                        
+                        return Err(error_msg);
                     }
                 }
             } else {

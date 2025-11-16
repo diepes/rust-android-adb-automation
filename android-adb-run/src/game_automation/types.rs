@@ -205,6 +205,7 @@ pub enum AutomationEvent {
     ScreenshotTaken(Vec<u8>, u64), // Screenshot data and timing in milliseconds
     StateChanged(GameState),
     Error(String),
+    DeviceDisconnected(String), // Device disconnected with error message
     TemplatesUpdated(Vec<String>),      // List of template files found
     TimedTapExecuted(String, u32, u32), // ID, x, y of executed timed tap (for backward compatibility)
     TimedTapCountdown(String, u64), // ID, seconds until next execution (for backward compatibility)

@@ -120,25 +120,29 @@ fn App() -> Element {
     use_effect(move || {
         let use_rust_impl = *USE_RUST_IMPL.get().unwrap_or(&true);
         spawn(async move {
-            // Step 1: Look for devices (fast operation)
-            status.set("🔍 Looking for devices...".to_string());
+            // Retry loop for device connection
+            loop {
+                // Step 1: Look for devices (fast operation)
+                status.set("🔍 Looking for devices...".to_string());
 
-            let devices = match AdbBackend::list_devices(use_rust_impl).await {
-                Ok(devices) if !devices.is_empty() => devices,
-                Ok(_) => {
-                    status.set("❌ No devices found".to_string());
-                    return;
-                }
-                Err(e) => {
-                    status.set(format!("❌ Error listing devices: {e}"));
-                    return;
-                }
-            };
+                let devices = match AdbBackend::list_devices(use_rust_impl).await {
+                    Ok(devices) if !devices.is_empty() => devices,
+                    Ok(_) => {
+                        status.set("❌ No devices found - retrying in 3s...".to_string());
+                        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                        continue; // Retry
+                    }
+                    Err(e) => {
+                        status.set(format!("❌ Error listing devices: {e} - retrying in 3s..."));
+                        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                        continue; // Retry
+                    }
+                };
 
-            let first_device = &devices[0];
+                let first_device = &devices[0];
 
-            // Step 2: Update GUI immediately with found device info
-            status.set(format!("📱 Found device: {}", first_device.name));
+                // Step 2: Update GUI immediately with found device info
+                status.set(format!("📱 Found device: {}", first_device.name));
 
             // Small delay to let UI update
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -215,11 +219,17 @@ fn App() -> Element {
                             });
                         }
                         Err(e) => {
-                            status.set(format!("❌ Connection failed: {e}"));
+                            status.set(format!("❌ Connection failed: {e} - retrying in 3s..."));
+                            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                            // Continue to retry loop
                         }
                     }
                 }
             });
+            
+            // If we reach here, connection was successful - break the retry loop
+            break;
+        }
         });
     });
 
@@ -238,6 +248,8 @@ fn App() -> Element {
         let mut timed_events_list_clone = timed_events_list.clone();
         let mut is_paused_by_touch_clone = is_paused_by_touch.clone();
         let mut touch_timeout_remaining_clone = touch_timeout_remaining.clone();
+        let mut status_clone = status.clone();
+        let mut device_info_clone = device_info.clone();
 
         spawn(async move {
             // Create automation channels
@@ -321,6 +333,31 @@ fn App() -> Element {
                                 println!("🤖 Automation error: {}", error);
                             }
                             screenshot_status_clone.set(format!("🤖 Automation error: {}", error));
+                        }
+                        AutomationEvent::DeviceDisconnected(error) => {
+                            if debug_mode {
+                                println!("🔌 Device disconnected: {}", error);
+                            }
+                            
+                            // Clear device info to hide "Connected" status
+                            device_info_clone.set(None);
+                            
+                            // Update GUI to reflect disconnection
+                            screenshot_data_clone.set(None); // Clear screenshot
+                            screenshot_bytes_clone.set(None); // Clear screenshot bytes
+                            // Optionally, add a visual indicator for disconnection
+                            screenshot_status_clone.set("🔌 Device Disconnected - Please reconnect USB".to_string());
+                            
+                            // Update status messages
+                            screenshot_status_clone.set("🔌 Device Disconnected - Reconnecting...".to_string());
+                            status_clone.set("🔌 Device Disconnected - Reconnecting...".to_string());
+                            
+                            // Trigger reconnection attempt after 2 seconds
+                            spawn(async move {
+                                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                                // Restart the entire application to trigger reconnection
+                                std::process::exit(1); // Exit with error code to allow external restart
+                            });
                         }
                         AutomationEvent::TemplatesUpdated(templates) => {
                             if debug_mode {

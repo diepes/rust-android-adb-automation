@@ -4,6 +4,7 @@ use adb_client::{ADBDeviceExt, ADBServer, ADBServerDevice};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
+use crate::game_automation::fsm::is_disconnect_error;
 
 #[allow(dead_code)]
 pub struct RustAdb {
@@ -835,7 +836,12 @@ impl AdbClient for RustAdb {
         }
         let refs: Vec<&str> = cmd_parts.iter().map(|s| s.as_str()).collect();
         dev.shell_command(&refs, &mut out)
-            .map_err(|e| format!("RustAdb: swipe failed: {e}"))?;
+            .map_err(|e| {
+                if is_disconnect_error(&e.to_string()) {
+                    return "RustAdb: device disconnected".into();
+                }
+                format!("RustAdb: swipe failed: {e}")
+            })?;
         Ok(())
     }
 
