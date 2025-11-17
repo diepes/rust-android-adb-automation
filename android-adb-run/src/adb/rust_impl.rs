@@ -51,7 +51,7 @@ impl RustAdb {
     async fn capture_screen_bytes_internal(&self) -> Result<Vec<u8>, String> {
         let mut dev = self.server_device.lock().await;
 
-        // Try the faster framebuffer_bytes() method first to get png
+        // Try the faster framebuffer_bytes() method first
         match dev.framebuffer_bytes() {
             Ok(framebuffer_data) => {
                 drop(dev); // Release the lock early
@@ -65,7 +65,6 @@ impl RustAdb {
                             );
                         }
                         // Continue to fallback method below
-                        return Err(e)
                     }
                 }
             }
@@ -796,35 +795,20 @@ impl AdbClient for RustAdb {
     }
 
     async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
-        // Add timeout to prevent hanging on USB disconnect
-        let capture_future = self.capture_screen_bytes_internal();
-        
-        match tokio::time::timeout(Duration::from_secs(10), capture_future).await {
-            Ok(result) => result,
-            Err(_) => Err("RustAdb: screenshot capture timed out after 10 seconds (device may be disconnected)".to_string()),
-        }
+        self.capture_screen_bytes_internal().await
     }
 
     async fn tap(&self, x: u32, y: u32) -> Result<(), String> {
         if x > self.screen_x || y > self.screen_y {
             return Err(format!("RustAdb: tap out of bounds x={x} y={y}"));
         }
-        
-        let tap_future = async {
-            let mut out: Vec<u8> = Vec::new();
-            let mut dev = self.server_device.lock().await;
-            let xs = x.to_string();
-            let ys = y.to_string();
-            dev.shell_command(&["input", "tap", &xs, &ys], &mut out)
-                .map_err(|e| format!("RustAdb: tap failed: {e}"))?;
-            Ok::<(), String>(())
-        };
-        
-        // Add timeout to prevent hanging on USB disconnect
-        match tokio::time::timeout(Duration::from_secs(5), tap_future).await {
-            Ok(result) => result,
-            Err(_) => Err("RustAdb: tap operation timed out after 5 seconds (device may be disconnected)".to_string()),
-        }
+        let mut out: Vec<u8> = Vec::new();
+        let mut dev = self.server_device.lock().await;
+        let xs = x.to_string();
+        let ys = y.to_string();
+        dev.shell_command(&["input", "tap", &xs, &ys], &mut out)
+            .map_err(|e| format!("RustAdb: tap failed: {e}"))?;
+        Ok(())
     }
 
     async fn swipe(
@@ -840,34 +824,25 @@ impl AdbClient for RustAdb {
                 return Err("RustAdb: swipe out of bounds".into());
             }
         }
-        
-        let swipe_future = async {
-            let mut out: Vec<u8> = Vec::new();
-            let mut dev = self.server_device.lock().await;
-            let s1 = x1.to_string();
-            let s2 = y1.to_string();
-            let s3 = x2.to_string();
-            let s4 = y2.to_string();
-            let mut cmd_parts: Vec<String> = vec!["input".into(), "swipe".into(), s1, s2, s3, s4];
-            if let Some(d) = duration {
-                cmd_parts.push(d.to_string());
-            }
-            let refs: Vec<&str> = cmd_parts.iter().map(|s| s.as_str()).collect();
-            dev.shell_command(&refs, &mut out)
-                .map_err(|e| {
-                    if is_disconnect_error(&e.to_string()) {
-                        return "RustAdb: device disconnected".into();
-                    }
-                    format!("RustAdb: swipe failed: {e}")
-                })?;
-            Ok::<(), String>(())
-        };
-        
-        // Add timeout to prevent hanging on USB disconnect
-        match tokio::time::timeout(Duration::from_secs(5), swipe_future).await {
-            Ok(result) => result,
-            Err(_) => Err("RustAdb: swipe operation timed out after 5 seconds (device may be disconnected)".to_string()),
+        let mut out: Vec<u8> = Vec::new();
+        let mut dev = self.server_device.lock().await;
+        let s1 = x1.to_string();
+        let s2 = y1.to_string();
+        let s3 = x2.to_string();
+        let s4 = y2.to_string();
+        let mut cmd_parts: Vec<String> = vec!["input".into(), "swipe".into(), s1, s2, s3, s4];
+        if let Some(d) = duration {
+            cmd_parts.push(d.to_string());
         }
+        let refs: Vec<&str> = cmd_parts.iter().map(|s| s.as_str()).collect();
+        dev.shell_command(&refs, &mut out)
+            .map_err(|e| {
+                if is_disconnect_error(&e.to_string()) {
+                    return "RustAdb: device disconnected".into();
+                }
+                format!("RustAdb: swipe failed: {e}")
+            })?;
+        Ok(())
     }
 
     async fn get_device_ip(&self) -> Result<String, String> {

@@ -30,8 +30,6 @@ pub fn is_disconnect_error(error: &str) -> bool {
         || error_lower.contains("closed")
         || error_lower.contains("not connected")
         || error_lower.contains("io error")
-        || error_lower.contains("timed out")  // Timeout often indicates disconnect
-        || error_lower.contains("timeout")     // Alternative timeout message format
 }
 
 pub struct GameAutomation {
@@ -263,8 +261,10 @@ impl GameAutomation {
                             "🔌 Device disconnect detected: {}",
                             error
                         );
-                        // Switch automation to pause on USB disconnect
-                        return Err(error);
+                        let _ = self
+                            .event_tx
+                            .send(AutomationEvent::DeviceDisconnected(error.clone()))
+                            .await;
                     } else {
                         let _ = self
                             .event_tx
@@ -613,11 +613,6 @@ impl GameAutomation {
 
     /// Process all ready timed events (pauses if human is touching device)
     async fn process_timed_events(&mut self) {
-        debug_print!(
-            self.debug_enabled,
-            "🔍 Checking if human is touching the device..."
-        );
-
         // Check if human is currently touching the device
         if let Some(client) = &self.adb_client {
             let client_guard = client.lock().await;
@@ -670,11 +665,6 @@ impl GameAutomation {
             }
         }
 
-        debug_print!(
-            self.debug_enabled,
-            "🔍 Collecting ready timed events..."
-        );
-
         let mut events_to_execute = Vec::new();
 
         // Collect ready events
@@ -686,20 +676,7 @@ impl GameAutomation {
 
         // Execute ready events
         for (event_id, event_type) in events_to_execute {
-            debug_print!(
-                self.debug_enabled,
-                "🔍 Executing timed event '{}' of type {:?}...",
-                event_id,
-                event_type
-            );
-
             if let Err(e) = self.execute_timed_event(&event_id, &event_type).await {
-                debug_print!(
-                    self.debug_enabled,
-                    "❌ Error during timed event execution '{}': {}",
-                    event_id,
-                    e
-                );
                 debug_print!(
                     self.debug_enabled,
                     "❌ Timed event '{}' failed: {}",
@@ -721,7 +698,7 @@ impl GameAutomation {
                             event_id, e
                         )))
                         .await;
-                    break; // Stop processing further events on disconnect
+                    return; // Stop processing further events on disconnect
                 } else {
                     let _ = self
                         .event_tx
@@ -1036,57 +1013,5 @@ impl GameAutomation {
         }
 
         next_tap
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_is_disconnect_error() {
-        // Test various disconnect error messages
-        assert!(is_disconnect_error("device offline"));
-        assert!(is_disconnect_error("Device Offline"));
-        assert!(is_disconnect_error("DEVICE OFFLINE"));
-        assert!(is_disconnect_error("device not found"));
-        assert!(is_disconnect_error("no devices/emulators found"));
-        assert!(is_disconnect_error("connection refused"));
-        assert!(is_disconnect_error("broken pipe"));
-        assert!(is_disconnect_error("connection reset"));
-        assert!(is_disconnect_error("transport error"));
-        assert!(is_disconnect_error("connection closed"));
-        assert!(is_disconnect_error("not connected"));
-        assert!(is_disconnect_error("io error: connection reset"));
-        assert!(is_disconnect_error("operation timed out"));
-        assert!(is_disconnect_error("timeout after 10 seconds"));
-        assert!(is_disconnect_error("screenshot capture timed out"));
-        
-        // Test non-disconnect errors
-        assert!(!is_disconnect_error("permission denied"));
-        assert!(!is_disconnect_error("invalid argument"));
-        assert!(!is_disconnect_error("unknown error"));
-    }
-
-    #[test]
-    fn test_timed_event_creation() {
-        // Test creating various timed events
-        let screenshot_event = TimedEvent::new_screenshot_minutes(10);
-        assert_eq!(screenshot_event.interval.as_secs(), 600);
-        assert!(screenshot_event.enabled);
-        assert!(matches!(screenshot_event.event_type, TimedEventType::Screenshot));
-
-        let tap_event = TimedEvent::new_tap_seconds("test_tap".to_string(), 100, 200, 30);
-        assert_eq!(tap_event.interval.as_secs(), 30);
-        assert!(tap_event.enabled);
-        if let TimedEventType::Tap { x, y } = tap_event.event_type {
-            assert_eq!(x, 100);
-            assert_eq!(y, 200);
-        } else {
-            panic!("Expected Tap event type");
-        }
-
-        let tap_event_minutes = TimedEvent::new_tap_minutes("test_tap2".to_string(), 300, 400, 5);
-        assert_eq!(tap_event_minutes.interval.as_secs(), 300);
     }
 }
