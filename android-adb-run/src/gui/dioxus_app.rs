@@ -345,19 +345,13 @@ fn App() -> Element {
                             // Update GUI to reflect disconnection
                             screenshot_data_clone.set(None); // Clear screenshot
                             screenshot_bytes_clone.set(None); // Clear screenshot bytes
-                            // Optionally, add a visual indicator for disconnection
-                            screenshot_status_clone.set("🔌 Device Disconnected - Please reconnect USB".to_string());
                             
-                            // Update status messages
-                            screenshot_status_clone.set("🔌 Device Disconnected - Reconnecting...".to_string());
-                            status_clone.set("🔌 Device Disconnected - Reconnecting...".to_string());
+                            // Update status messages with clear indication
+                            screenshot_status_clone.set(format!("🔌 USB DISCONNECTED: {} - Please reconnect the device", error));
+                            status_clone.set("🔌 Device Disconnected - Automation Paused".to_string());
                             
-                            // Trigger reconnection attempt after 2 seconds
-                            spawn(async move {
-                                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                                // Restart the entire application to trigger reconnection
-                                std::process::exit(1); // Exit with error code to allow external restart
-                            });
+                            // Note: The automation FSM will automatically pause when disconnect is detected
+                            // User can reconnect USB and resume automation manually
                         }
                         AutomationEvent::TemplatesUpdated(templates) => {
                             if debug_mode {

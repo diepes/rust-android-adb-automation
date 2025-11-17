@@ -795,20 +795,42 @@ impl AdbClient for RustAdb {
     }
 
     async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
-        self.capture_screen_bytes_internal().await
+        // Add 10-second timeout to detect USB disconnect
+        let capture_future = self.capture_screen_bytes_internal();
+        
+        match tokio::time::timeout(Duration::from_secs(10), capture_future).await {
+            Ok(result) => result,
+            Err(_) => Err("RustAdb: screenshot capture timed out after 10 seconds (device may be disconnected)".to_string()),
+        }
     }
 
     async fn tap(&self, x: u32, y: u32) -> Result<(), String> {
+        // Check bounds before attempting tap
         if x > self.screen_x || y > self.screen_y {
             return Err(format!("RustAdb: tap out of bounds x={x} y={y}"));
         }
-        let mut out: Vec<u8> = Vec::new();
-        let mut dev = self.server_device.lock().await;
-        let xs = x.to_string();
-        let ys = y.to_string();
-        dev.shell_command(&["input", "tap", &xs, &ys], &mut out)
-            .map_err(|e| format!("RustAdb: tap failed: {e}"))?;
-        Ok(())
+
+        // Clone Arc for move into spawn_blocking
+        let server_device = Arc::clone(&self.server_device);
+        
+        // Wrap the blocking shell_command in spawn_blocking so timeout can work
+        let tap_future = tokio::task::spawn_blocking(move || -> Result<(), String> {
+            let mut out: Vec<u8> = Vec::new();
+            // This blocks until we get the lock, then blocks on shell_command
+            let mut dev = server_device.blocking_lock();
+            let xs = x.to_string();
+            let ys = y.to_string();
+            dev.shell_command(&["input", "tap", &xs, &ys], &mut out)
+                .map_err(|e| format!("RustAdb: tap failed: {e}"))?;
+            Ok(())
+        });
+
+        // Timeout wraps the spawn_blocking task
+        match tokio::time::timeout(Duration::from_secs(5), tap_future).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(e)) => Err(format!("RustAdb: tap task failed: {e}")),
+            Err(_) => Err("RustAdb: tap timed out after 5 seconds (device may be disconnected)".to_string()),
+        }
     }
 
     async fn swipe(
@@ -819,30 +841,45 @@ impl AdbClient for RustAdb {
         y2: u32,
         duration: Option<u32>,
     ) -> Result<(), String> {
+        // Check bounds before attempting swipe
         for &(x, y) in &[(x1, y1), (x2, y2)] {
             if x > self.screen_x || y > self.screen_y {
                 return Err("RustAdb: swipe out of bounds".into());
             }
         }
-        let mut out: Vec<u8> = Vec::new();
-        let mut dev = self.server_device.lock().await;
-        let s1 = x1.to_string();
-        let s2 = y1.to_string();
-        let s3 = x2.to_string();
-        let s4 = y2.to_string();
-        let mut cmd_parts: Vec<String> = vec!["input".into(), "swipe".into(), s1, s2, s3, s4];
-        if let Some(d) = duration {
-            cmd_parts.push(d.to_string());
+
+        // Clone Arc for move into spawn_blocking
+        let server_device = Arc::clone(&self.server_device);
+        
+        // Wrap the blocking shell_command in spawn_blocking so timeout can work
+        let swipe_future = tokio::task::spawn_blocking(move || -> Result<(), String> {
+            let mut out: Vec<u8> = Vec::new();
+            let mut dev = server_device.blocking_lock();
+            let s1 = x1.to_string();
+            let s2 = y1.to_string();
+            let s3 = x2.to_string();
+            let s4 = y2.to_string();
+            let mut cmd_parts: Vec<String> = vec!["input".into(), "swipe".into(), s1, s2, s3, s4];
+            if let Some(d) = duration {
+                cmd_parts.push(d.to_string());
+            }
+            let refs: Vec<&str> = cmd_parts.iter().map(|s| s.as_str()).collect();
+            dev.shell_command(&refs, &mut out)
+                .map_err(|e| {
+                    if is_disconnect_error(&e.to_string()) {
+                        return "RustAdb: device disconnected".into();
+                    }
+                    format!("RustAdb: swipe failed: {e}")
+                })?;
+            Ok(())
+        });
+
+        // Timeout wraps the spawn_blocking task
+        match tokio::time::timeout(Duration::from_secs(5), swipe_future).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(e)) => Err(format!("RustAdb: swipe task failed: {e}")),
+            Err(_) => Err("RustAdb: swipe timed out after 5 seconds (device may be disconnected)".to_string()),
         }
-        let refs: Vec<&str> = cmd_parts.iter().map(|s| s.as_str()).collect();
-        dev.shell_command(&refs, &mut out)
-            .map_err(|e| {
-                if is_disconnect_error(&e.to_string()) {
-                    return "RustAdb: device disconnected".into();
-                }
-                format!("RustAdb: swipe failed: {e}")
-            })?;
-        Ok(())
     }
 
     async fn get_device_ip(&self) -> Result<String, String> {

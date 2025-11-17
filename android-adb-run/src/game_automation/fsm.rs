@@ -30,6 +30,8 @@ pub fn is_disconnect_error(error: &str) -> bool {
         || error_lower.contains("closed")
         || error_lower.contains("not connected")
         || error_lower.contains("io error")
+        || error_lower.contains("timed out")  // Timeout often indicates disconnect
+        || error_lower.contains("timeout")     // Alternative timeout message format
 }
 
 pub struct GameAutomation {
@@ -691,6 +693,11 @@ impl GameAutomation {
                         "🔌 Device disconnect detected during timed event: {}",
                         e
                     );
+                    
+                    // Pause the automation
+                    self.change_state(GameState::Paused).await;
+                    
+                    // Send disconnect event to GUI
                     let _ = self
                         .event_tx
                         .send(AutomationEvent::DeviceDisconnected(format!(
