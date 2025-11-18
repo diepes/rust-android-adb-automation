@@ -128,13 +128,19 @@ fn App() -> Element {
                 let devices = match AdbBackend::list_devices(use_rust_impl).await {
                     Ok(devices) if !devices.is_empty() => devices,
                     Ok(_) => {
-                        status.set("❌ No devices found - retrying in 3s...".to_string());
-                        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                        // Countdown timer for retry
+                        for seconds_remaining in (1..=3).rev() {
+                            status.set(format!("❌ No devices found - retrying in {}s...", seconds_remaining));
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        }
                         continue; // Retry
                     }
                     Err(e) => {
-                        status.set(format!("❌ Error listing devices: {e} - retrying in 3s..."));
-                        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                        // Countdown timer for retry
+                        for seconds_remaining in (1..=3).rev() {
+                            status.set(format!("❌ Error listing devices: {} - retrying in {}s...", e, seconds_remaining));
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        }
                         continue; // Retry
                     }
                 };
@@ -219,8 +225,11 @@ fn App() -> Element {
                             });
                         }
                         Err(e) => {
-                            status.set(format!("❌ Connection failed: {e} - retrying in 3s..."));
-                            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                            // Countdown timer for retry
+                            for seconds_remaining in (1..=3).rev() {
+                                status.set(format!("❌ Connection failed: {} - retrying in {}s...", e, seconds_remaining));
+                                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                            }
                             // Continue to retry loop
                         }
                     }
