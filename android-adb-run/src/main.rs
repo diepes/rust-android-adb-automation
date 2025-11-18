@@ -1,3 +1,4 @@
+use android_adb_run::adb::AdbClient;
 use android_adb_run::gui::dioxus_app::run_gui; // updated after rename
 use std::env;
 
@@ -6,7 +7,6 @@ fn main() {
 
     // Defaults
     let mut mode: Option<&str> = None; // None => GUI
-    let mut use_rust_adb_impl: bool = true; // default rust
     let mut debug_mode: bool = false; // default no debug
 
     // Parse all flags (skip program name)
@@ -23,15 +23,6 @@ fn main() {
             mode = Some("gui");
         } else if arg == "--screenshot" || arg == "-s" {
             mode = Some("screenshot");
-        } else if let Some(rest) = arg.strip_prefix("--impl=") {
-            use_rust_adb_impl = match rest {
-                "rust" => true,
-                "shell" => false,
-                other => {
-                    println!("❌ Unknown impl '{}', expected 'rust' or 'shell'", other);
-                    return;
-                }
-            };
         } else {
             println!("❌ Unknown argument: {}", arg);
             print_help();
@@ -41,20 +32,23 @@ fn main() {
 
     match mode {
         Some("screenshot") => {
-            let impl_str = if use_rust_adb_impl { "rust" } else { "shell" };
-            println!("📸 CLI screenshot using impl='{}'...", impl_str);
+            println!("📸 CLI screenshot mode...");
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
-                match android_adb_run::adb::AdbBackend::list_devices(use_rust_adb_impl).await {
+                match android_adb_run::adb::AdbBackend::list_devices().await {
                     Ok(devs) if !devs.is_empty() => {
                         let first = &devs[0];
-                        match android_adb_run::adb::AdbBackend::new_with_device(&first.name, use_rust_adb_impl).await {
+                        match android_adb_run::adb::AdbBackend::new_with_device(&first.name).await {
                             Ok(client) => {
                                 let (sx, sy) = client.screen_dimensions();
-                                println!("📱 Device: {} size: {}x{} (backend={})", client.device_name(), sx, sy, impl_str);
+                                println!("📱 Device: {} size: {}x{}", client.device_name(), sx, sy);
                                 match client.screen_capture().await {
                                     Ok(cap) => {
-                                        if let Err(e) = tokio::fs::write("cli-screenshot.png", &cap.bytes).await { println!("❌ Write failed: {e}"); } else { println!("✅ Screenshot #{} ({}ms) saved to cli-screenshot.png", cap.index, cap.duration_ms); }
+                                        if let Err(e) = tokio::fs::write("cli-screenshot.png", &cap.bytes).await { 
+                                            println!("❌ Write failed: {e}"); 
+                                        } else { 
+                                            println!("✅ Screenshot #{} ({}ms) saved to cli-screenshot.png", cap.index, cap.duration_ms); 
+                                        }
                                     }
                                     Err(e) => println!("❌ Screenshot failed: {e}"),
                                 }
@@ -68,13 +62,11 @@ fn main() {
             });
         }
         Some("gui") | None => {
-            let impl_str = if use_rust_adb_impl { "rust" } else { "shell" };
             println!(
-                "🚀 Launching Android ADB Control GUI (impl='{}'){}...",
-                impl_str,
+                "🚀 Launching Android ADB Control GUI{}...",
                 if debug_mode { " [DEBUG MODE]" } else { "" }
             );
-            run_gui(use_rust_adb_impl, debug_mode);
+            run_gui(debug_mode);
         }
         _ => unreachable!(),
     }
@@ -90,17 +82,12 @@ fn print_help() {
     println!("    (no flags)          Launch GUI interface");
     println!("    --gui               Launch GUI interface");
     println!("    --screenshot, -s    Take a screenshot and save to file (cli-screenshot.png)");
-    println!("    --impl=<shell|rust> Select ADB implementation for CLI actions (default: rust)");
-    println!(
-        "                        The shell implementation reqires the ADB tool to be installed."
-    );
     println!("    --debug             Enable debug output for automation");
     println!("    --help, -h          Show this help message");
     println!("    --version, -v       Show version information");
     println!();
     println!("EXAMPLES:");
     println!("    android-adb-run --screenshot");
-    println!("    android-adb-run --screenshot --impl=rust");
-    println!("    android-adb-run --impl=shell --screenshot");
     println!("    android-adb-run --gui");
+    println!("    android-adb-run --debug");
 }

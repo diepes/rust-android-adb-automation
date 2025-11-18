@@ -737,6 +737,16 @@ impl RustAdb {
 
         score
     }
+
+    /// Connect to the first available device
+    pub async fn connect_first() -> Result<Self, String> {
+        let devices = Self::list_devices().await?;
+        let first = devices
+            .into_iter()
+            .next()
+            .ok_or_else(|| "No devices found".to_string())?;
+        Self::new_with_device(&first.name).await
+    }
 }
 
 impl AdbClient for RustAdb {

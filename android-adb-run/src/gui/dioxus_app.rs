@@ -1,4 +1,4 @@
-use crate::adb::AdbBackend;
+use crate::adb::{AdbBackend, AdbClient};
 use crate::game_automation::types::TimedEvent;
 use crate::game_automation::{
     AutomationCommand, AutomationEvent, GameAutomation, GameState, create_automation_channels,
@@ -11,9 +11,6 @@ use dioxus::prelude::*;
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
 
-// Global state to store the ADB implementation choice
-static USE_RUST_IMPL: OnceLock<bool> = OnceLock::new();
-
 // Global state to store the debug mode choice
 static DEBUG_MODE: OnceLock<bool> = OnceLock::new();
 
@@ -21,10 +18,7 @@ pub fn is_debug_mode() -> bool {
     *DEBUG_MODE.get().unwrap_or(&false)
 }
 
-pub fn run_gui(use_rust_impl: bool, debug_mode: bool) {
-    USE_RUST_IMPL
-        .set(use_rust_impl)
-        .expect("USE_RUST_IMPL should only be set once");
+pub fn run_gui(debug_mode: bool) {
     DEBUG_MODE
         .set(debug_mode)
         .expect("DEBUG_MODE should only be set once");
@@ -118,14 +112,13 @@ fn App() -> Element {
 
     // Initialize ADB connection on first render - fully async with progressive UI updates
     use_effect(move || {
-        let use_rust_impl = *USE_RUST_IMPL.get().unwrap_or(&true);
         spawn(async move {
             // Retry loop for device connection
             loop {
                 // Step 1: Look for devices (fast operation)
                 status.set("🔍 Looking for devices...".to_string());
 
-                let devices = match AdbBackend::list_devices(use_rust_impl).await {
+                let devices = match AdbBackend::list_devices().await {
                     Ok(devices) if !devices.is_empty() => devices,
                     Ok(_) => {
                         // Countdown timer for retry
@@ -159,9 +152,8 @@ fn App() -> Element {
             // Step 4: Connect to device in background, update GUI when ready
             spawn({
                 let device_name = first_device.name.clone();
-                let use_rust_impl = use_rust_impl;
                 async move {
-                    match AdbBackend::new_with_device(&device_name, use_rust_impl).await {
+                    match AdbBackend::new_with_device(&device_name).await {
                         Ok(client) => {
                             // Step 4: Connection successful, update device info immediately
                             let (sx, sy) = client.screen_dimensions();
@@ -171,10 +163,7 @@ fn App() -> Element {
                                 sx,
                                 sy,
                             )));
-                            status.set(format!(
-                                "✅ Connected via {}",
-                                if use_rust_impl { "rust" } else { "shell" }
-                            ));
+                            status.set("✅ Connected".to_string());
 
                             // Step 5: Take initial screenshot in background, don't block UI
                             spawn(async move {
@@ -244,7 +233,6 @@ fn App() -> Element {
 
     // Initialize game automation on first render
     use_effect(move || {
-        let use_rust_impl = *USE_RUST_IMPL.get().unwrap_or(&true);
         let debug_mode = *DEBUG_MODE.get().unwrap_or(&false);
         // Clone signals for use in async context
         let mut automation_command_tx_clone = automation_command_tx.clone();
@@ -269,7 +257,7 @@ fn App() -> Element {
 
             // Start automation task
             let mut automation = GameAutomation::new(cmd_rx, event_tx, debug_mode);
-            if let Err(e) = automation.initialize_adb(use_rust_impl).await {
+            if let Err(e) = automation.initialize_adb().await {
                 if debug_mode {
                     println!("❌ Failed to initialize automation ADB: {}", e);
                 }
@@ -519,7 +507,7 @@ fn App() -> Element {
                         div { style: "margin-top:4px; text-align:left; font-size:0.7em; opacity:0.75; letter-spacing:0.5px;", "Built with Rust 🦀 and Dioxus ⚛️" }
                     }
                     // Right column: screenshot panel (image, gestures)
-                    screenshot_panel { screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, device_info: device_info, device_coords: device_coords, mouse_coords: mouse_coords, is_loading_screenshot: is_loading_screenshot, auto_update_on_touch: auto_update_on_touch, is_swiping: is_swiping, swipe_start: swipe_start, swipe_end: swipe_end, calculate_device_coords: calculate_device_coords, select_box: select_box, selection_start: selection_start, selection_end: selection_end, tap_markers: tap_markers, use_rust_impl: *USE_RUST_IMPL.get().unwrap_or(&true), screenshot_counter: screenshot_counter }
+                    screenshot_panel { screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, device_info: device_info, device_coords: device_coords, mouse_coords: mouse_coords, is_loading_screenshot: is_loading_screenshot, auto_update_on_touch: auto_update_on_touch, is_swiping: is_swiping, swipe_start: swipe_start, swipe_end: swipe_end, calculate_device_coords: calculate_device_coords, select_box: select_box, selection_start: selection_start, selection_end: selection_end, tap_markers: tap_markers, screenshot_counter: screenshot_counter }
                 }
             }
         }

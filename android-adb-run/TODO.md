@@ -13,6 +13,15 @@
 
 **See:** `TAP_ERROR_FLOW.md`, `TAP_FREEZE_FIX.md`, `DISCONNECT_DETECTION_COMPLETE.md`
 
+### Code Simplification
+- ✅ Removed shell ADB implementation
+- ✅ Simplified to pure Rust implementation only
+- ✅ Removed `--impl` flag
+- ✅ Cleaned up 95% of backend.rs code
+- ✅ Type alias: `AdbBackend = RustAdb`
+
+**See:** `ADB_SIMPLIFICATION.md`
+
 ## In Progress 🚧
 
 ### Device Reconnection

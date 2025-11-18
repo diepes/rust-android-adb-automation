@@ -8,7 +8,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize ADB
     println!("📱 Initializing ADB connection...");
-    let adb = AdbBackend::new(true).await?;
+    let adb = AdbBackend::connect_first().await?;
     println!("✅ ADB initialized\n");
 
     println!("🎯 Test 1: Normal tap (device connected)");

@@ -1,7 +1,7 @@
 // Finite State Machine implementation for game automation - Event Driven Architecture
 use super::match_image::{GameStateDetector, MatchConfig, create_default_config};
 use super::types::{AutomationCommand, AutomationEvent, GameState, TimedEvent, TimedEventType};
-use crate::adb::AdbBackend;
+use crate::adb::{AdbBackend, AdbClient};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
@@ -139,8 +139,8 @@ impl GameAutomation {
         }
     }
 
-    pub async fn initialize_adb(&mut self, use_rust_impl: bool) -> Result<(), String> {
-        match AdbBackend::connect_first(use_rust_impl).await {
+    pub async fn initialize_adb(&mut self) -> Result<(), String> {
+        match AdbBackend::connect_first().await {
             Ok(client) => {
                 let (screen_width, screen_height) = client.screen_dimensions();
 
