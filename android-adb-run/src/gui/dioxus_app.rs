@@ -418,24 +418,24 @@ fn App() -> Element {
                             // Update the pause state signal
                             is_paused_by_touch_clone.set(is_active);
                             touch_timeout_remaining_clone.set(remaining_seconds);
-
+                        }
+                        AutomationEvent::ReconnectionAttempt(seconds_remaining) => {
+                            if debug_mode && seconds_remaining % 5 == 0 {
+                                println!("🔄 Reconnection attempt in {}s", seconds_remaining);
+                            }
+                            screenshot_status_clone.set(format!(
+                                "🔌 Device disconnected - Retrying connection in {}s...",
+                                seconds_remaining
+                            ));
+                        }
+                        AutomationEvent::DeviceReconnected => {
                             if debug_mode {
-                                println!(
-                                    "👆 GUI: Manual touch activity: {} - automation {} (remaining: {:?}s)",
-                                    if is_active { "DETECTED" } else { "TIMEOUT" },
-                                    if is_active { "PAUSED" } else { "RESUMED" },
-                                    remaining_seconds
-                                );
+                                println!("✅ Device reconnected successfully!");
                             }
-                            // Update GUI status to indicate touch activity
-                            if is_active {
-                                screenshot_status_clone
-                                    .set("🚫 Human activity detected - waiting for touch to clear...".to_string());
-                            } else {
-                                screenshot_status_clone.set(
-                                    "✅ Touch cleared - automation resumed".to_string(),
-                                );
-                            }
+                            screenshot_status_clone.set("✅ Device reconnected! You can now resume automation.".to_string());
+                            status_clone.set("✅ Device Reconnected - Ready to Resume".to_string());
+                            
+                            // Note: Device info will be updated when user resumes or takes a new screenshot
                         }
                     }
                 }

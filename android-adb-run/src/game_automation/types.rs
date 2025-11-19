@@ -213,4 +213,6 @@ pub enum AutomationEvent {
     TimedEventExecuted(String),     // ID of executed timed event
     NextTimedEvent(String, u64),    // ID, seconds until next event
     ManualActivityDetected(bool, Option<u64>), // (is_active, remaining_seconds) - True when human touch detected with countdown, false when timeout expires
+    ReconnectionAttempt(u64),       // Seconds until next reconnection attempt
+    DeviceReconnected,              // Device successfully reconnected
 }
