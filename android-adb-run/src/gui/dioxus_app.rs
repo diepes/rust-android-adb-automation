@@ -121,17 +121,19 @@ fn App() -> Element {
                 let devices = match AdbBackend::list_devices().await {
                     Ok(devices) if !devices.is_empty() => devices,
                     Ok(_) => {
-                        // Countdown timer for retry
-                        for seconds_remaining in (1..=3).rev() {
-                            status.set(format!("❌ No devices found - retrying in {}s...", seconds_remaining));
+                        // Countdown timer for retry (10 seconds)
+                        for seconds_remaining in (1..=10).rev() {
+                            status.set(format!("🔌 No Device Connected - Retrying in {}s...", seconds_remaining));
+                            screenshot_status.set(format!("⏳ Connect your device via USB... ({}/10)", 11 - seconds_remaining));
                             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                         }
                         continue; // Retry
                     }
                     Err(e) => {
-                        // Countdown timer for retry
-                        for seconds_remaining in (1..=3).rev() {
-                            status.set(format!("❌ Error listing devices: {} - retrying in {}s...", e, seconds_remaining));
+                        // Countdown timer for retry (10 seconds)
+                        for seconds_remaining in (1..=10).rev() {
+                            status.set(format!("❌ Error: {} - Retrying in {}s...", e, seconds_remaining));
+                            screenshot_status.set(format!("⏳ Connect your device via USB... ({}/10)", 11 - seconds_remaining));
                             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                         }
                         continue; // Retry
@@ -214,9 +216,10 @@ fn App() -> Element {
                             });
                         }
                         Err(e) => {
-                            // Countdown timer for retry
-                            for seconds_remaining in (1..=3).rev() {
-                                status.set(format!("❌ Connection failed: {} - retrying in {}s...", e, seconds_remaining));
+                            // Countdown timer for retry (10 seconds)
+                            for seconds_remaining in (1..=10).rev() {
+                                status.set(format!("❌ Connection failed: {} - Retrying in {}s...", e, seconds_remaining));
+                                screenshot_status.set(format!("⏳ Waiting for device... ({}/10)", 11 - seconds_remaining));
                                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                             }
                             // Continue to retry loop
@@ -257,11 +260,25 @@ fn App() -> Element {
 
             // Start automation task
             let mut automation = GameAutomation::new(cmd_rx, event_tx, debug_mode);
-            if let Err(e) = automation.initialize_adb().await {
-                if debug_mode {
-                    println!("❌ Failed to initialize automation ADB: {}", e);
+            
+            // Retry loop for automation ADB initialization
+            loop {
+                match automation.initialize_adb().await {
+                    Ok(_) => {
+                        if debug_mode {
+                            println!("✅ Automation ADB initialized successfully");
+                        }
+                        break; // Success - exit retry loop
+                    }
+                    Err(e) => {
+                        if debug_mode {
+                            println!("❌ Failed to initialize automation ADB: {} - will retry...", e);
+                        }
+                        // Wait 10 seconds before retrying
+                        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                        // Loop will retry
+                    }
                 }
-                return;
             }
 
             // Spawn automation FSM loop
@@ -432,10 +449,54 @@ fn App() -> Element {
                             if debug_mode {
                                 println!("✅ Device reconnected successfully!");
                             }
-                            screenshot_status_clone.set("✅ Device reconnected! You can now resume automation.".to_string());
-                            status_clone.set("✅ Device Reconnected - Ready to Resume".to_string());
+                            screenshot_status_clone.set("✅ Device reconnected! Restoring connection...".to_string());
+                            status_clone.set("✅ Device Reconnected".to_string());
                             
-                            // Note: Device info will be updated when user resumes or takes a new screenshot
+                            // Restore device info by reconnecting in GUI
+                            spawn(async move {
+                                match AdbBackend::connect_first().await {
+                                    Ok(client) => {
+                                        let (sx, sy) = client.screen_dimensions();
+                                        device_info_clone.set(Some((
+                                            client.device_name().to_string(),
+                                            client.transport_id(),
+                                            sx,
+                                            sy,
+                                        )));
+                                        status_clone.set("✅ Connected".to_string());
+                                        screenshot_status_clone.set("✅ Device reconnected! Automation ready.".to_string());
+                                        
+                                        if debug_mode {
+                                            println!("✅ GUI device info restored");
+                                        }
+                                        
+                                        // Take a fresh screenshot to show device is working
+                                        match client.screen_capture_bytes().await {
+                                            Ok(bytes) => {
+                                                let bytes_clone = bytes.clone();
+                                                let base64_string = tokio::task::spawn_blocking(move || {
+                                                    base64_encode(&bytes_clone)
+                                                }).await.unwrap_or_else(|_| "".to_string());
+                                                
+                                                screenshot_data_clone.set(Some(base64_string));
+                                                screenshot_bytes_clone.set(Some(bytes));
+                                                screenshot_status_clone.set("✅ Reconnected - Click Resume to continue automation".to_string());
+                                            }
+                                            Err(e) => {
+                                                if debug_mode {
+                                                    println!("⚠️ Failed to take reconnection screenshot: {}", e);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        if debug_mode {
+                                            println!("❌ Failed to restore GUI connection: {}", e);
+                                        }
+                                        screenshot_status_clone.set(format!("❌ Failed to restore connection: {}", e));
+                                    }
+                                }
+                            });
                         }
                     }
                 }
@@ -458,12 +519,6 @@ fn App() -> Element {
         "background: #5a1f1f; color: #ff6262; border: 1px solid #ff6262; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; letter-spacing: 0.5px; font-weight: 600;"
     } else {
         "background: #5a4b1f; color: #ffd857; border: 1px solid #ffd857; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; letter-spacing: 0.5px; font-weight: 600;"
-    };
-    // Use detailed error message (e.g. missing adb guidance) when status contains Error
-    let fallback_message = if current_status.contains("Error") {
-        current_status.clone()
-    } else {
-        "Please connect an Android device with ADB enabled, or use the CLI version.".to_string()
     };
 
     rsx! {
@@ -496,10 +551,31 @@ fn App() -> Element {
                                 touch_timeout_remaining: touch_timeout_remaining  // Pass countdown timer
                             }
                         } else {
-                            // Fallback panel if no device is connected
+                            // Fallback panel if no device is connected - show live status updates
                             div { style: "background:rgba(255,255,255,0.1); backdrop-filter:blur(10px); padding:20px; border-radius:15px; margin-bottom:20px; border:1px solid rgba(255,255,255,0.2);",
                                 h2 { style: "margin-top:0; color:#ffb347;", "⚠️ No Device Connected" }
-                                p { style: "font-size:1.1em; margin:15px 0; text-align:center;", "{fallback_message}" }
+                                
+                                // Show current connection status with countdown
+                                div { style: "background:rgba(0,0,0,0.3); padding:15px; border-radius:10px; margin:15px 0;",
+                                    p { style: "font-size:1.2em; margin:0; text-align:center; font-weight:600;", 
+                                        "{current_status}" 
+                                    }
+                                }
+                                
+                                // Show screenshot status with progress indicator
+                                if !screenshot_status.read().is_empty() {
+                                    div { style: "background:rgba(0,0,0,0.2); padding:12px; border-radius:8px; margin:10px 0;",
+                                        p { style: "font-size:1em; margin:0; text-align:center; color:#ffd857;", 
+                                            "{screenshot_status.read()}" 
+                                        }
+                                    }
+                                }
+                                
+                                // Helpful message
+                                p { style: "font-size:0.95em; margin:15px 0; text-align:center; color:rgba(255,255,255,0.7);", 
+                                    "Connect your Android device via USB with ADB debugging enabled" 
+                                }
+                                
                                 button { style: "background:linear-gradient(45deg,#dc3545,#e74c3c); color:white; padding:15px 25px; border:none; border-radius:10px; cursor:pointer; font-size:1.1em; font-weight:bold; min-width:150px;", onclick: move |_| { std::thread::spawn(|| std::process::exit(0)); }, "🚪 Exit Application" }
                             }
                         }
