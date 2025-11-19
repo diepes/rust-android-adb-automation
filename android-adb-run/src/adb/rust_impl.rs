@@ -938,6 +938,12 @@ impl AdbClient for RustAdb {
         Ok(())
     }
 
+    async fn register_touch_activity(&self) -> Result<(), String> {
+        let mut monitor = self.touch_monitor.write().await;
+        monitor.mark_touch_activity();
+        Ok(())
+    }
+
     async fn start_touch_monitoring(&self) -> Result<(), String> {
         let mut monitor = self.touch_monitor.write().await;
 

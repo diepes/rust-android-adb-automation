@@ -450,7 +450,7 @@ fn App() -> Element {
                                 println!("✅ Device reconnected successfully!");
                             }
                             screenshot_status_clone.set("✅ Device reconnected! Restoring connection...".to_string());
-                            status_clone.set("✅ Device Reconnected".to_string());
+                            status_clone.set("✅ Device Reconnected - Auto-Resuming".to_string());
                             
                             // Restore device info by reconnecting in GUI
                             spawn(async move {
@@ -480,7 +480,7 @@ fn App() -> Element {
                                                 
                                                 screenshot_data_clone.set(Some(base64_string));
                                                 screenshot_bytes_clone.set(Some(bytes));
-                                                screenshot_status_clone.set("✅ Reconnected - Click Resume to continue automation".to_string());
+                                                screenshot_status_clone.set("✅ Reconnected - Automation auto-resumed!".to_string());
                                             }
                                             Err(e) => {
                                                 if debug_mode {
@@ -583,7 +583,7 @@ fn App() -> Element {
                         div { style: "margin-top:4px; text-align:left; font-size:0.7em; opacity:0.75; letter-spacing:0.5px;", "Built with Rust 🦀 and Dioxus ⚛️" }
                     }
                     // Right column: screenshot panel (image, gestures)
-                    screenshot_panel { screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, device_info: device_info, device_coords: device_coords, mouse_coords: mouse_coords, is_loading_screenshot: is_loading_screenshot, auto_update_on_touch: auto_update_on_touch, is_swiping: is_swiping, swipe_start: swipe_start, swipe_end: swipe_end, calculate_device_coords: calculate_device_coords, select_box: select_box, selection_start: selection_start, selection_end: selection_end, tap_markers: tap_markers, screenshot_counter: screenshot_counter }
+                    screenshot_panel { screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, device_info: device_info, device_coords: device_coords, mouse_coords: mouse_coords, is_loading_screenshot: is_loading_screenshot, auto_update_on_touch: auto_update_on_touch, is_swiping: is_swiping, swipe_start: swipe_start, swipe_end: swipe_end, calculate_device_coords: calculate_device_coords, select_box: select_box, selection_start: selection_start, selection_end: selection_end, tap_markers: tap_markers, screenshot_counter: screenshot_counter, automation_command_tx: automation_command_tx }
                 }
             }
         }

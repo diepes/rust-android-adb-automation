@@ -26,6 +26,7 @@ pub struct ScreenshotPanelProps {
     pub selection_end: Signal<Option<ElementPoint>>,
     pub tap_markers: Signal<Vec<ElementPoint>>,
     pub screenshot_counter: Signal<u64>, // GUI-level counter
+    pub automation_command_tx: Signal<Option<tokio::sync::mpsc::Sender<crate::game_automation::AutomationCommand>>>,
 }
 
 #[component]
@@ -48,6 +49,7 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
     let mut selection_end = props.selection_end;
     let mut tap_markers = props.tap_markers;
     let mut screenshot_counter = props.screenshot_counter;
+    let automation_command_tx = props.automation_command_tx;
     let _status_text = screenshot_status.read().clone();
 
     // Helper to compute rectangle overlay adjusted for image border
@@ -150,6 +152,15 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                             if refresh_after { is_loading_screenshot.set(true); }
                                             if distance < 10.0 {
                                                 let raw_point = evt.element_coordinates(); tap_markers.with_mut(|v| v.push(raw_point));
+                                                
+                                                // Trigger 30-second pause for GUI tap (same as human touch detection)
+                                                if let Some(cmd_tx) = automation_command_tx.read().as_ref() {
+                                                    let cmd_tx_clone = cmd_tx.clone();
+                                                    spawn(async move {
+                                                        let _ = cmd_tx_clone.send(crate::game_automation::AutomationCommand::RegisterTouchActivity).await;
+                                                    });
+                                                }
+                                                
                                                 spawn(async move {
                                                     let result = async move {
                                                         match AdbBackend::connect_first().await {
@@ -192,6 +203,14 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                                     }
                                                 });
                                             } else {
+                                                // Trigger 30-second pause for GUI swipe (same as human touch detection)
+                                                if let Some(cmd_tx) = automation_command_tx.read().as_ref() {
+                                                    let cmd_tx_clone = cmd_tx.clone();
+                                                    spawn(async move {
+                                                        let _ = cmd_tx_clone.send(crate::game_automation::AutomationCommand::RegisterTouchActivity).await;
+                                                    });
+                                                }
+                                                
                                                 spawn(async move {
                                                     let result = async move {
                                                         match AdbBackend::connect_first().await {

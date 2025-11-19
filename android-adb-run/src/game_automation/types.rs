@@ -196,6 +196,7 @@ pub enum AutomationCommand {
     TriggerTimedEvent(String), // Trigger timed event immediately by ID
     ListTimedEvents,           // List all configured timed events
     ClearTouchActivity,        // Clear touch activity to resume automation immediately
+    RegisterTouchActivity,     // Register touch activity to pause automation for 30 seconds
     Shutdown,
 }
 

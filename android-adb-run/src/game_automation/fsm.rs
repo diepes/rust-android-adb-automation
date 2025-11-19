@@ -396,6 +396,26 @@ impl GameAutomation {
                     }
                 }
             }
+            AutomationCommand::RegisterTouchActivity => {
+                // Register touch activity to pause automation for 30 seconds
+                if let Some(client_arc) = &self.adb_client {
+                    let client_guard = client_arc.lock().await;
+                    if let Err(e) = client_guard.register_touch_activity().await {
+                        debug_print!(
+                            self.debug_enabled,
+                            "⚠️ Failed to register touch activity: {}",
+                            e
+                        );
+                    } else {
+                        debug_print!(self.debug_enabled, "👆 GUI touch registered - pausing automation for 30s");
+                        // Send event to update GUI with countdown
+                        let _ = self
+                            .event_tx
+                            .send(AutomationEvent::ManualActivityDetected(true, Some(30)))
+                            .await;
+                    }
+                }
+            }
             AutomationCommand::TakeScreenshot => {
                 if self.is_running && self.state != GameState::Paused {
                     let _ = self.take_screenshot().await;
@@ -1119,6 +1139,15 @@ impl GameAutomation {
                 self.device_disconnected = false;
                 self.last_reconnect_attempt = None;
                 
+                // Auto-resume automation if it was running (same as initial startup)
+                if self.is_running && self.state == GameState::Paused {
+                    self.change_state(GameState::Running).await;
+                    debug_print!(
+                        self.debug_enabled,
+                        "▶️ Auto-resuming automation after reconnection"
+                    );
+                }
+                
                 // Send reconnection event to GUI
                 let _ = self
                     .event_tx
@@ -1127,7 +1156,7 @@ impl GameAutomation {
                 
                 debug_print!(
                     self.debug_enabled,
-                    "✅ Device reconnected successfully - automation can be resumed"
+                    "✅ Device reconnected successfully - automation auto-resumed"
                 );
                 
                 Ok(())

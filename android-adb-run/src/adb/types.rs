@@ -114,6 +114,7 @@ pub trait AdbClient: Send + Sync {
     async fn is_human_touching(&self) -> bool;
     async fn get_touch_timeout_remaining(&self) -> Option<u64>;
     async fn clear_touch_activity(&self) -> Result<(), String>;
+    async fn register_touch_activity(&self) -> Result<(), String>; // NEW: Marks touch to pause automation
     async fn start_touch_monitoring(&self) -> Result<(), String>;
     async fn stop_touch_monitoring(&self) -> Result<(), String>;
 
