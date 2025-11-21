@@ -43,9 +43,9 @@ pub fn Actions(props: ActionsProps) -> Element {
                 div { style: "display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: center;",
                     // Automation state indicator with touch pause detection
                     {
-                        let is_touch_paused = is_paused_by_touch.read().clone();
+                        let is_touch_paused = *is_paused_by_touch.read();
                         let state = automation_state.read().clone();
-                        let remaining_secs = touch_timeout_remaining.read().clone();
+                        let remaining_secs = *touch_timeout_remaining.read();
                         
                         let (display_text, style) = if is_touch_paused && state == GameState::Running {
                             // Show countdown if available
@@ -70,7 +70,7 @@ pub fn Actions(props: ActionsProps) -> Element {
 
                     // Control buttons - show Resume when touch paused
                     {
-                        let is_touch_paused = is_paused_by_touch.read().clone();
+                        let is_touch_paused = *is_paused_by_touch.read();
                         let state = automation_state.read().clone();
                         let effective_state = if is_touch_paused && state == GameState::Running {
                             GameState::Paused
@@ -267,15 +267,14 @@ pub fn Actions(props: ActionsProps) -> Element {
                                                         let event_id = event.id.clone();
                                                         let is_enabled = event.enabled;
                                                         move |_| {
-                                                            if is_enabled {
-                                                                if let Some(tx) = automation_command_tx.read().as_ref() {
+                                                            if is_enabled
+                                                                && let Some(tx) = automation_command_tx.read().as_ref() {
                                                                     let tx = tx.clone();
                                                                     let event_id = event_id.clone();
                                                                     spawn(async move {
                                                                         let _ = tx.send(AutomationCommand::TriggerTimedEvent(event_id)).await;
                                                                     });
                                                                 }
-                                                            }
                                                         }
                                                     },
                                                     title: if event.enabled {
@@ -325,15 +324,15 @@ pub fn Actions(props: ActionsProps) -> Element {
                                             div { style: "margin-top: 4px; background: rgba(255,255,255,0.1); border-radius: 3px; height: 4px; overflow: hidden;",
                                                 div {
                                                     style: {
-                                                        let progress = if let Some(time_until) = event.time_until_next() {
+                                                        
+                                                        if let Some(time_until) = event.time_until_next() {
                                                             let total_seconds = event.interval.as_secs() as f64;
                                                             let remaining_seconds = time_until.as_secs() as f64;
-                                                            let progress = ((total_seconds - remaining_seconds) / total_seconds * 100.0).max(0.0).min(100.0);
+                                                            let progress = ((total_seconds - remaining_seconds) / total_seconds * 100.0).clamp(0.0, 100.0);
                                                             format!("background: linear-gradient(90deg, #28a745, #20c997); width: {}%; height: 100%; transition: width 0.5s ease;", progress)
                                                         } else {
                                                             "background: #6c757d; width: 0%; height: 100%;".to_string()
-                                                        };
-                                                        progress
+                                                        }
                                                     }
                                                 }
                                             }

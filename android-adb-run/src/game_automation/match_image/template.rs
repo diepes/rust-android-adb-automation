@@ -82,13 +82,13 @@ impl Template {
 
     /// Extract region coordinates from filename
     fn extract_region_from_filename(filename: &str) -> Option<(u32, u32, u32, u32)> {
-        if let Some(start) = filename.find('[') {
-            if let Some(end) = filename.find(']') {
-                if end > start {
+        if let Some(start) = filename.find('[')
+            && let Some(end) = filename.find(']')
+                && end > start {
                     let region_str = &filename[start + 1..end];
                     let parts: Vec<&str> = region_str.split(',').collect();
-                    if parts.len() == 4 {
-                        if let (Ok(x), Ok(y), Ok(width), Ok(height)) = (
+                    if parts.len() == 4
+                        && let (Ok(x), Ok(y), Ok(width), Ok(height)) = (
                             parts[0].trim().parse::<u32>(),
                             parts[1].trim().parse::<u32>(),
                             parts[2].trim().parse::<u32>(),
@@ -96,10 +96,7 @@ impl Template {
                         ) {
                             return Some((x, y, width, height));
                         }
-                    }
                 }
-            }
-        }
         None
     }
 
@@ -200,9 +197,9 @@ impl TemplateManager {
             .map_err(|e| format!("Failed to read directory {}: {}", directory, e))?;
 
         for entry in entries {
-            if let Ok(entry) = entry {
-                if let Some(file_name) = entry.file_name().to_str() {
-                    if file_name.ends_with(".png") && entry.path().is_file() {
+            if let Ok(entry) = entry
+                && let Some(file_name) = entry.file_name().to_str()
+                    && file_name.ends_with(".png") && entry.path().is_file() {
                         let file_path = entry.path().to_string_lossy().to_string();
 
                         // Determine search region from filename or use full screen
@@ -222,8 +219,6 @@ impl TemplateManager {
                             }
                         }
                     }
-                }
-            }
         }
 
         // Sort templates by category and name for consistent processing

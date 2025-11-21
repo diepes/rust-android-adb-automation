@@ -33,13 +33,12 @@ impl SearchRegion {
 
     /// Parse region from filename format: template-[x,y,width,height].png
     pub fn parse_from_filename(filename: &str, screen_width: u32, screen_height: u32) -> Self {
-        if let Some(region_str) = Self::extract_region_string(filename) {
-            if let Some(region) = Self::parse_region_coordinates(&region_str) {
+        if let Some(region_str) = Self::extract_region_string(filename)
+            && let Some(region) = Self::parse_region_coordinates(&region_str) {
                 // Validate and clip to screen bounds
                 let clipped = Self::clip_to_screen(region, screen_width, screen_height);
                 return clipped;
             }
-        }
 
         // Default to full screen if parsing fails
         Self::full_screen(screen_width, screen_height)
@@ -47,21 +46,19 @@ impl SearchRegion {
 
     /// Extract region string from filename (e.g., "[300,1682,50,50]")
     fn extract_region_string(filename: &str) -> Option<String> {
-        if let Some(start) = filename.find('[') {
-            if let Some(end) = filename.find(']') {
-                if end > start {
+        if let Some(start) = filename.find('[')
+            && let Some(end) = filename.find(']')
+                && end > start {
                     return Some(filename[start + 1..end].to_string());
                 }
-            }
-        }
         None
     }
 
     /// Parse coordinates from region string (e.g., "300,1682,50,50")
     fn parse_region_coordinates(region_str: &str) -> Option<SearchRegion> {
         let parts: Vec<&str> = region_str.split(',').collect();
-        if parts.len() == 4 {
-            if let (Ok(x), Ok(y), Ok(width), Ok(height)) = (
+        if parts.len() == 4
+            && let (Ok(x), Ok(y), Ok(width), Ok(height)) = (
                 parts[0].trim().parse::<u32>(),
                 parts[1].trim().parse::<u32>(),
                 parts[2].trim().parse::<u32>(),
@@ -75,7 +72,6 @@ impl SearchRegion {
                     format!("parsed_{}_{}_{}_{}", x, y, width, height),
                 ));
             }
-        }
         None
     }
 

@@ -518,12 +518,13 @@ impl RustAdb {
                     event_device
                 );
 
+                #[allow(clippy::redundant_pattern_matching)]
                 if let Ok(_) = dev.shell_command(&["sh", "-c", &command], &mut out) {
                     let output = String::from_utf8_lossy(&out);
 
                     // Check for touch events in the output
                     let has_touch_events =
-                        output.lines().any(|line| Self::is_touch_event_line(line));
+                        output.lines().any(Self::is_touch_event_line);
 
                     if has_touch_events {
                         {
@@ -604,8 +605,8 @@ impl RustAdb {
             // New device declaration: "add device N: /dev/input/eventX"
             if line.starts_with("add device") && line.contains("/dev/input/event") {
                 // Save previous device if it was touch-capable
-                if let Some(ref device) = current_device {
-                    if has_touch_events {
+                if let Some(ref device) = current_device
+                    && has_touch_events {
                         let score = Self::score_touch_device(&current_name);
                         if crate::gui::dioxus_app::is_debug_mode() {
                             println!(
@@ -618,7 +619,6 @@ impl RustAdb {
                             best_score = score;
                         }
                     }
-                }
 
                 // Extract device path
                 if let Some(path_start) = line.find("/dev/input/event") {
@@ -629,13 +629,11 @@ impl RustAdb {
             }
             // Device name: '  name:     "device_name"'
             else if line.starts_with("name:") {
-                if let Some(name_start) = line.find('"') {
-                    if let Some(name_end) = line.rfind('"') {
-                        if name_start < name_end {
+                if let Some(name_start) = line.find('"')
+                    && let Some(name_end) = line.rfind('"')
+                        && name_start < name_end {
                             current_name = line[name_start + 1..name_end].to_string();
                         }
-                    }
-                }
             }
             // Look for touch-related ABS events
             else if line.contains("ABS (0003)") || line.contains("0035") || line.contains("0036")
@@ -646,8 +644,8 @@ impl RustAdb {
         }
 
         // Check the last device
-        if let Some(ref device) = current_device {
-            if has_touch_events {
+        if let Some(ref device) = current_device
+            && has_touch_events {
                 let score = Self::score_touch_device(&current_name);
                 if crate::gui::dioxus_app::is_debug_mode() {
                     println!(
@@ -660,7 +658,6 @@ impl RustAdb {
                     best_score = score;
                 }
             }
-        }
 
         match best_device {
             Some(device) => {
@@ -962,11 +959,9 @@ impl AdbClient for RustAdb {
         let task = tokio::spawn(async move {
             if let Err(e) =
                 Self::monitor_touch_activity_loop(touch_monitor.clone(), server_device).await
-            {
-                if crate::gui::dioxus_app::is_debug_mode() {
+                && crate::gui::dioxus_app::is_debug_mode() {
                     eprintln!("Touch monitoring ended: {}", e);
                 }
-            }
 
             // Mark monitoring as stopped when task ends
             let mut monitor = touch_monitor.write().await;

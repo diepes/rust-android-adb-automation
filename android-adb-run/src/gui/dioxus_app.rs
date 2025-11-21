@@ -58,7 +58,7 @@ fn App() -> Element {
     let automation_state = use_signal(|| GameState::Idle);
     let automation_command_tx = use_signal(|| None::<mpsc::Sender<AutomationCommand>>);
     let timed_tap_countdown = use_signal(|| None::<(String, u64)>); // (id, seconds_remaining)
-    let timed_events_list = use_signal(|| Vec::<TimedEvent>::new()); // All timed events
+    let timed_events_list = use_signal(Vec::<TimedEvent>::new); // All timed events
     let is_paused_by_touch = use_signal(|| false); // New signal for touch-based pause state
     let touch_timeout_remaining = use_signal(|| None::<u64>); // Remaining seconds until touch timeout expires
 
@@ -239,18 +239,18 @@ fn App() -> Element {
     use_effect(move || {
         let debug_mode = *DEBUG_MODE.get().unwrap_or(&false);
         // Clone signals for use in async context
-        let mut automation_command_tx_clone = automation_command_tx.clone();
-        let mut automation_state_clone = automation_state.clone();
-        let mut screenshot_counter_clone = screenshot_counter.clone();
-        let mut screenshot_data_clone = screenshot_data.clone();
-        let mut screenshot_bytes_clone = screenshot_bytes.clone();
-        let mut screenshot_status_clone = screenshot_status.clone();
-        let mut timed_tap_countdown_clone = timed_tap_countdown.clone();
-        let mut timed_events_list_clone = timed_events_list.clone();
-        let mut is_paused_by_touch_clone = is_paused_by_touch.clone();
-        let mut touch_timeout_remaining_clone = touch_timeout_remaining.clone();
-        let mut status_clone = status.clone();
-        let mut device_info_clone = device_info.clone();
+        let mut automation_command_tx_clone = automation_command_tx;
+        let mut automation_state_clone = automation_state;
+        let mut screenshot_counter_clone = screenshot_counter;
+        let mut screenshot_data_clone = screenshot_data;
+        let mut screenshot_bytes_clone = screenshot_bytes;
+        let mut screenshot_status_clone = screenshot_status;
+        let mut timed_tap_countdown_clone = timed_tap_countdown;
+        let mut timed_events_list_clone = timed_events_list;
+        let mut is_paused_by_touch_clone = is_paused_by_touch;
+        let mut touch_timeout_remaining_clone = touch_timeout_remaining;
+        let mut status_clone = status;
+        let mut device_info_clone = device_info;
 
         spawn(async move {
             // Create automation channels

@@ -971,7 +971,7 @@ impl GameAutomation {
                             );
                         }
 
-                        return Ok(true);
+                        Ok(true)
                     }
                     Err(e) => {
                         let error_msg = format!("Failed to tap at ({}, {}): {}", tap_x, tap_y, e);
@@ -991,15 +991,15 @@ impl GameAutomation {
                                 .await;
                         }
                         
-                        return Err(error_msg);
+                        Err(error_msg)
                     }
                 }
             } else {
-                return Err("ADB client not available for tap action".to_string());
+                Err("ADB client not available for tap action".to_string())
             }
         } else {
             debug_print!(self.debug_enabled, "👀 No actionable matches found");
-            return Ok(false);
+            Ok(false)
         }
     }
 

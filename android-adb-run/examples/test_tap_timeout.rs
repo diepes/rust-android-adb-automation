@@ -1,4 +1,4 @@
-use android_adb_run::adb::backend::AdbBackend;
+use android_adb_run::adb::{backend::AdbBackend, AdbClient};
 use std::time::Instant;
 
 #[tokio::main]

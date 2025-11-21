@@ -294,7 +294,7 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                             let marker_y = marker.point.y + 0.0;
                             let age_secs = marker.timestamp.elapsed().as_secs_f32();
                             // Fade out over 30 seconds: opacity 1.0 -> 0.0
-                            let opacity = (1.0 - (age_secs / 30.0)).max(0.0).min(1.0);
+                            let opacity = (1.0 - (age_secs / 30.0)).clamp(0.0, 1.0);
                             rsx!{ div { style: format!("position:absolute; left:{marker_x}px; top:{marker_y}px; width:10px; height:10px; background:#ffffff; border:2px solid #ff4444; border-radius:50%; box-shadow:0 0 6px rgba(255,255,255,0.8); transform:translate(-50%, -50%); pointer-events:none; z-index:9; opacity:{opacity};"), } }
                         } }
                         if loading { div { style: "position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255, 68, 68, 0.95); color: white; padding: 15px 25px; border-radius: 25px; font-size: 1.2em; font-weight: bold; border: 2px solid white; box-shadow: 0 4px 20px rgba(0,0,0,0.5); z-index: 20;", "📸 LOADING..." } }

@@ -2,7 +2,7 @@
 
 use super::{
     config::MatchConfig,
-    template::{Template, TemplateCategory, TemplateManager, TemplateMatch},
+    template::{Template, TemplateManager, TemplateMatch},
 };
 use crate::game_automation::types::GameState;
 use image::{ImageBuffer, Luma};
@@ -14,6 +14,12 @@ pub struct DetectionResult {
     pub suggested_state: Option<GameState>,
     pub confidence_score: f32,
     pub processing_time_ms: u128,
+}
+
+impl Default for DetectionResult {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DetectionResult {
@@ -153,7 +159,7 @@ impl GameStateDetector {
         if region.x + region.width > self.screen_width
             || region.y + region.height > self.screen_height
         {
-            return Err(format!("Search region exceeds screen bounds"));
+            return Err("Search region exceeds screen bounds".to_string());
         }
 
         let cropped_view = image::imageops::crop_imm(
@@ -278,7 +284,7 @@ impl GameStateDetector {
 
         // Find matches above threshold
         for (x, y, pixel) in result.enumerate_pixels() {
-            let confidence = pixel[0] as f32 / 255.0;
+            let confidence = pixel[0] / 255.0;
 
             if confidence >= self.config.confidence_threshold {
                 // Convert coordinates back to screen space
@@ -306,19 +312,10 @@ impl GameStateDetector {
         // Analyze matches to suggest game state
         // This is where game-specific logic would go
 
-        let best_match = matches.first()?;
+        let _best_match = matches.first()?;
 
-        // Example state determination logic
-        match best_match.template.category {
-            TemplateCategory::Button => {
-                if best_match.confidence > 0.9 {
-                    Some(GameState::Running)
-                } else {
-                    Some(GameState::Running)
-                }
-            }
-            _ => Some(GameState::Running),
-        }
+        // Example state determination logic - simplified since all cases return the same
+        Some(GameState::Running)
     }
 
     /// Calculate overall confidence score
@@ -455,15 +452,14 @@ impl GameStateDetector {
             let template_gray = template_image.to_luma8();
 
             // Still warn if template is very large
-            if template_gray.width() > 500 || template_gray.height() > 500 {
-                if self.config.debug_enabled {
+            if (template_gray.width() > 500 || template_gray.height() > 500)
+                && self.config.debug_enabled {
                     println!(
                         "⚠️ Large template detected: {}x{} - this may be slow!",
                         template_gray.width(),
                         template_gray.height()
                     );
                 }
-            }
 
             Ok(template_gray)
         }
@@ -476,13 +472,13 @@ impl GameStateDetector {
         filename: &str,
     ) -> Option<(u32, u32, u32, u32)> {
         // Look for pattern [x,y,width,height] in filename
-        if let Some(start) = filename.find('[') {
-            if let Some(end) = filename.find(']') {
-                if end > start {
+        if let Some(start) = filename.find('[')
+            && let Some(end) = filename.find(']')
+                && end > start {
                     let region_str = &filename[start + 1..end];
                     let parts: Vec<&str> = region_str.split(',').collect();
-                    if parts.len() == 4 {
-                        if let (Ok(x), Ok(y), Ok(width), Ok(height)) = (
+                    if parts.len() == 4
+                        && let (Ok(x), Ok(y), Ok(width), Ok(height)) = (
                             parts[0].trim().parse::<u32>(),
                             parts[1].trim().parse::<u32>(),
                             parts[2].trim().parse::<u32>(),
@@ -490,10 +486,7 @@ impl GameStateDetector {
                         ) {
                             return Some((x, y, width, height));
                         }
-                    }
                 }
-            }
-        }
         None
     }
 }
