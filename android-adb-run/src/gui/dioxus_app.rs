@@ -4,7 +4,7 @@ use crate::game_automation::{
     AutomationCommand, AutomationEvent, GameAutomation, GameState, create_automation_channels,
 };
 use crate::gui::components::{
-    actions::Actions, device_info::DeviceInfo, header::Header, screenshot_panel::screenshot_panel,
+    actions::Actions, device_info::DeviceInfo, header::Header, screenshot_panel::{screenshot_panel, TapMarker},
 };
 use crate::gui::util::base64_encode;
 use dioxus::prelude::*;
@@ -69,7 +69,7 @@ fn App() -> Element {
     let swipe_start = use_signal(|| None::<(u32, u32)>);
     let swipe_end = use_signal(|| None::<(u32, u32)>);
 
-    let tap_markers = use_signal(Vec::<dioxus::html::geometry::ElementPoint>::new);
+    let tap_markers = use_signal(Vec::<TapMarker>::new);
 
     // Helper function to calculate device coordinates from mouse coordinates (correcting for image border)
     fn calculate_device_coords(

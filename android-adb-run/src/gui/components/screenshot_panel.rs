@@ -3,8 +3,15 @@ use crate::adb::{AdbBackend, AdbClient};
 use crate::gui::util::base64_encode;
 use dioxus::html::geometry::ElementPoint;
 use dioxus::prelude::*;
+use std::time::Instant;
 
 type DeviceInfo = (String, Option<u32>, u32, u32);
+
+#[derive(Clone, PartialEq)]
+pub struct TapMarker {
+    pub point: ElementPoint,
+    pub timestamp: Instant,
+}
 
 #[allow(unpredictable_function_pointer_comparisons)]
 #[derive(Props, PartialEq, Clone)]
@@ -24,7 +31,7 @@ pub struct ScreenshotPanelProps {
     pub select_box: Signal<bool>,
     pub selection_start: Signal<Option<ElementPoint>>,
     pub selection_end: Signal<Option<ElementPoint>>,
-    pub tap_markers: Signal<Vec<ElementPoint>>,
+    pub tap_markers: Signal<Vec<TapMarker>>,
     pub screenshot_counter: Signal<u64>, // GUI-level counter
     pub automation_command_tx: Signal<Option<tokio::sync::mpsc::Sender<crate::game_automation::AutomationCommand>>>,
 }
@@ -51,6 +58,20 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
     let mut screenshot_counter = props.screenshot_counter;
     let automation_command_tx = props.automation_command_tx;
     let _status_text = screenshot_status.read().clone();
+
+    // Periodic cleanup of old tap markers and trigger re-renders for fade animation
+    use_effect(move || {
+        spawn(async move {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                
+                // Remove markers older than 30 seconds
+                tap_markers.with_mut(|markers| {
+                    markers.retain(|m| m.timestamp.elapsed().as_secs() < 30);
+                });
+            }
+        });
+    });
 
     // Helper to compute rectangle overlay adjusted for image border
     let adjust_overlay = |start: ElementPoint, end: ElementPoint| {
@@ -151,7 +172,11 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                             let refresh_after = auto && !already_loading;
                                             if refresh_after { is_loading_screenshot.set(true); }
                                             if distance < 10.0 {
-                                                let raw_point = evt.element_coordinates(); tap_markers.with_mut(|v| v.push(raw_point));
+                                                let raw_point = evt.element_coordinates(); 
+                                                tap_markers.with_mut(|v| v.push(TapMarker {
+                                                    point: raw_point,
+                                                    timestamp: Instant::now(),
+                                                }));
                                                 
                                                 // Trigger 30-second pause for GUI tap (same as human touch detection)
                                                 if let Some(cmd_tx) = automation_command_tx.read().as_ref() {
@@ -264,10 +289,13 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                 div { style: "position:absolute; right:0; bottom:0; background:rgba(0,0,0,0.55); color:#fff; font-size:10px; padding:2px 4px; border-top-left-radius:4px;", "{ow}x{oh}" }
                             }
                         }
-                        for p in tap_markers.read().iter() { {
-                            let marker_x = p.x + 0.0;
-                            let marker_y = p.y + 0.0;
-                            rsx!{ div { style: format!("position:absolute; left:{marker_x}px; top:{marker_y}px; width:10px; height:10px; background:#ffffff; border:2px solid #ff4444; border-radius:50%; box-shadow:0 0 6px rgba(255,255,255,0.8); transform:translate(-50%, -50%); pointer-events:none; z-index:9;"), } }
+                        for marker in tap_markers.read().iter() { {
+                            let marker_x = marker.point.x + 0.0;
+                            let marker_y = marker.point.y + 0.0;
+                            let age_secs = marker.timestamp.elapsed().as_secs_f32();
+                            // Fade out over 30 seconds: opacity 1.0 -> 0.0
+                            let opacity = (1.0 - (age_secs / 30.0)).max(0.0).min(1.0);
+                            rsx!{ div { style: format!("position:absolute; left:{marker_x}px; top:{marker_y}px; width:10px; height:10px; background:#ffffff; border:2px solid #ff4444; border-radius:50%; box-shadow:0 0 6px rgba(255,255,255,0.8); transform:translate(-50%, -50%); pointer-events:none; z-index:9; opacity:{opacity};"), } }
                         } }
                         if loading { div { style: "position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255, 68, 68, 0.95); color: white; padding: 15px 25px; border-radius: 25px; font-size: 1.2em; font-weight: bold; border: 2px solid white; box-shadow: 0 4px 20px rgba(0,0,0,0.5); z-index: 20;", "📸 LOADING..." } }
                     }
