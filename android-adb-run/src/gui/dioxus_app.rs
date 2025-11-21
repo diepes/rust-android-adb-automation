@@ -24,14 +24,17 @@ pub fn run_gui(debug_mode: bool) {
         .expect("DEBUG_MODE should only be set once");
 
     use dioxus::desktop::{Config, WindowBuilder};
-    let enable_borderless = true; // borderless window
-    let config = Config::new().with_window(
-        WindowBuilder::new()
-            .with_title("Android ADB Automation")
-            .with_decorations(!enable_borderless) // false => no native title/menu
-            .with_resizable(true)
-            .with_inner_size(dioxus::desktop::LogicalSize::new(1000, 700)),
-    );
+    let enable_borderless = false; // Use custom borderless window for better cross-platform control
+    let config = Config::new()
+        .with_window(
+            WindowBuilder::new()
+                .with_title("Android ADB Automation")
+                .with_decorations(!enable_borderless) // false => no native title/menu (custom controls)
+                .with_resizable(true)
+                .with_inner_size(dioxus::desktop::LogicalSize::new(1000, 700)),
+        )
+        .with_menu(None); // Disable the menu bar (removes [Window] and [Edit])
+    
     dioxus::LaunchBuilder::desktop()
         .with_cfg(config)
         .launch(App);
@@ -41,6 +44,9 @@ pub fn run_gui(debug_mode: bool) {
 fn App() -> Element {
     use dioxus::desktop::use_window; // access desktop window for dragging
     let desktop = use_window();
+    let desktop_for_border = desktop.clone();
+    let desktop_for_minimize = desktop.clone();
+    let desktop_for_maximize = desktop.clone();
     let mut status = use_signal(|| "Initializing...".to_string());
     let mut device_info = use_signal(|| None::<(String, Option<u32>, u32, u32)>);
     let mut screenshot_data = use_signal(|| None::<String>);
@@ -70,6 +76,23 @@ fn App() -> Element {
     let swipe_end = use_signal(|| None::<(u32, u32)>);
 
     let tap_markers = use_signal(Vec::<TapMarker>::new);
+    
+    // Runtime tracking
+    let mut runtime_days = use_signal(|| 0.0f64);
+    let app_start_time = use_signal(|| std::time::Instant::now());
+    
+    // Update runtime every second
+    use_effect(move || {
+        spawn(async move {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                let start = *app_start_time.read();
+                let elapsed_secs = start.elapsed().as_secs_f64();
+                let days = elapsed_secs / 86400.0; // 86400 seconds in a day
+                runtime_days.set(days);
+            }
+        });
+    });
 
     // Helper function to calculate device coordinates from mouse coordinates (correcting for image border)
     fn calculate_device_coords(
@@ -522,16 +545,41 @@ fn App() -> Element {
     };
 
     rsx! {
-        // Main app container: vertical layout, fills viewport
-        div { style: "height:97vh; display:flex; flex-direction:column; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:white; border:1px solid rgba(255,255,255,0.25); box-sizing:content-box;",
-            // Scrollable content area
-            div { style: "flex:1; overflow:auto; padding:8px;",
+        // Main app container: vertical layout, fills viewport - draggable from border/background areas
+        div { 
+            style: r#"height:97vh; display:flex;
+                flex-direction:column;
+                background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+                color:white;
+                border:1px solid rgba(255,255,255,0.25);
+                box-sizing:content-box;"#,
+            onmousedown: move |_e| {
+                // Trigger drag when clicking on outer container (border/background)
+                // Child elements will stop propagation to prevent drag during interaction
+                let _ = desktop_for_border.window.drag_window();
+            },
+            // Scrollable content area - stops propagation to prevent accidental dragging
+            div { 
+                style: "flex:1; overflow:auto; padding:8px; cursor:default;",
+                onmousedown: move |e| {
+                    // Stop propagation to prevent drag when clicking on UI elements
+                    e.stop_propagation();
+                },
                 // Horizontal split: left (info/actions), right (screenshot)
                 div { style: "display:flex; gap:14px; align-items:flex-start;",
                     // Left column: header, device info, actions, credits
                     div { style: "flex:1; min-width:0; display:flex; flex-direction:column; gap:10px;",
-                        // App header bar (drag/close)
-                        Header { on_drag: move |_| { let _ = desktop.window.drag_window(); }, on_close: move |_| { std::thread::spawn(|| std::process::exit(0)); } }
+                        // App header bar (drag/minimize/maximize/close)
+                        Header { 
+                            on_drag: move |_| { let _ = desktop.window.drag_window(); },
+                            on_minimize: move |_| { desktop_for_minimize.window.set_minimized(true); },
+                            on_maximize: move |_| { 
+                                let is_maximized = desktop_for_maximize.window.is_maximized();
+                                desktop_for_maximize.window.set_maximized(!is_maximized);
+                            },
+                            on_close: move |_| { std::thread::spawn(|| std::process::exit(0)); },
+                            runtime_days: runtime_days
+                        }
                         // Device info and actions (only if device connected)
                         if let Some((name, transport_id_opt, screen_x, screen_y)) = device_info.read().clone() {
                             // Device metadata panel
