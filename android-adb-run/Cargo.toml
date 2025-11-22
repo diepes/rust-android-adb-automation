@@ -22,6 +22,12 @@ image = { version = "0.25", features = ["png", "jpeg"] }
 # For image template matching
 imageproc = "0.25"
 
+# Force all rustls dependencies to use 'ring' instead of 'aws-lc-rs'
+# aws-lc-rs has build issues on Windows with long file paths
+# ring is pure Rust and builds reliably on all platforms
+[patch.crates-io]
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+
 [profile]
 
 [profile.wasm-dev]
