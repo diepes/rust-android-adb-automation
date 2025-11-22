@@ -55,6 +55,11 @@ jobs:
           pkg-config \
           libxdo-dev
 
+    - name: Install Windows build dependencies
+      if: runner.os == 'Windows'
+      run: |
+        choco install cmake nasm -y
+
     - name: Build release binary
       working-directory: android-adb-run
       run: cargo build --release --target ${{ matrix.target }}

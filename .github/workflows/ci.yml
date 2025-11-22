@@ -41,6 +41,11 @@ jobs:
           pkg-config \
           libxdo-dev
 
+    - name: Install Windows build dependencies
+      if: runner.os == 'Windows'
+      run: |
+        choco install cmake nasm -y
+
     - name: Cache cargo registry
       uses: actions/cache@v3
       with:
@@ -124,6 +129,11 @@ jobs:
           libssl-dev \
           pkg-config \
           libxdo-dev
+
+    - name: Install Windows build dependencies
+      if: runner.os == 'Windows'
+      run: |
+        choco install cmake nasm -y
 
     - name: Cache cargo registry
       uses: actions/cache@v3
