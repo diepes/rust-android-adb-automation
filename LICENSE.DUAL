@@ -1,0 +1,48 @@
+Dual License (Open Source + Commercial)
+
+Copyright (c) 2025 [Your Name/Company Name]. All rights reserved.
+
+This software is available under two different licenses:
+
+## 1. GNU Affero General Public License v3.0 (AGPL-3.0)
+
+For non-commercial and open-source use, this software is licensed under the 
+GNU Affero General Public License v3.0. See LICENSE.AGPL for full terms.
+
+Key requirements:
+- You must release your source code under AGPL-3.0
+- You must provide source code to network users
+- You cannot distribute under a different license
+- Free for personal and non-commercial use
+
+## 2. Commercial License
+
+For commercial use, closed-source applications, or if you want to avoid the 
+AGPL-3.0 requirements, you must obtain a commercial license.
+
+Commercial licenses allow you to:
+- Keep your source code private
+- Distribute the software in proprietary applications
+- Avoid AGPL-3.0 copyleft requirements
+- Receive commercial support
+
+Pricing:
+- Single Developer: $XXX/year
+- Small Team (up to 5): $XXX/year
+- Enterprise: Contact for pricing
+
+For commercial licensing inquiries, contact: [your-email@example.com]
+
+## Which License Do I Need?
+
+Choose AGPL-3.0 if:
+- You're building an open-source project
+- You're using it for personal/educational purposes
+- You can release your source code
+
+Choose Commercial if:
+- You're building a commercial/proprietary product
+- You want to keep your source code private
+- You need commercial support
+
+For questions, contact: [your-email@example.com]

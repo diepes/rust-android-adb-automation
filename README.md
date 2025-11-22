@@ -95,7 +95,40 @@ cargo run --release -- --gui
 
 **Technical Details**: Built with Rust using ADB (Android Debug Bridge). No root or special permissions needed - just USB debugging.
 
+---
+
 ## License
 
-MIT
+This project is dual-licensed under:
 
+### 🆓 For Personal & Open Source Use
+- **AGPL-3.0** - Free for personal, educational, and open-source projects
+- You must share your source code if you distribute or modify this software
+- Perfect for hobbyists, students, and open-source developers
+
+### 💼 For Commercial Use
+- **Commercial License** - Required for businesses and closed-source applications
+- Keep your source code private
+- No open-source obligations
+- Includes commercial support
+
+**Pricing:**
+- 👤 Single Developer: **$49/year**
+- 👥 Small Team (up to 5): **$299/year**
+- 🏢 Enterprise: **Contact for custom pricing**
+
+**Need a commercial license?** Contact us at: **[your-email@example.com]**
+
+See [LICENSE](LICENSE) for full legal terms.
+
+---
+
+### Why Dual License?
+
+We believe in open source, but also need to sustain development. This model allows:
+- ✅ **Free use** for hobbyists and open-source projects
+- ✅ **Fair compensation** for commercial use
+- ✅ **Active development** and support from revenue
+- ✅ **Community contributions** from open-source users
+
+Similar to how MongoDB, GitLab, and Qt are licensed.
