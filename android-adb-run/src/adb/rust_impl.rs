@@ -1004,7 +1004,11 @@ impl AdbClient for RustAdb {
 mod tests {
     use super::*;
 
+    // This test requires an actual ADB server to be running.
+    // Skip it in CI environments where ADB won't be available.
+    // Run locally with: cargo test -- --ignored
     #[tokio::test]
+    #[ignore]
     async fn rust_adb_list_devices_runs() {
         let result = RustAdb::list_devices().await;
         assert!(
