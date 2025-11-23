@@ -12,6 +12,8 @@ jobs:
   build-release:
     name: Build Release Binaries
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     env:
       TARGET_DIR: android-adb-run/target
     strategy:
@@ -21,18 +23,22 @@ jobs:
             target: x86_64-unknown-linux-gnu
             artifact_name: android-adb-run
             asset_name: android-adb-run-linux-x86_64
+            archive_ext: tar.gz
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: android-adb-run
             asset_name: android-adb-run-macos-x86_64
+            archive_ext: tar.gz
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact_name: android-adb-run
             asset_name: android-adb-run-macos-aarch64
+            archive_ext: tar.gz
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: android-adb-run.exe
-            asset_name: android-adb-run-windows-x86_64.exe
+            asset_name: android-adb-run-windows-x86_64
+            archive_ext: zip
 
     steps:
     - name: Checkout code
@@ -95,8 +101,9 @@ jobs:
         ARTIFACT_NAME: ${{ matrix.artifact_name }}
         TARGET_DIR: ${{ env.TARGET_DIR }}
         TARGET_TRIPLE: ${{ matrix.target }}
+        ARCHIVE_EXT: ${{ matrix.archive_ext }}
       run: |
-        tar czf android-adb-run/${ASSET_NAME}.tar.gz \
+        tar czf android-adb-run/${ASSET_NAME}.${ARCHIVE_EXT} \
           -C "${TARGET_DIR}/${TARGET_TRIPLE}/release" \
           "${ARTIFACT_NAME}"
 
@@ -108,8 +115,9 @@ jobs:
         ARTIFACT_NAME: ${{ matrix.artifact_name }}
         TARGET_DIR: ${{ env.TARGET_DIR }}
         TARGET_TRIPLE: ${{ matrix.target }}
+        ARCHIVE_EXT: ${{ matrix.archive_ext }}
       run: |
-        $archive = Join-Path 'android-adb-run' ($env:ARCHIVE_NAME + '.zip')
+        $archive = Join-Path 'android-adb-run' ($env:ARCHIVE_NAME + '.' + $env:ARCHIVE_EXT)
         $binary = Join-Path $env:TARGET_DIR $env:TARGET_TRIPLE
         $binary = Join-Path $binary 'release'
         $binary = Join-Path $binary $env:ARTIFACT_NAME
@@ -118,9 +126,7 @@ jobs:
     - name: Upload Release Assets
       uses: softprops/action-gh-release@v2
       with:
-        files: |
-          android-adb-run/${{ matrix.asset_name }}.tar.gz
-          android-adb-run/${{ matrix.asset_name }}.zip
+        files: android-adb-run/${{ matrix.asset_name }}.${{ matrix.archive_ext }}
         fail_on_unmatched_files: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
