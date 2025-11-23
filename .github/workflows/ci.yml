@@ -46,11 +46,25 @@ jobs:
       run: |
         choco install cmake nasm -y
 
+    - name: Compute cargo lock hash
+      id: cargo-lock-hash
+      shell: bash
+      run: |
+        python - <<'PY'
+        import hashlib, os, pathlib
+
+        lock_path = pathlib.Path("android-adb-run/Cargo.lock")
+        hash_value = hashlib.sha256(lock_path.read_bytes()).hexdigest() if lock_path.is_file() else "missing"
+
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write(f"hash={hash_value}\n")
+        PY
+
     - name: Cache cargo registry
       uses: actions/cache@v3
       with:
         path: ~/.cargo/registry
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-cargo-registry-${{ steps.cargo-lock-hash.outputs.hash }}
         restore-keys: |
           ${{ runner.os }}-cargo-registry-
 
@@ -58,7 +72,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ~/.cargo/git
-        key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-cargo-git-${{ steps.cargo-lock-hash.outputs.hash }}
         restore-keys: |
           ${{ runner.os }}-cargo-git-
 
@@ -66,7 +80,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: android-adb-run/target
-        key: ${{ runner.os }}-target-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-target-${{ steps.cargo-lock-hash.outputs.hash }}
         restore-keys: |
           ${{ runner.os }}-target-
 
@@ -135,23 +149,37 @@ jobs:
       run: |
         choco install cmake nasm -y
 
+    - name: Compute cargo lock hash
+      id: cargo-lock-hash
+      shell: bash
+      run: |
+        python - <<'PY'
+        import hashlib, os, pathlib
+
+        lock_path = pathlib.Path("android-adb-run/Cargo.lock")
+        hash_value = hashlib.sha256(lock_path.read_bytes()).hexdigest() if lock_path.is_file() else "missing"
+
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write(f"hash={hash_value}\n")
+        PY
+
     - name: Cache cargo registry
       uses: actions/cache@v3
       with:
         path: ~/.cargo/registry
-        key: ${{ runner.os }}-${{ matrix.target }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-${{ matrix.target }}-cargo-registry-${{ steps.cargo-lock-hash.outputs.hash }}
 
     - name: Cache cargo index
       uses: actions/cache@v3
       with:
         path: ~/.cargo/git
-        key: ${{ runner.os }}-${{ matrix.target }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-${{ matrix.target }}-cargo-git-${{ steps.cargo-lock-hash.outputs.hash }}
 
     - name: Cache target directory
       uses: actions/cache@v3
       with:
         path: android-adb-run/target
-        key: ${{ runner.os }}-${{ matrix.target }}-target-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-${{ matrix.target }}-target-${{ steps.cargo-lock-hash.outputs.hash }}
 
     - name: Build release binary (Windows)
       if: runner.os == 'Windows'
