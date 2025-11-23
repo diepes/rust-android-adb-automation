@@ -21,12 +21,11 @@ adb_client = "2.1.17"
 image = { version = "0.25", features = ["png", "jpeg"] }
 # For image template matching
 imageproc = "0.25"
-
-# Windows-specific: Force rustls to NOT use aws-lc-rs
-# This prevents aws-lc-rs build failures on Windows (CMake/NASM issues)
-[target.'cfg(windows)'.dependencies]
-# Override rustls to use ring crypto backend (pure Rust, no C dependencies)
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+# Force the RustTLS ecosystem to use the pure-Rust ring backend instead of aws-lc-rs
+# This keeps Windows builds working without needing C11 atomics or aws-lc native toolchain
+rustls = { version = "0.23.35", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-webpki = { version = "0.103.7", default-features = false, features = ["ring"] }
+rcgen = { version = "0.13.2", default-features = false, features = ["ring"] }
 
 [profile]
 

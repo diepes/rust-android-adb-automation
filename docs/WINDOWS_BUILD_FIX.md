@@ -2,23 +2,20 @@
 
 ## Problem
 
-Windows builds are failing in GitHub Actions because `aws-lc-rs` (a cryptographic library used by `rustls`) requires:
-1. CMake
-2. NASM assembler  
-3. Working C/C++ build environment
-4. Causes issues with long Windows file paths
+Windows builds fail in GitHub Actions when the `aws-lc-sys` build script tries to
+compile its `c11.c` check with MSVC. Newer Microsoft CRT headers require C11
+atomics support, and MSVC only enables them when the compiler flag `/std:c11`
+is passed. Without that flag the build aborts with:
 
-Error:
-```
-error: failed to run custom build command for `aws-lc-sys v0.32.3`
-Missing dependency: cmake
-NASM command not found or failed to execute.
+```text
+C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35207\include\vcruntime_c11_stdatomic.h(16): fatal error C1189: "C atomics require C11 or later"
 ```
 
 ## Root Cause
 
 Dependency chain:
-```
+
+```text
 android-adb-run 
   → adb_client
     → rustls (v0.23)
@@ -30,94 +27,68 @@ android-adb-run
 
 ## Solution Attempts
 
-### Attempt 1: Patch crates.io ❌
-Tried to patch `rustls` from crates.io with custom features - doesn't work because you can't patch a crate from crates.io with itself.
+### Attempt 1: Switch rustls backend ❌
 
-### Attempt 2: Feature flags to disable TCP ❌  
-Made `adb_client` optional behind a feature flag - too invasive, requires rewriting large parts of the codebase.
+Tried to force the RustTLS ecosystem to use the pure-Rust `ring` backend.
+Unfortunately `adb_client` enables the `aws-lc-rs` feature internally, so the
+transitive dependency stays enabled anyway.
 
-### Attempt 3: Target-specific dependencies ❌
-Added `rustls` with `ring` feature for Windows target:
-```toml
-[target.'cfg(windows)'.dependencies]
-rustls = { version = "0.23", default-features = false, features = ["ring"] }
-```
-Doesn't work - doesn't override transitive dependencies.
+### Attempt 2: Disable TCP stack ❌
+
+Considered hiding `adb_client` behind a feature flag so the GUI would ship
+without network ADB support on Windows. This would remove the dependency but
+breaks functionality and forks the code paths.
+
+### Attempt 3: Target-specific dependency override ❌
+
+Added a Windows-only dependency override for `rustls` so it would use `ring`.
+Cargo feature resolution is additive, so the default features requested by
+`adb_client` still pulled in `aws-lc-rs`.
 
 ## Working Solution
 
-The only reliable solution for Windows builds is to use the **GNU toolchain** instead of MSVC, or install the required build dependencies.
+We keep using the official MSVC toolchain, install the two required build
+dependencies (CMake + NASM), and set extra compiler flags when building on
+Windows so that MSVC enables its C11 mode.
 
-### Option A: Install Build Dependencies in CI (Recommended)
+### Workflow changes
 
-Add to Windows build step in `.github/workflows/ci.yml`:
+Both CI workflows now contain these platform-specific steps:
 
 ```yaml
 - name: Install Windows build dependencies
   if: runner.os == 'Windows'
   run: |
     choco install cmake nasm -y
-```
 
-###Option B: Use Pre-built Binaries
-
-The `aws-lc-rs` crate can use pre-built binaries if available. Set environment variable:
-
-```yaml
-- name: Build release binary
+- name: Build release binary (Windows)
   if: runner.os == 'Windows'
-  working-directory: android-adb-run
   env:
-    AWS_LC_SYS_PREBUILT_NASM: "1"
+    CFLAGS_x86_64_pc_windows_msvc: "/std:c11"
+    CXXFLAGS_x86_64_pc_windows_msvc: "/std:c++17"
   run: cargo build --release --target ${{ matrix.target }}
 ```
 
-### Option C: Force Ring Crypto Backend
-
-Use a Cargo.toml workspace-level override (requires workspace):
-
-```toml
-[workspace]
-members = ["android-adb-run"]
-
-[workspace.dependencies]
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-```
-
-Then reference it:
-```toml
-[dependencies]
-rustls = { workspace = true }
-```
-
-### Option D: Fork adb_client
-
-Fork `adb_client` and modify it to use `ring` instead of default features. Most invasive but most reliable.
-
-## Recommended Approach
-
-**Install CMake and NASM in GitHub Actions** (Option A):
-
-1. Update `.github/workflows/ci.yml` and `.github/workflows/release.yml`
-2. Add chocolatey install step for Windows
-3. Keep current Cargo.toml structure
-
-This is the cleanest solution that doesn't require code changes.
+Setting `CFLAGS_x86_64_pc_windows_msvc=/std:c11` ensures the `aws-lc-sys`
+sanity checks compile, while `CXXFLAGS_x86_64_pc_windows_msvc=/std:c++17`
+matches the expectations of the C++ sources that come with the library.
 
 ## Current State
 
-- Added `[target.'cfg(windows)'.dependencies]` to Cargo.toml (doesn't fully work)
-- Updated workflows to use standard build commands
-- Reverted feature flag changes to keep code simple
+- Windows builds install CMake and NASM automatically.
+- Cargo is instructed to compile C code with `/std:c11`, unblocking the
+  `aws-lc-sys` build script.
+- Linux and macOS builds continue unchanged.
 
 ## Next Steps
 
-1. Add CMake/NASM installation to Windows CI jobs
-2. Test Windows build completes successfully
-3. Document Windows development requirements in README
+1. Let GitHub Actions finish a full run to verify the fix.
+2. Keep an eye on future `aws-lc-rs` releases; if they switch defaults again we
+   may revisit forcing the ring backend.
+3. Document the MSVC C11 requirement for anyone building locally on Windows.
 
 ## References
 
-- aws-lc-rs docs: https://aws.github.io/aws-lc-rs/
-- rustls crypto providers: https://docs.rs/rustls/latest/rustls/#cryptography-providers
-- GitHub Actions Windows: https://github.com/actions/runner-images/blob/main/images/windows/Windows2022-Readme.md
+- [aws-lc-rs docs](https://aws.github.io/aws-lc-rs/)
+- [rustls crypto providers](https://docs.rs/rustls/latest/rustls/#cryptography-providers)
+- [GitHub Actions Windows image reference](https://github.com/actions/runner-images/blob/main/images/windows/Windows2022-Readme.md)
