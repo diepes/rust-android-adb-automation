@@ -13,6 +13,8 @@ jobs:
   test:
     name: Test
     runs-on: ${{ matrix.os }}
+    env:
+      TARGET_DIR: android-adb-run/target
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -45,6 +47,15 @@ jobs:
       if: runner.os == 'Windows'
       run: |
         choco install cmake nasm -y
+
+    - name: Configure Windows cargo target dir
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $target = Join-Path $env:RUNNER_TEMP 'cargo-target'
+        New-Item -ItemType Directory -Path $target -Force | Out-Null
+        "CARGO_TARGET_DIR=$target" >> $env:GITHUB_ENV
+        "TARGET_DIR=$target" >> $env:GITHUB_ENV
 
     - name: Compute cargo lock hash
       id: cargo-lock-hash
@@ -79,7 +90,7 @@ jobs:
     - name: Cache target directory
       uses: actions/cache@v3
       with:
-        path: android-adb-run/target
+        path: ${{ env.TARGET_DIR }}
         key: ${{ runner.os }}-target-${{ steps.cargo-lock-hash.outputs.hash }}
         restore-keys: |
           ${{ runner.os }}-target-
@@ -101,6 +112,8 @@ jobs:
     name: Build Release
     needs: test
     runs-on: ${{ matrix.os }}
+    env:
+      TARGET_DIR: android-adb-run/target
     strategy:
       matrix:
         include:
@@ -149,6 +162,15 @@ jobs:
       run: |
         choco install cmake nasm -y
 
+    - name: Configure Windows cargo target dir
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $target = Join-Path $env:RUNNER_TEMP 'cargo-target'
+        New-Item -ItemType Directory -Path $target -Force | Out-Null
+        "CARGO_TARGET_DIR=$target" >> $env:GITHUB_ENV
+        "TARGET_DIR=$target" >> $env:GITHUB_ENV
+
     - name: Compute cargo lock hash
       id: cargo-lock-hash
       shell: bash
@@ -178,14 +200,14 @@ jobs:
     - name: Cache target directory
       uses: actions/cache@v3
       with:
-        path: android-adb-run/target
+        path: ${{ env.TARGET_DIR }}
         key: ${{ runner.os }}-${{ matrix.target }}-target-${{ steps.cargo-lock-hash.outputs.hash }}
 
     - name: Build release binary (Windows)
       if: runner.os == 'Windows'
       working-directory: android-adb-run
       env:
-        CFLAGS_x86_64_pc_windows_msvc: "/std:c11"
+        CFLAGS_x86_64_pc_windows_msvc: "/std:c11 /experimental:c11atomics"
         CXXFLAGS_x86_64_pc_windows_msvc: "/std:c++17"
       run: cargo build --release --target ${{ matrix.target }}
 
@@ -196,12 +218,11 @@ jobs:
 
     - name: Strip binary (Linux and macOS)
       if: runner.os != 'Windows'
-      working-directory: android-adb-run
-      run: strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+      run: strip ${{ env.TARGET_DIR }}/${{ matrix.target }}/release/${{ matrix.artifact_name }}
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.asset_name }}
-        path: android-adb-run/target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+        path: ${{ env.TARGET_DIR }}/${{ matrix.target }}/release/${{ matrix.artifact_name }}
         if-no-files-found: error

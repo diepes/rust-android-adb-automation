@@ -64,13 +64,14 @@ Both CI workflows now contain these platform-specific steps:
 - name: Build release binary (Windows)
   if: runner.os == 'Windows'
   env:
-    CFLAGS_x86_64_pc_windows_msvc: "/std:c11"
+    CFLAGS_x86_64_pc_windows_msvc: "/std:c11 /experimental:c11atomics"
     CXXFLAGS_x86_64_pc_windows_msvc: "/std:c++17"
   run: cargo build --release --target ${{ matrix.target }}
 ```
 
-Setting `CFLAGS_x86_64_pc_windows_msvc=/std:c11` ensures the `aws-lc-sys`
-sanity checks compile, while `CXXFLAGS_x86_64_pc_windows_msvc=/std:c++17`
+Setting `CFLAGS_x86_64_pc_windows_msvc` to include `/std:c11` enables the
+modern CRT headers, and `/experimental:c11atomics` unlocks the atomics the
+headers expect. `CXXFLAGS_x86_64_pc_windows_msvc=/std:c++17`
 matches the expectations of the C++ sources that come with the library.
 
 ## Current State
@@ -86,6 +87,23 @@ matches the expectations of the C++ sources that come with the library.
 2. Keep an eye on future `aws-lc-rs` releases; if they switch defaults again we
    may revisit forcing the ring backend.
 3. Document the MSVC C11 requirement for anyone building locally on Windows.
+
+## Troubleshooting CI Logs
+
+When the GitHub CLI truncates large logs, fetch the job output directly from
+the REST API and inspect it locally:
+
+```bash
+# Download the raw log for a given job ID
+gh api repos/<owner>/<repo>/actions/jobs/<job_id>/logs > job.log
+
+# Quickly highlight failing portions
+rg "error:" job.log | head
+```
+
+The helper script `check-gh-build.sh` also sets `GH_DEBUG=api` so every `gh`
+invocation prints the underlying HTTP requests, which is handy when diagnosing
+authentication or pagination issues.
 
 ## References
 

@@ -12,6 +12,8 @@ jobs:
   build-release:
     name: Build Release Binaries
     runs-on: ${{ matrix.os }}
+    env:
+      TARGET_DIR: android-adb-run/target
     strategy:
       matrix:
         include:
@@ -60,11 +62,20 @@ jobs:
       run: |
         choco install cmake nasm -y
 
+    - name: Configure Windows cargo target dir
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $target = Join-Path $env:RUNNER_TEMP 'cargo-target'
+        New-Item -ItemType Directory -Path $target -Force | Out-Null
+        "CARGO_TARGET_DIR=$target" >> $env:GITHUB_ENV
+        "TARGET_DIR=$target" >> $env:GITHUB_ENV
+
     - name: Build release binary (Windows)
       if: runner.os == 'Windows'
       working-directory: android-adb-run
       env:
-        CFLAGS_x86_64_pc_windows_msvc: "/std:c11"
+        CFLAGS_x86_64_pc_windows_msvc: "/std:c11 /experimental:c11atomics"
         CXXFLAGS_x86_64_pc_windows_msvc: "/std:c++17"
       run: cargo build --release --target ${{ matrix.target }}
 
@@ -75,22 +86,34 @@ jobs:
 
     - name: Strip binary (Linux and macOS)
       if: runner.os != 'Windows'
-      working-directory: android-adb-run
-      run: strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+      run: strip ${{ env.TARGET_DIR }}/${{ matrix.target }}/release/${{ matrix.artifact_name }}
 
     - name: Create archive (Unix)
       if: runner.os != 'Windows'
-      working-directory: android-adb-run
+      env:
+        ASSET_NAME: ${{ matrix.asset_name }}
+        ARTIFACT_NAME: ${{ matrix.artifact_name }}
+        TARGET_DIR: ${{ env.TARGET_DIR }}
+        TARGET_TRIPLE: ${{ matrix.target }}
       run: |
-        tar czf ${{ matrix.asset_name }}.tar.gz \
-          -C target/${{ matrix.target }}/release \
-          ${{ matrix.artifact_name }}
+        tar czf android-adb-run/${ASSET_NAME}.tar.gz \
+          -C "${TARGET_DIR}/${TARGET_TRIPLE}/release" \
+          "${ARTIFACT_NAME}"
 
     - name: Create archive (Windows)
       if: runner.os == 'Windows'
-      working-directory: android-adb-run
+      shell: pwsh
+      env:
+        ARCHIVE_NAME: ${{ matrix.asset_name }}
+        ARTIFACT_NAME: ${{ matrix.artifact_name }}
+        TARGET_DIR: ${{ env.TARGET_DIR }}
+        TARGET_TRIPLE: ${{ matrix.target }}
       run: |
-        7z a ${{ matrix.asset_name }}.zip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+        $archive = Join-Path 'android-adb-run' ($env:ARCHIVE_NAME + '.zip')
+        $binary = Join-Path $env:TARGET_DIR $env:TARGET_TRIPLE
+        $binary = Join-Path $binary 'release'
+        $binary = Join-Path $binary $env:ARTIFACT_NAME
+        7z a $archive $binary
 
     - name: Upload Release Assets
       uses: softprops/action-gh-release@v2

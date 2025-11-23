@@ -35,7 +35,7 @@ required language modes when Cargo invokes the `cc` crate:
 - name: Build release binary (Windows)
   if: runner.os == 'Windows'
   env:
-    CFLAGS_x86_64_pc_windows_msvc: "/std:c11"
+    CFLAGS_x86_64_pc_windows_msvc: "/std:c11 /experimental:c11atomics"
     CXXFLAGS_x86_64_pc_windows_msvc: "/std:c++17"
   run: cargo build --release --target ${{ matrix.target }}
 ```
@@ -48,6 +48,22 @@ Created `docs/WINDOWS_BUILD_FIX.md` explaining:
 - Various solution attempts
 - Recommended approach
 - Future improvements
+
+### 4. ✅ Easier log inspection
+
+Added a small workflow for pulling job logs directly via the GitHub API and
+searching them locally with ripgrep:
+
+```bash
+# Download raw logs for a specific job ID
+gh api repos/<owner>/<repo>/actions/jobs/<job_id>/logs > job.log
+
+# Quickly spot failing steps
+rg "error:" job.log | head
+```
+
+The helper script `check-gh-build.sh` now exports `GH_DEBUG=api` so that
+every `gh` invocation prints the exact API requests when debugging CI.
 
 ## Why This Works
 
