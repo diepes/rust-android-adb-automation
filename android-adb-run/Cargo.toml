@@ -1,6 +1,6 @@
 [package]
 name = "android-adb-run"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 license = "AGPL-3.0-or-later OR LicenseRef-Commercial"
 authors = ["Vigor Solutions"]
@@ -38,3 +38,6 @@ inherits = "dev"
 
 [profile.android-dev]
 inherits = "dev"
+
+[build-dependencies]
+time = "0.3"

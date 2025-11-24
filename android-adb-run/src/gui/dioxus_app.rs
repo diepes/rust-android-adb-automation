@@ -11,6 +11,9 @@ use dioxus::prelude::*;
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
 
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+const BUILD_YEAR: &str = env!("APP_BUILD_YEAR");
+
 // Global state to store the debug mode choice
 static DEBUG_MODE: OnceLock<bool> = OnceLock::new();
 
@@ -25,10 +28,11 @@ pub fn run_gui(debug_mode: bool) {
 
     use dioxus::desktop::{Config, WindowBuilder};
     let enable_borderless = false; // Use custom borderless window for better cross-platform control
+    let window_title = format!("Android ADB Automation v{} (Build {})", APP_VERSION, BUILD_YEAR);
     let config = Config::new()
         .with_window(
             WindowBuilder::new()
-                .with_title("Android ADB Automation")
+                .with_title(window_title)
                 .with_decorations(!enable_borderless) // false => no native title/menu (custom controls)
                 .with_resizable(true)
                 .with_inner_size(dioxus::desktop::LogicalSize::new(1000, 700)),
