@@ -15,7 +15,7 @@ fn main() {
             print_help();
             return;
         } else if arg == "--version" || arg == "-v" {
-            println!("Android ADB Run v{}", env!("CARGO_PKG_VERSION"));
+            println!("Android ADB Run v{}", env!("APP_VERSION_DISPLAY"));
             return;
         } else if arg == "--debug" {
             debug_mode = true;

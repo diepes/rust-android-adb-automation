@@ -1,7 +1,7 @@
 // gui/components/header.rs
 use dioxus::prelude::*;
 
-const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+const APP_VERSION: &str = env!("APP_VERSION_DISPLAY");
 const BUILD_YEAR: &str = env!("APP_BUILD_YEAR");
 
 #[derive(Props, PartialEq, Clone)]

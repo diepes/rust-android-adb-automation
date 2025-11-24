@@ -11,7 +11,7 @@ use dioxus::prelude::*;
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
 
-const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+const APP_VERSION: &str = env!("APP_VERSION_DISPLAY");
 const BUILD_YEAR: &str = env!("APP_BUILD_YEAR");
 
 // Global state to store the debug mode choice
