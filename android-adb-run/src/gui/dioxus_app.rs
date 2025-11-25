@@ -76,6 +76,21 @@ fn App() -> Element {
 
     let tap_markers = use_signal(Vec::<TapMarker>::new);
 
+    let runtime_days = use_signal(|| 0.0f64);
+
+    use_effect(move || {
+        let runtime_days_signal = runtime_days;
+        spawn(async move {
+            let mut runtime_days_signal = runtime_days_signal;
+            let start = std::time::Instant::now();
+            loop {
+                let elapsed_days = start.elapsed().as_secs_f64() / 86_400.0;
+                runtime_days_signal.set(elapsed_days);
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            }
+        });
+    });
+
     // Helper function to calculate device coordinates from mouse coordinates (correcting for image border)
     fn calculate_device_coords(
         element_rect: dioxus::html::geometry::ElementPoint,
@@ -525,6 +540,7 @@ fn App() -> Element {
     } else {
         "background: #5a4b1f; color: #ffd857; border: 1px solid #ffd857; padding: 4px 10px; border-radius: 16px; font-size: 0.8em; letter-spacing: 0.5px; font-weight: 600;"
     };
+    let runtime_days_value = *runtime_days.read();
 
     rsx! {
         // Main app container: vertical layout, fills viewport
@@ -540,7 +556,7 @@ fn App() -> Element {
                         // Device info and actions (only if device connected)
                         if let Some((name, transport_id_opt, screen_x, screen_y)) = device_info.read().clone() {
                             // Device metadata panel
-                            DeviceInfo { name: name.clone(), transport_id: transport_id_opt, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string() }
+                            DeviceInfo { name: name.clone(), transport_id: transport_id_opt, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string(), runtime_days: runtime_days_value }
 
                             // Action buttons (screenshot, save, exit, etc) - automation controls will show pause state
                             Actions {
