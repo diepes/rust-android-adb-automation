@@ -145,7 +145,22 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
         }
     };
 
+    let hover_css = r#"
+        @keyframes hover-pulse-ring {
+            0% { transform: translate(-50%, -50%) scale(1.0); opacity: 0.8; }
+            50% { transform: translate(-50%, -50%) scale(1.35); opacity: 0.65; }
+            100% { transform: translate(-50%, -50%) scale(1.0); opacity: 0.8; }
+        }
+
+        @keyframes hover-pulse-core {
+            0% { transform: translate(-50%, -50%) scale(0.9); opacity: 0.95; }
+            50% { transform: translate(-50%, -50%) scale(1.3); opacity: 0.8; }
+            100% { transform: translate(-50%, -50%) scale(0.9); opacity: 0.95; }
+        }
+    "#;
+
     rsx! {
+        style { dangerous_inner_html: "{hover_css}" }
         div { style: "flex:0 0 400px; background:rgba(255,255,255,0.1); backdrop-filter:blur(10px); padding:15px; border-radius:15px; border:1px solid rgba(255,255,255,0.2); height:fit-content;",
             if let Some(image_data) = screenshot_data.read().as_ref() {
                 div { style: "display:flex; justify-content:center;",
@@ -327,8 +342,8 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                             }
                         }
                         if let Some((disp_x, disp_y)) = hover_preview_point {
-                            div { style: format!("position:absolute; left:{disp_x}px; top:{disp_y}px; width:18px; height:18px; border:2px solid #ff2d2d; background:rgba(255,45,45,0.2); border-radius:50%; box-shadow:0 0 12px rgba(255,45,45,0.75); transform:translate(-50%, -50%); pointer-events:none; z-index:12;"), }
-                            div { style: format!("position:absolute; left:{disp_x}px; top:{disp_y}px; width:6px; height:6px; background:#ff4545; border-radius:50%; transform:translate(-50%, -50%); pointer-events:none; z-index:13;"), }
+                            div { style: format!("position:absolute; left:{disp_x}px; top:{disp_y}px; width:20px; height:20px; border:2px solid #ff2d2d; background:rgba(255,45,45,0.2); border-radius:50%; box-shadow:0 0 12px rgba(255,45,45,0.75); transform:translate(-50%, -50%); pointer-events:none; z-index:12; animation:hover-pulse-ring 1.6s ease-in-out infinite;"), }
+                            div { style: format!("position:absolute; left:{disp_x}px; top:{disp_y}px; width:6px; height:6px; background:#ff4545; border-radius:50%; transform:translate(-50%, -50%); pointer-events:none; z-index:13; animation:hover-pulse-core 1.6s ease-in-out infinite;"), }
                         }
                         for marker in tap_markers.read().iter() { {
                             let marker_x = marker.point.x + 0.0;
