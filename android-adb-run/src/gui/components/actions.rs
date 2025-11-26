@@ -16,6 +16,7 @@ pub struct ActionsProps {
     pub timed_events_list: Signal<Vec<TimedEvent>>,         // All timed events
     pub is_paused_by_touch: Signal<bool>,                   // Touch-based pause indicator
     pub touch_timeout_remaining: Signal<Option<u64>>,       // Remaining seconds until touch timeout expires
+    pub hover_tap_preview: Signal<Option<(u32, u32)>>,       // Preview tap position for hover state
 }
 
 #[component]
@@ -29,6 +30,7 @@ pub fn Actions(props: ActionsProps) -> Element {
     let timed_events_list = props.timed_events_list;
     let is_paused_by_touch = props.is_paused_by_touch;
     let touch_timeout_remaining = props.touch_timeout_remaining;
+    let hover_tap_preview = props.hover_tap_preview;
 
     rsx! {
         div { style: "background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 15px; border-radius: 15px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.2);",
@@ -199,7 +201,25 @@ pub fn Actions(props: ActionsProps) -> Element {
 
                                 // Individual event displays
                                 for event in visible_events {
-                                    div { style: "background: rgba(255,255,255,0.05); border-radius: 6px; padding: 8px; margin-bottom: 6px; border: 1px solid rgba(255,255,255,0.1);",
+                                    div {
+                                        style: "background: rgba(255,255,255,0.05); border-radius: 6px; padding: 8px; margin-bottom: 6px; border: 1px solid rgba(255,255,255,0.1);",
+                                        onmouseenter: {
+                                            let event_type = event.event_type.clone();
+                                            let mut hover_signal = hover_tap_preview;
+                                            move |_| {
+                                                if let crate::game_automation::types::TimedEventType::Tap { x, y } = event_type {
+                                                    hover_signal.set(Some((x, y)));
+                                                } else {
+                                                    hover_signal.set(None);
+                                                }
+                                            }
+                                        },
+                                        onmouseleave: {
+                                            let mut hover_signal = hover_tap_preview;
+                                            move |_| {
+                                                hover_signal.set(None);
+                                            }
+                                        },
                                         div { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;",
                                             // Event name and type
                                             div { style: "display: flex; align-items: center; gap: 6px;",

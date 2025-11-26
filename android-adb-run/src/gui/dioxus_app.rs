@@ -77,6 +77,7 @@ fn App() -> Element {
     let tap_markers = use_signal(Vec::<TapMarker>::new);
 
     let runtime_days = use_signal(|| 0.0f64);
+    let hover_tap_preview = use_signal(|| None::<(u32, u32)>);
 
     use_effect(move || {
         let runtime_days_signal = runtime_days;
@@ -569,7 +570,8 @@ fn App() -> Element {
                                 timed_tap_countdown: timed_tap_countdown,
                                 timed_events_list: timed_events_list,
                                 is_paused_by_touch: is_paused_by_touch,  // Pass touch pause state to Actions
-                                touch_timeout_remaining: touch_timeout_remaining  // Pass countdown timer
+                                touch_timeout_remaining: touch_timeout_remaining,  // Pass countdown timer
+                                hover_tap_preview: hover_tap_preview
                             }
                         } else {
                             // Fallback panel if no device is connected - show live status updates
@@ -604,7 +606,7 @@ fn App() -> Element {
                         div { style: "margin-top:4px; text-align:left; font-size:0.7em; opacity:0.75; letter-spacing:0.5px;", "Built with Rust 🦀 and Dioxus ⚛️" }
                     }
                     // Right column: screenshot panel (image, gestures)
-                    screenshot_panel { screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, device_info: device_info, device_coords: device_coords, mouse_coords: mouse_coords, is_loading_screenshot: is_loading_screenshot, auto_update_on_touch: auto_update_on_touch, is_swiping: is_swiping, swipe_start: swipe_start, swipe_end: swipe_end, calculate_device_coords: calculate_device_coords, select_box: select_box, selection_start: selection_start, selection_end: selection_end, tap_markers: tap_markers, screenshot_counter: screenshot_counter, automation_command_tx: automation_command_tx }
+                    screenshot_panel { screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, device_info: device_info, device_coords: device_coords, mouse_coords: mouse_coords, is_loading_screenshot: is_loading_screenshot, auto_update_on_touch: auto_update_on_touch, is_swiping: is_swiping, swipe_start: swipe_start, swipe_end: swipe_end, calculate_device_coords: calculate_device_coords, select_box: select_box, selection_start: selection_start, selection_end: selection_end, tap_markers: tap_markers, screenshot_counter: screenshot_counter, automation_command_tx: automation_command_tx, hover_tap_preview: hover_tap_preview }
                 }
             }
         }

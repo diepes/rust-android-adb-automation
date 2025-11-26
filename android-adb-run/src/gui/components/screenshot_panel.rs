@@ -34,6 +34,7 @@ pub struct ScreenshotPanelProps {
     pub tap_markers: Signal<Vec<TapMarker>>,
     pub screenshot_counter: Signal<u64>, // GUI-level counter
     pub automation_command_tx: Signal<Option<tokio::sync::mpsc::Sender<crate::game_automation::AutomationCommand>>>,
+    pub hover_tap_preview: Signal<Option<(u32, u32)>>,
 }
 
 #[component]
@@ -57,6 +58,7 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
     let mut tap_markers = props.tap_markers;
     let mut screenshot_counter = props.screenshot_counter;
     let automation_command_tx = props.automation_command_tx;
+    let hover_tap_preview = props.hover_tap_preview;
     let _status_text = screenshot_status.read().clone();
 
     // Periodic cleanup of old tap markers and trigger re-renders for fade animation
@@ -106,6 +108,41 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
         }
     } else {
         None
+    };
+
+    let device_to_display = |device_x: u32, device_y: u32, screen_x: u32, screen_y: u32| -> (f32, f32) {
+        if screen_x == 0 || screen_y == 0 {
+            return (0.0, 0.0);
+        }
+        let max_display_width = 400.0;
+        let max_display_height = 600.0;
+        let border_px = 8.0;
+        let image_aspect = screen_x as f32 / screen_y as f32;
+        let container_aspect = max_display_width / max_display_height;
+        let (outer_w, outer_h) = if image_aspect > container_aspect {
+            (max_display_width, max_display_width / image_aspect)
+        } else {
+            (max_display_height * image_aspect, max_display_height)
+        };
+        let displayed_w = (outer_w - border_px * 2.0).max(1.0);
+        let displayed_h = (outer_h - border_px * 2.0).max(1.0);
+        let scale_x = displayed_w / screen_x as f32;
+        let scale_y = displayed_h / screen_y as f32;
+        let px = device_x as f32 * scale_x + border_px;
+        let py = device_y as f32 * scale_y + border_px;
+        (px, py)
+    };
+
+    let hover_preview_point = {
+        let preview_opt = *hover_tap_preview.read();
+        let device_opt = device_info.read().clone();
+        match (preview_opt, device_opt) {
+            (Some((px, py)), Some((_, _, sx, sy))) if sx > 0 && sy > 0 => {
+                let (disp_x, disp_y) = device_to_display(px, py, sx, sy);
+                Some((disp_x, disp_y))
+            }
+            _ => None,
+        }
     };
 
     rsx! {
@@ -288,6 +325,10 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                             div { style: format!("position:absolute; left:{ox}px; top:{oy}px; width:{ow}px; height:{oh}px; border:2px solid #4da3ff; background:rgba(77,163,255,0.12); box-shadow:0 0 10px rgba(77,163,255,0.5); pointer-events:none; z-index:10;"),
                                 div { style: "position:absolute; right:0; bottom:0; background:rgba(0,0,0,0.55); color:#fff; font-size:10px; padding:2px 4px; border-top-left-radius:4px;", "{ow}x{oh}" }
                             }
+                        }
+                        if let Some((disp_x, disp_y)) = hover_preview_point {
+                            div { style: format!("position:absolute; left:{disp_x}px; top:{disp_y}px; width:18px; height:18px; border:2px solid #ff2d2d; background:rgba(255,45,45,0.2); border-radius:50%; box-shadow:0 0 12px rgba(255,45,45,0.75); transform:translate(-50%, -50%); pointer-events:none; z-index:12;"), }
+                            div { style: format!("position:absolute; left:{disp_x}px; top:{disp_y}px; width:6px; height:6px; background:#ff4545; border-radius:50%; transform:translate(-50%, -50%); pointer-events:none; z-index:13;"), }
                         }
                         for marker in tap_markers.read().iter() { {
                             let marker_x = marker.point.x + 0.0;
