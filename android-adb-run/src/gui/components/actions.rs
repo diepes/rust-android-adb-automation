@@ -1,38 +1,26 @@
 // gui/components/actions.rs
 use crate::game_automation::types::{
-    MAX_TAP_INTERVAL_SECONDS, MIN_TAP_INTERVAL_SECONDS, TimedEvent, TimedEventType,
+    TimedEvent, TimedEventType, MAX_TAP_INTERVAL_SECONDS, MIN_TAP_INTERVAL_SECONDS,
 };
 use crate::game_automation::{AutomationCommand, GameState};
+use crate::gui::dioxus_app::AppContext;
 use dioxus::prelude::*;
 use tokio::sync::mpsc;
 
-#[derive(Props, PartialEq, Clone)]
-pub struct ActionsProps {
-    pub screenshot_status: Signal<String>,
-    pub screenshot_bytes: Signal<Option<Vec<u8>>>,
-    pub auto_update_on_touch: Signal<bool>,
-    pub select_box: Signal<bool>, // new signal for select box
-    pub automation_state: Signal<GameState>,
-    pub automation_command_tx: Signal<Option<mpsc::Sender<AutomationCommand>>>,
-    pub timed_tap_countdown: Signal<Option<(String, u64)>>, // (id, seconds_remaining)
-    pub timed_events_list: Signal<Vec<TimedEvent>>,         // All timed events
-    pub is_paused_by_touch: Signal<bool>,                   // Touch-based pause indicator
-    pub touch_timeout_remaining: Signal<Option<u64>>, // Remaining seconds until touch timeout expires
-    pub hover_tap_preview: Signal<Option<(u32, u32)>>, // Preview tap position for hover state
-}
-
 #[component]
-pub fn Actions(props: ActionsProps) -> Element {
-    let mut screenshot_status = props.screenshot_status;
-    let screenshot_bytes = props.screenshot_bytes;
-    let mut auto_update_on_touch = props.auto_update_on_touch;
-    let mut select_box = props.select_box;
-    let automation_state = props.automation_state;
-    let automation_command_tx = props.automation_command_tx;
-    let timed_events_list = props.timed_events_list;
-    let is_paused_by_touch = props.is_paused_by_touch;
-    let touch_timeout_remaining = props.touch_timeout_remaining;
-    let hover_tap_preview = props.hover_tap_preview;
+pub fn Actions() -> Element {
+    let ctx = use_context::<AppContext>();
+
+    let mut screenshot_status = ctx.screenshot_status;
+    let screenshot_bytes = ctx.screenshot_bytes;
+    let mut auto_update_on_touch = ctx.auto_update_on_touch;
+    let mut select_box = ctx.select_box;
+    let automation_state = ctx.automation_state;
+    let automation_command_tx = ctx.automation_command_tx;
+    let timed_events_list = ctx.timed_events_list;
+    let is_paused_by_touch = ctx.is_paused_by_touch;
+    let touch_timeout_remaining = ctx.touch_timeout_remaining;
+    let hover_tap_preview = ctx.hover_tap_preview;
 
     rsx! {
         div { style: "background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 15px; border-radius: 15px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.2);",

@@ -1,11 +1,10 @@
 // gui/components/screenshot_panel.rs
 use crate::adb::{AdbBackend, AdbClient};
+use crate::gui::dioxus_app::AppContext;
 use crate::gui::util::base64_encode;
 use dioxus::html::geometry::ElementPoint;
 use dioxus::prelude::*;
 use std::time::Instant;
-
-type DeviceInfo = (String, Option<u32>, u32, u32);
 
 #[derive(Clone, PartialEq)]
 pub struct TapMarker {
@@ -13,53 +12,30 @@ pub struct TapMarker {
     pub timestamp: Instant,
 }
 
-#[allow(unpredictable_function_pointer_comparisons)]
-#[derive(Props, PartialEq, Clone)]
-pub struct ScreenshotPanelProps {
-    pub screenshot_status: Signal<String>,
-    pub screenshot_data: Signal<Option<String>>,
-    pub screenshot_bytes: Signal<Option<Vec<u8>>>,
-    pub device_info: Signal<Option<DeviceInfo>>,
-    pub device_coords: Signal<Option<(u32, u32)>>,
-    pub mouse_coords: Signal<Option<(i32, i32)>>,
-    pub is_loading_screenshot: Signal<bool>,
-    pub auto_update_on_touch: Signal<bool>,
-    pub is_swiping: Signal<bool>,
-    pub swipe_start: Signal<Option<(u32, u32)>>,
-    pub swipe_end: Signal<Option<(u32, u32)>>,
-    pub calculate_device_coords: fn(dioxus::html::geometry::ElementPoint, u32, u32) -> (u32, u32),
-    pub select_box: Signal<bool>,
-    pub selection_start: Signal<Option<ElementPoint>>,
-    pub selection_end: Signal<Option<ElementPoint>>,
-    pub tap_markers: Signal<Vec<TapMarker>>,
-    pub screenshot_counter: Signal<u64>, // GUI-level counter
-    pub automation_command_tx:
-        Signal<Option<tokio::sync::mpsc::Sender<crate::game_automation::AutomationCommand>>>,
-    pub hover_tap_preview: Signal<Option<(u32, u32)>>,
-}
-
 #[component]
-pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
-    let loading = *props.is_loading_screenshot.read();
-    let mut screenshot_status = props.screenshot_status;
-    let mut screenshot_data = props.screenshot_data;
-    let mut screenshot_bytes = props.screenshot_bytes;
-    let device_info = props.device_info; // read-only
-    let mut device_coords = props.device_coords;
-    let mut mouse_coords = props.mouse_coords;
-    let mut is_swiping = props.is_swiping;
-    let mut swipe_start = props.swipe_start;
-    let mut swipe_end = props.swipe_end;
-    let auto_update_on_touch = props.auto_update_on_touch;
-    let mut is_loading_screenshot = props.is_loading_screenshot;
-    let calculate_device_coords = props.calculate_device_coords;
-    let select_box = props.select_box;
-    let mut selection_start = props.selection_start;
-    let mut selection_end = props.selection_end;
-    let mut tap_markers = props.tap_markers;
-    let mut screenshot_counter = props.screenshot_counter;
-    let automation_command_tx = props.automation_command_tx;
-    let hover_tap_preview = props.hover_tap_preview;
+pub fn screenshot_panel() -> Element {
+    let ctx = use_context::<AppContext>();
+
+    let mut screenshot_status = ctx.screenshot_status;
+    let mut screenshot_data = ctx.screenshot_data;
+    let mut screenshot_bytes = ctx.screenshot_bytes;
+    let device_info = ctx.device_info;
+    let mut device_coords = ctx.device_coords;
+    let mut mouse_coords = ctx.mouse_coords;
+    let mut is_swiping = ctx.is_swiping;
+    let mut swipe_start = ctx.swipe_start;
+    let mut swipe_end = ctx.swipe_end;
+    let auto_update_on_touch = ctx.auto_update_on_touch;
+    let mut is_loading_screenshot = ctx.is_loading_screenshot;
+    let calculate_device_coords = ctx.calculate_device_coords;
+    let select_box = ctx.select_box;
+    let mut selection_start = ctx.selection_start;
+    let mut selection_end = ctx.selection_end;
+    let mut tap_markers = ctx.tap_markers;
+    let mut screenshot_counter = ctx.screenshot_counter;
+    let automation_command_tx = ctx.automation_command_tx;
+    let hover_tap_preview = ctx.hover_tap_preview;
+    let loading = *is_loading_screenshot.read();
     let _status_text = screenshot_status.read().clone();
 
     // Periodic cleanup of old tap markers and trigger re-renders for fade animation
@@ -352,7 +328,7 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                             let marker_y = marker.point.y + 0.0;
                             let age_secs = marker.timestamp.elapsed().as_secs_f32();
                             // Fade out over 30 seconds: opacity 1.0 -> 0.0
-                            let opacity = (1.0 - (age_secs / 30.0)).clamp(0.0, 1.0);
+                            let opacity = (1.0f32 - (age_secs / 30.0f32)).clamp(0.0f32, 1.0f32);
                             rsx!{ div { style: format!("position:absolute; left:{marker_x}px; top:{marker_y}px; width:10px; height:10px; background:#ffffff; border:2px solid #ff4444; border-radius:50%; box-shadow:0 0 6px rgba(255,255,255,0.8); transform:translate(-50%, -50%); pointer-events:none; z-index:9; opacity:{opacity};"), } }
                         } }
                         if loading { div { style: "position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255, 68, 68, 0.95); color: white; padding: 15px 25px; border-radius: 25px; font-size: 1.2em; font-weight: bold; border: 2px solid white; box-shadow: 0 4px 20px rgba(0,0,0,0.5); z-index: 20;", "📸 LOADING..." } }

@@ -1,14 +1,15 @@
 use crate::adb::{AdbBackend, AdbClient};
 use crate::game_automation::types::TimedEvent;
 use crate::game_automation::{
-    AutomationCommand, AutomationEvent, GameAutomation, GameState, create_automation_channels,
+    create_automation_channels, AutomationCommand, AutomationEvent, GameAutomation, GameState,
 };
 use crate::gui::components::{
     actions::Actions,
     device_info::DeviceInfo,
-    screenshot_panel::{TapMarker, screenshot_panel},
+    screenshot_panel::{screenshot_panel, TapMarker},
 };
 use crate::gui::util::base64_encode;
+use dioxus::html::geometry::ElementPoint;
 use dioxus::prelude::*;
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
@@ -21,6 +22,34 @@ static DEBUG_MODE: OnceLock<bool> = OnceLock::new();
 
 pub fn is_debug_mode() -> bool {
     *DEBUG_MODE.get().unwrap_or(&false)
+}
+
+#[derive(Clone)]
+pub struct AppContext {
+    pub screenshot_status: Signal<String>,
+    pub screenshot_data: Signal<Option<String>>,
+    pub screenshot_bytes: Signal<Option<Vec<u8>>>,
+    pub device_info: Signal<Option<(String, Option<u32>, u32, u32)>>,
+    pub device_coords: Signal<Option<(u32, u32)>>,
+    pub mouse_coords: Signal<Option<(i32, i32)>>,
+    pub is_loading_screenshot: Signal<bool>,
+    pub auto_update_on_touch: Signal<bool>,
+    pub select_box: Signal<bool>,
+    pub is_swiping: Signal<bool>,
+    pub swipe_start: Signal<Option<(u32, u32)>>,
+    pub swipe_end: Signal<Option<(u32, u32)>>,
+    pub selection_start: Signal<Option<ElementPoint>>,
+    pub selection_end: Signal<Option<ElementPoint>>,
+    pub tap_markers: Signal<Vec<TapMarker>>,
+    pub screenshot_counter: Signal<u64>,
+    pub automation_state: Signal<GameState>,
+    pub automation_command_tx: Signal<Option<mpsc::Sender<AutomationCommand>>>,
+    pub timed_tap_countdown: Signal<Option<(String, u64)>>,
+    pub timed_events_list: Signal<Vec<TimedEvent>>,
+    pub is_paused_by_touch: Signal<bool>,
+    pub touch_timeout_remaining: Signal<Option<u64>>,
+    pub hover_tap_preview: Signal<Option<(u32, u32)>>,
+    pub calculate_device_coords: fn(ElementPoint, u32, u32) -> (u32, u32),
 }
 
 fn ensure_gui_environment() -> Result<(), String> {
@@ -162,6 +191,33 @@ fn App() -> Element {
 
         (device_x.min(screen_x - 1), device_y.min(screen_y - 1))
     }
+
+    use_context_provider(|| AppContext {
+        screenshot_status: screenshot_status.clone(),
+        screenshot_data: screenshot_data.clone(),
+        screenshot_bytes: screenshot_bytes.clone(),
+        device_info: device_info.clone(),
+        device_coords: device_coords.clone(),
+        mouse_coords: mouse_coords.clone(),
+        is_loading_screenshot: is_loading_screenshot.clone(),
+        auto_update_on_touch: auto_update_on_touch.clone(),
+        select_box: select_box.clone(),
+        is_swiping: is_swiping.clone(),
+        swipe_start: swipe_start.clone(),
+        swipe_end: swipe_end.clone(),
+        selection_start: selection_start.clone(),
+        selection_end: selection_end.clone(),
+        tap_markers: tap_markers.clone(),
+        screenshot_counter: screenshot_counter.clone(),
+        automation_state: automation_state.clone(),
+        automation_command_tx: automation_command_tx.clone(),
+        timed_tap_countdown: timed_tap_countdown.clone(),
+        timed_events_list: timed_events_list.clone(),
+        is_paused_by_touch: is_paused_by_touch.clone(),
+        touch_timeout_remaining: touch_timeout_remaining.clone(),
+        hover_tap_preview: hover_tap_preview.clone(),
+        calculate_device_coords,
+    });
 
     // Initialize ADB connection on first render - fully async with progressive UI updates
     use_effect(move || {
@@ -633,19 +689,7 @@ fn App() -> Element {
                             DeviceInfo { name: name.clone(), transport_id: transport_id_opt, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string(), runtime_days: runtime_days_value }
 
                             // Action buttons (screenshot, save, exit, etc) - automation controls will show pause state
-                            Actions {
-                                screenshot_status: screenshot_status,
-                                screenshot_bytes: screenshot_bytes,
-                                auto_update_on_touch: auto_update_on_touch,
-                                select_box: select_box,
-                                automation_state: automation_state,
-                                automation_command_tx: automation_command_tx,
-                                timed_tap_countdown: timed_tap_countdown,
-                                timed_events_list: timed_events_list,
-                                is_paused_by_touch: is_paused_by_touch,  // Pass touch pause state to Actions
-                                touch_timeout_remaining: touch_timeout_remaining,  // Pass countdown timer
-                                hover_tap_preview: hover_tap_preview
-                            }
+                            Actions {}
                         } else {
                             // Fallback panel if no device is connected - show live status updates
                             div { style: "background:rgba(255,255,255,0.1); backdrop-filter:blur(10px); padding:20px; border-radius:15px; margin-bottom:20px; border:1px solid rgba(255,255,255,0.2);",
@@ -679,7 +723,7 @@ fn App() -> Element {
                         div { style: "margin-top:4px; text-align:left; font-size:0.7em; opacity:0.75; letter-spacing:0.5px;", "Built with Rust 🦀 and Dioxus ⚛️" }
                     }
                     // Right column: screenshot panel (image, gestures)
-                    screenshot_panel { screenshot_status: screenshot_status, screenshot_data: screenshot_data, screenshot_bytes: screenshot_bytes, device_info: device_info, device_coords: device_coords, mouse_coords: mouse_coords, is_loading_screenshot: is_loading_screenshot, auto_update_on_touch: auto_update_on_touch, is_swiping: is_swiping, swipe_start: swipe_start, swipe_end: swipe_end, calculate_device_coords: calculate_device_coords, select_box: select_box, selection_start: selection_start, selection_end: selection_end, tap_markers: tap_markers, screenshot_counter: screenshot_counter, automation_command_tx: automation_command_tx, hover_tap_preview: hover_tap_preview }
+                    screenshot_panel {}
                 }
             }
         }
