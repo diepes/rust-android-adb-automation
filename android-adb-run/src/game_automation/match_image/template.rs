@@ -84,19 +84,21 @@ impl Template {
     fn extract_region_from_filename(filename: &str) -> Option<(u32, u32, u32, u32)> {
         if let Some(start) = filename.find('[')
             && let Some(end) = filename.find(']')
-                && end > start {
-                    let region_str = &filename[start + 1..end];
-                    let parts: Vec<&str> = region_str.split(',').collect();
-                    if parts.len() == 4
-                        && let (Ok(x), Ok(y), Ok(width), Ok(height)) = (
-                            parts[0].trim().parse::<u32>(),
-                            parts[1].trim().parse::<u32>(),
-                            parts[2].trim().parse::<u32>(),
-                            parts[3].trim().parse::<u32>(),
-                        ) {
-                            return Some((x, y, width, height));
-                        }
-                }
+            && end > start
+        {
+            let region_str = &filename[start + 1..end];
+            let parts: Vec<&str> = region_str.split(',').collect();
+            if parts.len() == 4
+                && let (Ok(x), Ok(y), Ok(width), Ok(height)) = (
+                    parts[0].trim().parse::<u32>(),
+                    parts[1].trim().parse::<u32>(),
+                    parts[2].trim().parse::<u32>(),
+                    parts[3].trim().parse::<u32>(),
+                )
+            {
+                return Some((x, y, width, height));
+            }
+        }
         None
     }
 
@@ -199,26 +201,28 @@ impl TemplateManager {
         for entry in entries {
             if let Ok(entry) = entry
                 && let Some(file_name) = entry.file_name().to_str()
-                    && file_name.ends_with(".png") && entry.path().is_file() {
-                        let file_path = entry.path().to_string_lossy().to_string();
+                && file_name.ends_with(".png")
+                && entry.path().is_file()
+            {
+                let file_path = entry.path().to_string_lossy().to_string();
 
-                        // Determine search region from filename or use full screen
-                        let search_region = region_manager.resolve_region(file_name);
+                // Determine search region from filename or use full screen
+                let search_region = region_manager.resolve_region(file_name);
 
-                        match Template::new(file_path, search_region) {
-                            Ok(template) => {
-                                if template.is_valid() {
-                                    self.templates.push(template);
-                                    loaded_count += 1;
-                                } else {
-                                    eprintln!("⚠️ Invalid template skipped: {}", file_name);
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("⚠️ Failed to load template {}: {}", file_name, e);
-                            }
+                match Template::new(file_path, search_region) {
+                    Ok(template) => {
+                        if template.is_valid() {
+                            self.templates.push(template);
+                            loaded_count += 1;
+                        } else {
+                            eprintln!("⚠️ Invalid template skipped: {}", file_name);
                         }
                     }
+                    Err(e) => {
+                        eprintln!("⚠️ Failed to load template {}: {}", file_name, e);
+                    }
+                }
+            }
         }
 
         // Sort templates by category and name for consistent processing

@@ -1,4 +1,4 @@
-use android_adb_run::adb::{backend::AdbBackend, AdbClient};
+use android_adb_run::adb::{AdbClient, backend::AdbBackend};
 use std::time::Instant;
 
 #[tokio::main]
@@ -37,17 +37,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let elapsed = start.elapsed();
             println!("❌ Tap failed: {}", e);
             println!("   Time elapsed: {:?}", elapsed);
-            
+
             if elapsed.as_secs() >= 5 {
                 println!("   ✅ Timeout triggered correctly (5+ seconds)");
             } else {
                 println!("   ℹ️  Quick failure (immediate error detection)");
             }
-            
+
             // Check if error is detected as disconnect
-            if e.to_lowercase().contains("timeout") 
+            if e.to_lowercase().contains("timeout")
                 || e.to_lowercase().contains("offline")
-                || e.to_lowercase().contains("disconnected") {
+                || e.to_lowercase().contains("disconnected")
+            {
                 println!("   ✅ Error detected as disconnect");
             } else {
                 println!("   ⚠️  Error NOT detected as disconnect!");

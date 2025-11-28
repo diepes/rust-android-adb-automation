@@ -1,5 +1,7 @@
 // gui/components/actions.rs
-use crate::game_automation::types::TimedEvent;
+use crate::game_automation::types::{
+    TimedEvent, TimedEventType, MAX_TAP_INTERVAL_SECONDS, MIN_TAP_INTERVAL_SECONDS,
+};
 use crate::game_automation::{AutomationCommand, GameState};
 use dioxus::prelude::*;
 use tokio::sync::mpsc;
@@ -15,8 +17,8 @@ pub struct ActionsProps {
     pub timed_tap_countdown: Signal<Option<(String, u64)>>, // (id, seconds_remaining)
     pub timed_events_list: Signal<Vec<TimedEvent>>,         // All timed events
     pub is_paused_by_touch: Signal<bool>,                   // Touch-based pause indicator
-    pub touch_timeout_remaining: Signal<Option<u64>>,       // Remaining seconds until touch timeout expires
-    pub hover_tap_preview: Signal<Option<(u32, u32)>>,       // Preview tap position for hover state
+    pub touch_timeout_remaining: Signal<Option<u64>>, // Remaining seconds until touch timeout expires
+    pub hover_tap_preview: Signal<Option<(u32, u32)>>, // Preview tap position for hover state
 }
 
 #[component]
@@ -48,7 +50,7 @@ pub fn Actions(props: ActionsProps) -> Element {
                         let is_touch_paused = *is_paused_by_touch.read();
                         let state = automation_state.read().clone();
                         let remaining_secs = *touch_timeout_remaining.read();
-                        
+
                         let (display_text, style) = if is_touch_paused && state == GameState::Running {
                             // Show countdown if available
                             let text = if let Some(secs) = remaining_secs {
@@ -79,10 +81,10 @@ pub fn Actions(props: ActionsProps) -> Element {
                         } else {
                             state.clone()
                         };
-                        
+
                         rsx! {
                             if effective_state == GameState::Idle || effective_state == GameState::Paused {
-                                button { 
+                                button {
                                     style: "background: linear-gradient(45deg, #28a745, #20c997); color: white; padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: bold;",
                                     onclick: {
                                         let state_for_click = effective_state.clone();
@@ -109,10 +111,10 @@ pub fn Actions(props: ActionsProps) -> Element {
                                         }
                                     },
                                     // Always show Resume when paused (either manually or by touch)
-                                    if effective_state == GameState::Paused { 
-                                        "▶️ Resume" 
-                                    } else { 
-                                        "🚀 Start" 
+                                    if effective_state == GameState::Paused {
+                                        "▶️ Resume"
+                                    } else {
+                                        "🚀 Start"
                                     }
                                 }
                             }
@@ -207,7 +209,7 @@ pub fn Actions(props: ActionsProps) -> Element {
                                             let event_type = event.event_type.clone();
                                             let mut hover_signal = hover_tap_preview;
                                             move |_| {
-                                                if let crate::game_automation::types::TimedEventType::Tap { x, y } = event_type {
+                                                if let TimedEventType::Tap { x, y } = event_type {
                                                     hover_signal.set(Some((x, y)));
                                                 } else {
                                                     hover_signal.set(None);
@@ -221,15 +223,14 @@ pub fn Actions(props: ActionsProps) -> Element {
                                             }
                                         },
                                         div { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;",
-                                            // Event name and type
                                             div { style: "display: flex; align-items: center; gap: 6px;",
                                                 span {
                                                     style: "font-size: 0.85em; font-weight: bold;",
                                                     {
                                                         match &event.event_type {
-                                                            crate::game_automation::types::TimedEventType::Screenshot => "📸".to_string(),
-                                                            crate::game_automation::types::TimedEventType::Tap { .. } => "👆".to_string(),
-                                                            crate::game_automation::types::TimedEventType::CountdownUpdate => "⏰".to_string(),
+                                                            TimedEventType::Screenshot => "📸".to_string(),
+                                                            TimedEventType::Tap { .. } => "👆".to_string(),
+                                                            TimedEventType::CountdownUpdate => "⏰".to_string(),
                                                         }
                                                     }
                                                 }
@@ -237,16 +238,13 @@ pub fn Actions(props: ActionsProps) -> Element {
                                                     style: "font-size: 0.8em; color: #87ceeb;",
                                                     {event.id.clone()}
                                                 }
-                                                // Execution counter
                                                 span {
                                                     style: "font-size: 0.7em; color: #ffd700; background: rgba(255,215,0,0.1); padding: 1px 4px; border-radius: 8px; font-weight: bold;",
                                                     "({event.execution_count})"
                                                 }
                                             }
 
-                                            // Control buttons row
                                             div { style: "display: flex; align-items: center; gap: 4px;",
-                                                // Status indicator (clickable toggle)
                                                 button {
                                                     style: if event.enabled {
                                                         "background: #28a745; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.7em; font-weight: bold; border: none; cursor: pointer; transition: all 0.2s ease;"
@@ -274,8 +272,6 @@ pub fn Actions(props: ActionsProps) -> Element {
                                                     title: if event.enabled { "Click to disable this event" } else { "Click to enable this event" },
                                                     if event.enabled { "ON" } else { "OFF" }
                                                 }
-
-                                                // Fire immediately button
                                                 button {
                                                     style: if event.enabled {
                                                         "background: #dc3545; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.7em; font-weight: bold; border: none; cursor: pointer; transition: all 0.2s ease; min-width: 24px;"
@@ -307,20 +303,20 @@ pub fn Actions(props: ActionsProps) -> Element {
                                             }
                                         }
 
-                                        // Countdown info
                                         div { style: "display: flex; justify-content: space-between; align-items: center; font-size: 0.75em;",
-                                            div { style: "color: #ccc;",
-                                                "Interval: {event.interval.as_secs()}s"
-                                                {
-                                                    match &event.event_type {
-                                                        crate::game_automation::types::TimedEventType::Tap { x, y } =>
-                                                            format!(" | Tap: ({}, {})", x, y),
-                                                        _ => String::new()
+                                            div {
+                                                style: "display: flex; align-items: center; gap: 6px; color: #ccc; flex-wrap: wrap;",
+                                                span {
+                                                    style: "font-size: 0.75em;",
+                                                    {
+                                                        let seconds = event.interval.as_secs();
+                                                        let label = format_interval_short(seconds);
+                                                        format!("Interval: {} ({}s)", label, seconds)
                                                     }
                                                 }
+                                                { render_tap_interval_controls(event, automation_command_tx) }
                                             }
 
-                                            // Time remaining display
                                             div { style: "color: #87ceeb; font-weight: bold;",
                                                 {
                                                     if let Some(time_until) = event.time_until_next() {
@@ -339,12 +335,11 @@ pub fn Actions(props: ActionsProps) -> Element {
                                             }
                                         }
 
-                                        // Progress bar
                                         if event.enabled {
                                             div { style: "margin-top: 4px; background: rgba(255,255,255,0.1); border-radius: 3px; height: 4px; overflow: hidden;",
                                                 div {
                                                     style: {
-                                                        
+
                                                         if let Some(time_until) = event.time_until_next() {
                                                             let total_seconds = event.interval.as_secs() as f64;
                                                             let remaining_seconds = time_until.as_secs() as f64;
@@ -397,5 +392,139 @@ pub fn Actions(props: ActionsProps) -> Element {
                 }
             }
         }
+    }
+}
+
+fn render_tap_interval_controls(
+    event: &TimedEvent,
+    automation_command_tx: Signal<Option<mpsc::Sender<AutomationCommand>>>,
+) -> Element {
+    if let TimedEventType::Tap { x, y } = &event.event_type {
+        let interval_secs = event.interval.as_secs();
+        let adjust_step = interval_adjust_step(interval_secs);
+        let step_label = format_interval_short(adjust_step);
+        let can_increase = interval_secs < MAX_TAP_INTERVAL_SECONDS;
+        let can_decrease = interval_secs > MIN_TAP_INTERVAL_SECONDS;
+        let increase_delta = adjust_step as i64;
+        let decrease_delta = -(adjust_step as i64);
+        let event_id_up = event.id.clone();
+        let event_id_down = event.id.clone();
+
+        rsx! {
+            div { style: "display: flex; align-items: center; gap: 6px;",
+                div { style: "display: flex; flex-direction: column; gap: 2px;",
+                    button {
+                        style: if can_increase {
+                            "background: rgba(255,255,255,0.08); color: #87ceeb; border: 1px solid rgba(135,206,235,0.45); border-radius: 4px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 0.55em; cursor: pointer; transition: all 0.2s ease;"
+                        } else {
+                            "background: rgba(255,255,255,0.03); color: #666; border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 0.55em; cursor: not-allowed;"
+                        },
+                        disabled: !can_increase,
+                        title: if can_increase {
+                            format!("Increase interval by {}", step_label.clone())
+                        } else {
+                            format!("Maximum interval is {}", format_interval_short(MAX_TAP_INTERVAL_SECONDS))
+                        },
+                        onclick: {
+                            let event_id = event_id_up.clone();
+                            let delta = increase_delta;
+                            move |_| {
+                                if let Some(tx) = automation_command_tx.read().as_ref() {
+                                    let tx = tx.clone();
+                                    let event_id = event_id.clone();
+                                    spawn(async move {
+                                        let _ = tx.send(AutomationCommand::AdjustTimedEventInterval {
+                                            id: event_id,
+                                            delta_seconds: delta,
+                                        }).await;
+                                    });
+                                }
+                            }
+                        },
+                        "▲"
+                    }
+                    button {
+                        style: if can_decrease {
+                            "background: rgba(255,255,255,0.08); color: #87ceeb; border: 1px solid rgba(135,206,235,0.45); border-radius: 4px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 0.55em; cursor: pointer; transition: all 0.2s ease;"
+                        } else {
+                            "background: rgba(255,255,255,0.03); color: #666; border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 0.55em; cursor: not-allowed;"
+                        },
+                        disabled: !can_decrease,
+                        title: if can_decrease {
+                            format!("Decrease interval by {}", step_label)
+                        } else {
+                            format!("Minimum interval is {}", format_interval_short(MIN_TAP_INTERVAL_SECONDS))
+                        },
+                        onclick: {
+                            let event_id = event_id_down.clone();
+                            let delta = decrease_delta;
+                            move |_| {
+                                if let Some(tx) = automation_command_tx.read().as_ref() {
+                                    let tx = tx.clone();
+                                    let event_id = event_id.clone();
+                                    spawn(async move {
+                                        let _ = tx.send(AutomationCommand::AdjustTimedEventInterval {
+                                            id: event_id,
+                                            delta_seconds: delta,
+                                        }).await;
+                                    });
+                                }
+                            }
+                        },
+                        "▼"
+                    }
+                }
+                span {
+                    style: "font-size: 0.75em; color: #999;",
+                    {
+                        format!("Tap: ({}, {})", x, y)
+                    }
+                }
+            }
+        }
+    } else {
+        rsx! {}
+    }
+}
+
+fn format_interval_short(seconds: u64) -> String {
+    if seconds == 0 {
+        return "0s".to_string();
+    }
+
+    let hours = seconds / 3600;
+    let minutes = (seconds % 3600) / 60;
+    let secs = seconds % 60;
+
+    if hours > 0 {
+        if minutes > 0 {
+            format!("{}h {}m", hours, minutes)
+        } else {
+            format!("{}h", hours)
+        }
+    } else if minutes > 0 {
+        if secs > 0 {
+            format!("{}m {}s", minutes, secs)
+        } else {
+            format!("{}m", minutes)
+        }
+    } else {
+        format!("{}s", secs)
+    }
+}
+
+fn interval_adjust_step(seconds: u64) -> u64 {
+    if seconds >= 1800 {
+        300 // 5 minutes
+    } else if seconds >= 900 {
+        120 // 2 minutes
+    } else if seconds >= 300 {
+        60 // 1 minute
+    } else if seconds >= 120 {
+        30 // 30 seconds
+    } else if seconds >= 60 {
+        10 // 10 seconds
+    } else {
+        5 // 5 seconds for fine control
     }
 }

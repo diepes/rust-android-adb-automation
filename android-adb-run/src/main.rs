@@ -44,10 +44,14 @@ fn main() {
                                 println!("📱 Device: {} size: {}x{}", client.device_name(), sx, sy);
                                 match client.screen_capture().await {
                                     Ok(cap) => {
-                                        if let Err(e) = tokio::fs::write("cli-screenshot.png", &cap.bytes).await { 
-                                            println!("❌ Write failed: {e}"); 
-                                        } else { 
-                                            println!("✅ Screenshot #{} ({}ms) saved to cli-screenshot.png", cap.index, cap.duration_ms); 
+                                        if let Err(e) = tokio::fs::write("cli-screenshot.png", &cap.bytes).await {
+                                            println!("❌ Write failed: {e}");
+                                        } else {
+                                            println!(
+                                                "✅ Screenshot #{} ({}ms) saved to cli-screenshot.png",
+                                                cap.index,
+                                                cap.duration_ms
+                                            );
                                         }
                                     }
                                     Err(e) => println!("❌ Screenshot failed: {e}"),

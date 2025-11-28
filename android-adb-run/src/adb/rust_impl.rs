@@ -1,10 +1,10 @@
 // https://crates.io/crates/adb_client
 use super::types::{AdbClient, Device, TouchActivityMonitor, TouchActivityState};
+use crate::game_automation::fsm::is_disconnect_error;
 use adb_client::{ADBDeviceExt, ADBServer, ADBServerDevice};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
-use crate::game_automation::fsm::is_disconnect_error;
 
 #[allow(dead_code)]
 pub struct RustAdb {
@@ -326,7 +326,7 @@ impl RustAdb {
     }
 
     /// Stream touch events continuously using real shell streaming
-    /// 
+    ///
     /// This implementation uses the shell() method with reader/writer to create
     /// a persistent shell session that continuously streams getevent output.
     /// This is much more efficient than running repeated timeout commands.
@@ -336,10 +336,7 @@ impl RustAdb {
         touch_monitor: TouchActivityMonitor,
     ) -> Result<(), String> {
         if crate::gui::dioxus_app::is_debug_mode() {
-            println!(
-                "📡 Starting real-time getevent stream for {}",
-                event_device
-            );
+            println!("📡 Starting real-time getevent stream for {}", event_device);
         }
 
         // Try the streaming approach first, fall back to polling if it fails
@@ -361,10 +358,10 @@ impl RustAdb {
     }
 
     /// Real streaming implementation using shell() with reader/writer
-    /// 
+    ///
     /// The shell() method signature from adb_client is:
     /// fn shell(&mut self, reader: &mut dyn Read, writer: Box<dyn Write + Send>) -> Result<()>
-    /// 
+    ///
     /// Where:
     /// - reader: receives input commands to send to the shell
     /// - writer: receives output from the shell
@@ -375,37 +372,40 @@ impl RustAdb {
     ) -> Result<(), String> {
         use std::io::{Cursor, Write};
         use std::sync::mpsc;
-        
+
         if crate::gui::dioxus_app::is_debug_mode() {
-            println!("🔄 Starting shell streaming for getevent on {}", event_device);
+            println!(
+                "🔄 Starting shell streaming for getevent on {}",
+                event_device
+            );
         }
 
         let event_device = event_device.to_string();
         let touch_monitor_clone = Arc::clone(&touch_monitor);
-        
+
         // Create a channel to receive output lines
         let (tx, rx) = mpsc::channel::<String>();
-        
+
         // Prepare the command to send to the shell
         let command = format!("getevent -lt {}\n", event_device);
-        
+
         // Spawn a blocking task to handle the shell I/O
         let handle = tokio::task::spawn_blocking(move || -> Result<(), String> {
             let mut dev = server_device.blocking_lock();
-            
+
             // Create a reader with the command we want to execute
             let mut command_reader = Cursor::new(command.as_bytes());
-            
+
             // Create a writer that will capture the output and send it through the channel
             struct ChannelWriter {
                 tx: mpsc::Sender<String>,
                 buffer: Vec<u8>,
             }
-            
+
             impl Write for ChannelWriter {
                 fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
                     self.buffer.extend_from_slice(buf);
-                    
+
                     // Process complete lines
                     while let Some(pos) = self.buffer.iter().position(|&b| b == b'\n') {
                         let line_bytes = self.buffer.drain(..=pos).collect::<Vec<u8>>();
@@ -413,10 +413,10 @@ impl RustAdb {
                             let _ = self.tx.send(line);
                         }
                     }
-                    
+
                     Ok(buf.len())
                 }
-                
+
                 fn flush(&mut self) -> std::io::Result<()> {
                     // Flush any remaining data
                     if !self.buffer.is_empty() {
@@ -428,18 +428,18 @@ impl RustAdb {
                     Ok(())
                 }
             }
-            
+
             let channel_writer = ChannelWriter {
                 tx: tx.clone(),
                 buffer: Vec::new(),
             };
-            
+
             let boxed_writer: Box<dyn Write + Send> = Box::new(channel_writer);
-            
+
             // Call the shell method
             match dev.shell(&mut command_reader, boxed_writer) {
                 Ok(_) => Ok(()),
-                Err(e) => Err(format!("Shell command failed: {}", e))
+                Err(e) => Err(format!("Shell command failed: {}", e)),
             }
         });
 
@@ -453,12 +453,12 @@ impl RustAdb {
                         break;
                     }
                 }
-                
+
                 // Check if this is a touch event
                 if Self::is_touch_event_line(&line) {
                     let mut monitor = touch_monitor_clone.write().await;
                     monitor.update_activity();
-                    
+
                     if crate::gui::dioxus_app::is_debug_mode() {
                         println!("👆 Touch event: {}", line.trim());
                     }
@@ -472,7 +472,7 @@ impl RustAdb {
                 // Also wait for processing to finish
                 let _ = process_handle.await;
                 result
-            },
+            }
             Err(e) => Err(format!("Task join error: {}", e)),
         }
     }
@@ -484,7 +484,10 @@ impl RustAdb {
         touch_monitor: TouchActivityMonitor,
     ) -> Result<(), String> {
         if crate::gui::dioxus_app::is_debug_mode() {
-            println!("📊 Using optimized polling for touch detection on {}", event_device);
+            println!(
+                "📊 Using optimized polling for touch detection on {}",
+                event_device
+            );
         }
 
         let check_interval = Duration::from_millis(100); // Faster polling
@@ -523,8 +526,7 @@ impl RustAdb {
                     let output = String::from_utf8_lossy(&out);
 
                     // Check for touch events in the output
-                    let has_touch_events =
-                        output.lines().any(Self::is_touch_event_line);
+                    let has_touch_events = output.lines().any(Self::is_touch_event_line);
 
                     if has_touch_events {
                         {
@@ -606,19 +608,20 @@ impl RustAdb {
             if line.starts_with("add device") && line.contains("/dev/input/event") {
                 // Save previous device if it was touch-capable
                 if let Some(ref device) = current_device
-                    && has_touch_events {
-                        let score = Self::score_touch_device(&current_name);
-                        if crate::gui::dioxus_app::is_debug_mode() {
-                            println!(
-                                "  📱 Found touch device: {} (name: '{}', score: {})",
-                                device, current_name, score
-                            );
-                        }
-                        if score > best_score {
-                            best_device = Some(device.clone());
-                            best_score = score;
-                        }
+                    && has_touch_events
+                {
+                    let score = Self::score_touch_device(&current_name);
+                    if crate::gui::dioxus_app::is_debug_mode() {
+                        println!(
+                            "  📱 Found touch device: {} (name: '{}', score: {})",
+                            device, current_name, score
+                        );
                     }
+                    if score > best_score {
+                        best_device = Some(device.clone());
+                        best_score = score;
+                    }
+                }
 
                 // Extract device path
                 if let Some(path_start) = line.find("/dev/input/event") {
@@ -631,9 +634,10 @@ impl RustAdb {
             else if line.starts_with("name:") {
                 if let Some(name_start) = line.find('"')
                     && let Some(name_end) = line.rfind('"')
-                        && name_start < name_end {
-                            current_name = line[name_start + 1..name_end].to_string();
-                        }
+                    && name_start < name_end
+                {
+                    current_name = line[name_start + 1..name_end].to_string();
+                }
             }
             // Look for touch-related ABS events
             else if line.contains("ABS (0003)") || line.contains("0035") || line.contains("0036")
@@ -645,19 +649,20 @@ impl RustAdb {
 
         // Check the last device
         if let Some(ref device) = current_device
-            && has_touch_events {
-                let score = Self::score_touch_device(&current_name);
-                if crate::gui::dioxus_app::is_debug_mode() {
-                    println!(
-                        "  📱 Found touch device: {} (name: '{}', score: {})",
-                        device, current_name, score
-                    );
-                }
-                if score > best_score {
-                    best_device = Some(device.clone());
-                    best_score = score;
-                }
+            && has_touch_events
+        {
+            let score = Self::score_touch_device(&current_name);
+            if crate::gui::dioxus_app::is_debug_mode() {
+                println!(
+                    "  📱 Found touch device: {} (name: '{}', score: {})",
+                    device, current_name, score
+                );
             }
+            if score > best_score {
+                best_device = Some(device.clone());
+                best_score = score;
+            }
+        }
 
         match best_device {
             Some(device) => {
@@ -804,7 +809,7 @@ impl AdbClient for RustAdb {
     async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
         // Add 10-second timeout to detect USB disconnect
         let capture_future = self.capture_screen_bytes_internal();
-        
+
         match tokio::time::timeout(Duration::from_secs(10), capture_future).await {
             Ok(result) => result,
             Err(_) => Err("RustAdb: screenshot capture timed out after 10 seconds (device may be disconnected)".to_string()),
@@ -819,7 +824,7 @@ impl AdbClient for RustAdb {
 
         // Clone Arc for move into spawn_blocking
         let server_device = Arc::clone(&self.server_device);
-        
+
         // Wrap the blocking shell_command in spawn_blocking so timeout can work
         let tap_future = tokio::task::spawn_blocking(move || -> Result<(), String> {
             let mut out: Vec<u8> = Vec::new();
@@ -836,7 +841,9 @@ impl AdbClient for RustAdb {
         match tokio::time::timeout(Duration::from_secs(5), tap_future).await {
             Ok(Ok(result)) => result,
             Ok(Err(e)) => Err(format!("RustAdb: tap task failed: {e}")),
-            Err(_) => Err("RustAdb: tap timed out after 5 seconds (device may be disconnected)".to_string()),
+            Err(_) => Err(
+                "RustAdb: tap timed out after 5 seconds (device may be disconnected)".to_string(),
+            ),
         }
     }
 
@@ -857,7 +864,7 @@ impl AdbClient for RustAdb {
 
         // Clone Arc for move into spawn_blocking
         let server_device = Arc::clone(&self.server_device);
-        
+
         // Wrap the blocking shell_command in spawn_blocking so timeout can work
         let swipe_future = tokio::task::spawn_blocking(move || -> Result<(), String> {
             let mut out: Vec<u8> = Vec::new();
@@ -871,13 +878,12 @@ impl AdbClient for RustAdb {
                 cmd_parts.push(d.to_string());
             }
             let refs: Vec<&str> = cmd_parts.iter().map(|s| s.as_str()).collect();
-            dev.shell_command(&refs, &mut out)
-                .map_err(|e| {
-                    if is_disconnect_error(&e.to_string()) {
-                        return "RustAdb: device disconnected".into();
-                    }
-                    format!("RustAdb: swipe failed: {e}")
-                })?;
+            dev.shell_command(&refs, &mut out).map_err(|e| {
+                if is_disconnect_error(&e.to_string()) {
+                    return "RustAdb: device disconnected".into();
+                }
+                format!("RustAdb: swipe failed: {e}")
+            })?;
             Ok(())
         });
 
@@ -885,7 +891,9 @@ impl AdbClient for RustAdb {
         match tokio::time::timeout(Duration::from_secs(5), swipe_future).await {
             Ok(Ok(result)) => result,
             Ok(Err(e)) => Err(format!("RustAdb: swipe task failed: {e}")),
-            Err(_) => Err("RustAdb: swipe timed out after 5 seconds (device may be disconnected)".to_string()),
+            Err(_) => Err(
+                "RustAdb: swipe timed out after 5 seconds (device may be disconnected)".to_string(),
+            ),
         }
     }
 
@@ -959,9 +967,10 @@ impl AdbClient for RustAdb {
         let task = tokio::spawn(async move {
             if let Err(e) =
                 Self::monitor_touch_activity_loop(touch_monitor.clone(), server_device).await
-                && crate::gui::dioxus_app::is_debug_mode() {
-                    eprintln!("Touch monitoring ended: {}", e);
-                }
+                && crate::gui::dioxus_app::is_debug_mode()
+            {
+                eprintln!("Touch monitoring ended: {}", e);
+            }
 
             // Mark monitoring as stopped when task ends
             let mut monitor = touch_monitor.write().await;

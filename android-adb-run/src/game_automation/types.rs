@@ -1,6 +1,9 @@
 // Types and enums for game automation
 use std::time::{Duration, Instant};
 
+pub const MIN_TAP_INTERVAL_SECONDS: u64 = 5;
+pub const MAX_TAP_INTERVAL_SECONDS: u64 = 6 * 60 * 60; // 6 hours upper bound for GUI adjustments
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameState {
     Idle,
@@ -150,6 +153,11 @@ impl TimedEvent {
         self.execution_count += 1;
     }
 
+    pub fn set_interval(&mut self, interval: Duration) {
+        self.interval = interval;
+        self.last_executed = Some(Instant::now());
+    }
+
     pub fn time_until_next(&self) -> Option<Duration> {
         if !self.enabled {
             return None;
@@ -197,6 +205,7 @@ pub enum AutomationCommand {
     ListTimedEvents,           // List all configured timed events
     ClearTouchActivity,        // Clear touch activity to resume automation immediately
     RegisterTouchActivity,     // Register touch activity to pause automation for 30 seconds
+    AdjustTimedEventInterval { id: String, delta_seconds: i64 }, // Adjust interval for timed tap events
     Shutdown,
 }
 
@@ -207,13 +216,13 @@ pub enum AutomationEvent {
     StateChanged(GameState),
     Error(String),
     DeviceDisconnected(String), // Device disconnected with error message
-    TemplatesUpdated(Vec<String>),      // List of template files found
+    TemplatesUpdated(Vec<String>), // List of template files found
     TimedTapExecuted(String, u32, u32), // ID, x, y of executed timed tap (for backward compatibility)
     TimedTapCountdown(String, u64), // ID, seconds until next execution (for backward compatibility)
     TimedEventsListed(Vec<TimedEvent>), // Response to ListTimedEvents command
     TimedEventExecuted(String),     // ID of executed timed event
     NextTimedEvent(String, u64),    // ID, seconds until next event
     ManualActivityDetected(bool, Option<u64>), // (is_active, remaining_seconds) - True when human touch detected with countdown, false when timeout expires
-    ReconnectionAttempt(u64),       // Seconds until next reconnection attempt
-    DeviceReconnected,              // Device successfully reconnected
+    ReconnectionAttempt(u64),                  // Seconds until next reconnection attempt
+    DeviceReconnected,                         // Device successfully reconnected
 }

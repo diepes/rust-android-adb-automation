@@ -33,7 +33,8 @@ pub struct ScreenshotPanelProps {
     pub selection_end: Signal<Option<ElementPoint>>,
     pub tap_markers: Signal<Vec<TapMarker>>,
     pub screenshot_counter: Signal<u64>, // GUI-level counter
-    pub automation_command_tx: Signal<Option<tokio::sync::mpsc::Sender<crate::game_automation::AutomationCommand>>>,
+    pub automation_command_tx:
+        Signal<Option<tokio::sync::mpsc::Sender<crate::game_automation::AutomationCommand>>>,
     pub hover_tap_preview: Signal<Option<(u32, u32)>>,
 }
 
@@ -66,7 +67,7 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
         spawn(async move {
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                
+
                 // Remove markers older than 30 seconds
                 tap_markers.with_mut(|markers| {
                     markers.retain(|m| m.timestamp.elapsed().as_secs() < 30);
@@ -110,28 +111,29 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
         None
     };
 
-    let device_to_display = |device_x: u32, device_y: u32, screen_x: u32, screen_y: u32| -> (f32, f32) {
-        if screen_x == 0 || screen_y == 0 {
-            return (0.0, 0.0);
-        }
-        let max_display_width = 400.0;
-        let max_display_height = 600.0;
-        let border_px = 8.0;
-        let image_aspect = screen_x as f32 / screen_y as f32;
-        let container_aspect = max_display_width / max_display_height;
-        let (outer_w, outer_h) = if image_aspect > container_aspect {
-            (max_display_width, max_display_width / image_aspect)
-        } else {
-            (max_display_height * image_aspect, max_display_height)
+    let device_to_display =
+        |device_x: u32, device_y: u32, screen_x: u32, screen_y: u32| -> (f32, f32) {
+            if screen_x == 0 || screen_y == 0 {
+                return (0.0, 0.0);
+            }
+            let max_display_width = 400.0;
+            let max_display_height = 600.0;
+            let border_px = 8.0;
+            let image_aspect = screen_x as f32 / screen_y as f32;
+            let container_aspect = max_display_width / max_display_height;
+            let (outer_w, outer_h) = if image_aspect > container_aspect {
+                (max_display_width, max_display_width / image_aspect)
+            } else {
+                (max_display_height * image_aspect, max_display_height)
+            };
+            let displayed_w = (outer_w - border_px * 2.0).max(1.0);
+            let displayed_h = (outer_h - border_px * 2.0).max(1.0);
+            let scale_x = displayed_w / screen_x as f32;
+            let scale_y = displayed_h / screen_y as f32;
+            let px = device_x as f32 * scale_x + border_px;
+            let py = device_y as f32 * scale_y + border_px;
+            (px, py)
         };
-        let displayed_w = (outer_w - border_px * 2.0).max(1.0);
-        let displayed_h = (outer_h - border_px * 2.0).max(1.0);
-        let scale_x = displayed_w / screen_x as f32;
-        let scale_y = displayed_h / screen_y as f32;
-        let px = device_x as f32 * scale_x + border_px;
-        let py = device_y as f32 * scale_y + border_px;
-        (px, py)
-    };
 
     let hover_preview_point = {
         let preview_opt = *hover_tap_preview.read();
@@ -224,12 +226,12 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                             let refresh_after = auto && !already_loading;
                                             if refresh_after { is_loading_screenshot.set(true); }
                                             if distance < 10.0 {
-                                                let raw_point = evt.element_coordinates(); 
+                                                let raw_point = evt.element_coordinates();
                                                 tap_markers.with_mut(|v| v.push(TapMarker {
                                                     point: raw_point,
                                                     timestamp: Instant::now(),
                                                 }));
-                                                
+
                                                 // Trigger 30-second pause for GUI tap (same as human touch detection)
                                                 if let Some(cmd_tx) = automation_command_tx.read().as_ref() {
                                                     let cmd_tx_clone = cmd_tx.clone();
@@ -237,7 +239,7 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                                         let _ = cmd_tx_clone.send(crate::game_automation::AutomationCommand::RegisterTouchActivity).await;
                                                     });
                                                 }
-                                                
+
                                                 spawn(async move {
                                                     let result = async move {
                                                         match AdbBackend::connect_first().await {
@@ -287,7 +289,7 @@ pub fn screenshot_panel(props: ScreenshotPanelProps) -> Element {
                                                         let _ = cmd_tx_clone.send(crate::game_automation::AutomationCommand::RegisterTouchActivity).await;
                                                     });
                                                 }
-                                                
+
                                                 spawn(async move {
                                                     let result = async move {
                                                         match AdbBackend::connect_first().await {

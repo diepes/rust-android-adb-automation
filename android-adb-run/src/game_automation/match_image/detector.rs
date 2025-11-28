@@ -453,13 +453,14 @@ impl GameStateDetector {
 
             // Still warn if template is very large
             if (template_gray.width() > 500 || template_gray.height() > 500)
-                && self.config.debug_enabled {
-                    println!(
-                        "⚠️ Large template detected: {}x{} - this may be slow!",
-                        template_gray.width(),
-                        template_gray.height()
-                    );
-                }
+                && self.config.debug_enabled
+            {
+                println!(
+                    "⚠️ Large template detected: {}x{} - this may be slow!",
+                    template_gray.width(),
+                    template_gray.height()
+                );
+            }
 
             Ok(template_gray)
         }
@@ -474,19 +475,21 @@ impl GameStateDetector {
         // Look for pattern [x,y,width,height] in filename
         if let Some(start) = filename.find('[')
             && let Some(end) = filename.find(']')
-                && end > start {
-                    let region_str = &filename[start + 1..end];
-                    let parts: Vec<&str> = region_str.split(',').collect();
-                    if parts.len() == 4
-                        && let (Ok(x), Ok(y), Ok(width), Ok(height)) = (
-                            parts[0].trim().parse::<u32>(),
-                            parts[1].trim().parse::<u32>(),
-                            parts[2].trim().parse::<u32>(),
-                            parts[3].trim().parse::<u32>(),
-                        ) {
-                            return Some((x, y, width, height));
-                        }
-                }
+            && end > start
+        {
+            let region_str = &filename[start + 1..end];
+            let parts: Vec<&str> = region_str.split(',').collect();
+            if parts.len() == 4
+                && let (Ok(x), Ok(y), Ok(width), Ok(height)) = (
+                    parts[0].trim().parse::<u32>(),
+                    parts[1].trim().parse::<u32>(),
+                    parts[2].trim().parse::<u32>(),
+                    parts[3].trim().parse::<u32>(),
+                )
+            {
+                return Some((x, y, width, height));
+            }
+        }
         None
     }
 }

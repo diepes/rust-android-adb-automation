@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🎯 Attempting tap at ({}, {}) with USB unplugged...", x, y);
     println!("   Expected: Timeout after 5 seconds");
     let start = Instant::now();
-    
+
     match adb.tap(x, y).await {
         Ok(_) => {
             let elapsed = start.elapsed();
@@ -43,19 +43,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let elapsed = start.elapsed();
             println!("❌ Tap failed after {:?}", elapsed);
             println!("   Error: {}", e);
-            
+
             // Check error detection
-            if e.to_lowercase().contains("timeout") 
-                || e.to_lowercase().contains("timed out") {
+            if e.to_lowercase().contains("timeout") || e.to_lowercase().contains("timed out") {
                 println!("   ✅ Timeout detected correctly!");
             } else if e.to_lowercase().contains("offline")
                 || e.to_lowercase().contains("disconnected")
-                || e.to_lowercase().contains("not found") {
+                || e.to_lowercase().contains("not found")
+            {
                 println!("   ✅ Disconnect detected correctly!");
             } else {
                 println!("   ⚠️  Error might not be detected as disconnect");
             }
-            
+
             // Check timing
             if elapsed.as_secs() >= 5 {
                 println!("   ✅ Timeout occurred at expected time (5+ seconds)");

@@ -34,11 +34,12 @@ impl SearchRegion {
     /// Parse region from filename format: template-[x,y,width,height].png
     pub fn parse_from_filename(filename: &str, screen_width: u32, screen_height: u32) -> Self {
         if let Some(region_str) = Self::extract_region_string(filename)
-            && let Some(region) = Self::parse_region_coordinates(&region_str) {
-                // Validate and clip to screen bounds
-                let clipped = Self::clip_to_screen(region, screen_width, screen_height);
-                return clipped;
-            }
+            && let Some(region) = Self::parse_region_coordinates(&region_str)
+        {
+            // Validate and clip to screen bounds
+            let clipped = Self::clip_to_screen(region, screen_width, screen_height);
+            return clipped;
+        }
 
         // Default to full screen if parsing fails
         Self::full_screen(screen_width, screen_height)
@@ -48,9 +49,10 @@ impl SearchRegion {
     fn extract_region_string(filename: &str) -> Option<String> {
         if let Some(start) = filename.find('[')
             && let Some(end) = filename.find(']')
-                && end > start {
-                    return Some(filename[start + 1..end].to_string());
-                }
+            && end > start
+        {
+            return Some(filename[start + 1..end].to_string());
+        }
         None
     }
 
@@ -63,15 +65,16 @@ impl SearchRegion {
                 parts[1].trim().parse::<u32>(),
                 parts[2].trim().parse::<u32>(),
                 parts[3].trim().parse::<u32>(),
-            ) {
-                return Some(SearchRegion::new(
-                    x,
-                    y,
-                    width,
-                    height,
-                    format!("parsed_{}_{}_{}_{}", x, y, width, height),
-                ));
-            }
+            )
+        {
+            return Some(SearchRegion::new(
+                x,
+                y,
+                width,
+                height,
+                format!("parsed_{}_{}_{}_{}", x, y, width, height),
+            ));
+        }
         None
     }
 

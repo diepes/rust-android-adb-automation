@@ -1,6 +1,9 @@
 // Finite State Machine implementation for game automation - Event Driven Architecture
 use super::match_image::{GameStateDetector, MatchConfig, create_default_config};
-use super::types::{AutomationCommand, AutomationEvent, GameState, TimedEvent, TimedEventType};
+use super::types::{
+    AutomationCommand, AutomationEvent, GameState, MAX_TAP_INTERVAL_SECONDS,
+    MIN_TAP_INTERVAL_SECONDS, TimedEvent, TimedEventType,
+};
 use crate::adb::{AdbBackend, AdbClient};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -33,7 +36,7 @@ pub fn is_disconnect_error(error: &str) -> bool {
         || error_lower.contains("io error")
         || error_lower.contains("timed out")           // Timeout often indicates disconnect
         || error_lower.contains("timeout")             // Alternative timeout message format
-        || error_lower.contains("adb request failed")  // ADB client library error
+        || error_lower.contains("adb request failed") // ADB client library error
 }
 
 pub struct GameAutomation {
@@ -262,7 +265,7 @@ impl GameAutomation {
                 }
                 Err(e) => {
                     let error = format!("Screenshot failed: {}", e);
-                    
+
                     // Check if this is a disconnect error
                     if is_disconnect_error(&error) {
                         debug_print!(
@@ -387,7 +390,10 @@ impl GameAutomation {
                             e
                         );
                     } else {
-                        debug_print!(self.debug_enabled, "👆 Touch activity cleared - automation resuming");
+                        debug_print!(
+                            self.debug_enabled,
+                            "👆 Touch activity cleared - automation resuming"
+                        );
                         // Send event to update GUI
                         let _ = self
                             .event_tx
@@ -407,7 +413,10 @@ impl GameAutomation {
                             e
                         );
                     } else {
-                        debug_print!(self.debug_enabled, "👆 GUI touch registered - pausing automation for 30s");
+                        debug_print!(
+                            self.debug_enabled,
+                            "👆 GUI touch registered - pausing automation for 30s"
+                        );
                         // Send event to update GUI with countdown
                         let _ = self
                             .event_tx
@@ -485,6 +494,50 @@ impl GameAutomation {
                     );
                 }
             }
+            AutomationCommand::AdjustTimedEventInterval { id, delta_seconds } => {
+                if let Some(event) = self.timed_events.get_mut(&id) {
+                    if matches!(event.event_type, TimedEventType::Tap { .. }) {
+                        let current_secs = event.interval.as_secs();
+                        let current_secs_i64 = current_secs as i64;
+                        let min_secs = MIN_TAP_INTERVAL_SECONDS as i64;
+                        let max_secs = MAX_TAP_INTERVAL_SECONDS as i64;
+
+                        let target_secs = current_secs_i64.saturating_add(delta_seconds);
+                        let clamped_secs = target_secs.clamp(min_secs, max_secs) as u64;
+
+                        if clamped_secs != current_secs {
+                            event.set_interval(Duration::from_secs(clamped_secs));
+                            debug_print!(
+                                self.debug_enabled,
+                                "⏱️ Adjusted timed event '{}' interval to {}s",
+                                id,
+                                clamped_secs
+                            );
+                            self.send_timed_events_list().await;
+                            self.send_timed_tap_countdowns().await;
+                        } else {
+                            debug_print!(
+                                self.debug_enabled,
+                                "ℹ️ Timed event '{}' interval unchanged ({}s)",
+                                id,
+                                clamped_secs
+                            );
+                        }
+                    } else {
+                        debug_print!(
+                            self.debug_enabled,
+                            "⚠️ Interval adjustments only supported for tap events ({}).",
+                            id
+                        );
+                    }
+                } else {
+                    debug_print!(
+                        self.debug_enabled,
+                        "⚠️ Timed event '{}' not found for interval adjustment",
+                        id
+                    );
+                }
+            }
             AutomationCommand::TriggerTimedEvent(id) => {
                 if let Some(event) = self.timed_events.get(&id) {
                     if event.enabled {
@@ -509,23 +562,22 @@ impl GameAutomation {
                                             y,
                                             e
                                         );
-                                                         // Check if this is a disconnect error
-                        if is_disconnect_error(&e) {
-                            debug_print!(
-                                self.debug_enabled,
-                                "🔌 Device disconnect detected during manual tap trigger: {}",
-                                e
-                            );
-                            self.device_disconnected = true;
-                            self.last_reconnect_attempt = None;
-                            let _ = self
-                                .event_tx
-                                .send(AutomationEvent::DeviceDisconnected(format!(
-                                    "Tap trigger failed: {}",
-                                    e
-                                )))
-                                .await;
-                        }
+                                        // Check if this is a disconnect error
+                                        if is_disconnect_error(&e) {
+                                            debug_print!(
+                                                self.debug_enabled,
+                                                "🔌 Device disconnect detected during manual tap trigger: {}",
+                                                e
+                                            );
+                                            self.device_disconnected = true;
+                                            self.last_reconnect_attempt = None;
+                                            let _ =
+                                                self.event_tx
+                                                    .send(AutomationEvent::DeviceDisconnected(
+                                                        format!("Tap trigger failed: {}", e),
+                                                    ))
+                                                    .await;
+                                        }
                                     } else {
                                         let _ = self
                                             .event_tx
@@ -658,7 +710,7 @@ impl GameAutomation {
             if human_touching {
                 // Get remaining seconds for countdown
                 let remaining_seconds = client_guard.get_touch_timeout_remaining().await;
-                
+
                 debug_print!(
                     self.debug_enabled,
                     "🚫 AUTOMATION PAUSED: Human touch detected - skipping timed events"
@@ -666,7 +718,10 @@ impl GameAutomation {
                 // Send notification that human activity is detected with countdown
                 let _ = self
                     .event_tx
-                    .send(AutomationEvent::ManualActivityDetected(true, remaining_seconds))
+                    .send(AutomationEvent::ManualActivityDetected(
+                        true,
+                        remaining_seconds,
+                    ))
                     .await;
                 return; // Skip processing timed events while human is touching
             } else {
@@ -720,7 +775,7 @@ impl GameAutomation {
                     event_id,
                     e
                 );
-                
+
                 // Check if this is a disconnect error
                 if is_disconnect_error(&e) {
                     debug_print!(
@@ -728,12 +783,12 @@ impl GameAutomation {
                         "🔌 Device disconnect detected during timed event: {}",
                         e
                     );
-                    
+
                     // Pause the automation
                     self.change_state(GameState::Paused).await;
                     self.device_disconnected = true;
                     self.last_reconnect_attempt = None;
-                    
+
                     // Send disconnect event to GUI
                     let _ = self
                         .event_tx
@@ -975,7 +1030,7 @@ impl GameAutomation {
                     }
                     Err(e) => {
                         let error_msg = format!("Failed to tap at ({}, {}): {}", tap_x, tap_y, e);
-                        
+
                         // Check if this is a disconnect error
                         if is_disconnect_error(&error_msg) {
                             debug_print!(
@@ -990,7 +1045,7 @@ impl GameAutomation {
                                 .send(AutomationEvent::DeviceDisconnected(error_msg.clone()))
                                 .await;
                         }
-                        
+
                         Err(error_msg)
                     }
                 }
@@ -1064,9 +1119,9 @@ impl GameAutomation {
     /// Check if it's time to attempt reconnection and send countdown updates
     async fn check_reconnection(&mut self) {
         const RECONNECTION_INTERVAL_SECS: u64 = 10;
-        
+
         let now = std::time::Instant::now();
-        
+
         // Determine if we should attempt reconnection
         let should_attempt = match self.last_reconnect_attempt {
             None => true, // First attempt
@@ -1075,23 +1130,23 @@ impl GameAutomation {
                 elapsed >= RECONNECTION_INTERVAL_SECS
             }
         };
-        
+
         if should_attempt {
             // Attempt reconnection
             debug_print!(self.debug_enabled, "🔄 Attempting device reconnection...");
             self.last_reconnect_attempt = Some(now);
-            
+
             if let Ok(()) = self.attempt_reconnection().await {
                 // Successful reconnection
                 return;
             }
         }
-        
+
         // Send countdown update to GUI
         if let Some(last_attempt) = self.last_reconnect_attempt {
             let elapsed = now.duration_since(last_attempt).as_secs();
             let remaining = RECONNECTION_INTERVAL_SECS.saturating_sub(elapsed);
-            
+
             let _ = self
                 .event_tx
                 .send(AutomationEvent::ReconnectionAttempt(remaining))
@@ -1101,8 +1156,11 @@ impl GameAutomation {
 
     /// Attempt to reconnect to the device
     async fn attempt_reconnection(&mut self) -> Result<(), String> {
-        debug_print!(self.debug_enabled, "🔄 Attempting to reconnect to device...");
-        
+        debug_print!(
+            self.debug_enabled,
+            "🔄 Attempting to reconnect to device..."
+        );
+
         match AdbBackend::connect_first().await {
             Ok(client) => {
                 let (screen_width, screen_height) = client.screen_dimensions();
@@ -1112,15 +1170,15 @@ impl GameAutomation {
                     screen_width,
                     screen_height
                 );
-                
+
                 // Update detector with screen dimensions
                 let mut config = create_default_config();
                 config.debug_enabled = self.debug_enabled;
                 self.game_detector = GameStateDetector::new(screen_width, screen_height, config);
-                
+
                 // Store the new client
                 self.adb_client = Some(Arc::new(Mutex::new(client)));
-                
+
                 // Restart touch monitoring
                 if let Some(client_arc) = &self.adb_client {
                     let client_guard = client_arc.lock().await;
@@ -1134,11 +1192,11 @@ impl GameAutomation {
                         debug_print!(self.debug_enabled, "👆 Touch monitoring restarted");
                     }
                 }
-                
+
                 // Mark as reconnected
                 self.device_disconnected = false;
                 self.last_reconnect_attempt = None;
-                
+
                 // Auto-resume automation if it was running (same as initial startup)
                 if self.is_running && self.state == GameState::Paused {
                     self.change_state(GameState::Running).await;
@@ -1147,18 +1205,15 @@ impl GameAutomation {
                         "▶️ Auto-resuming automation after reconnection"
                     );
                 }
-                
+
                 // Send reconnection event to GUI
-                let _ = self
-                    .event_tx
-                    .send(AutomationEvent::DeviceReconnected)
-                    .await;
-                
+                let _ = self.event_tx.send(AutomationEvent::DeviceReconnected).await;
+
                 debug_print!(
                     self.debug_enabled,
                     "✅ Device reconnected successfully - automation auto-resumed"
                 );
-                
+
                 Ok(())
             }
             Err(e) => {
