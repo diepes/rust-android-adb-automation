@@ -1,6 +1,6 @@
 // gui/components/actions.rs
 use crate::game_automation::types::{
-    TimedEvent, TimedEventType, MAX_TAP_INTERVAL_SECONDS, MIN_TAP_INTERVAL_SECONDS,
+    MAX_TAP_INTERVAL_SECONDS, MIN_TAP_INTERVAL_SECONDS, TimedEvent, TimedEventType,
 };
 use crate::game_automation::{AutomationCommand, GameState};
 use dioxus::prelude::*;
@@ -306,6 +306,7 @@ pub fn Actions(props: ActionsProps) -> Element {
                                         div { style: "display: flex; justify-content: space-between; align-items: center; font-size: 0.75em;",
                                             div {
                                                 style: "display: flex; align-items: center; gap: 6px; color: #ccc; flex-wrap: wrap;",
+                                                { render_tap_interval_controls(event, automation_command_tx) }
                                                 span {
                                                     style: "font-size: 0.75em;",
                                                     {
@@ -314,7 +315,14 @@ pub fn Actions(props: ActionsProps) -> Element {
                                                         format!("Interval: {} ({}s)", label, seconds)
                                                     }
                                                 }
-                                                { render_tap_interval_controls(event, automation_command_tx) }
+                                                if let TimedEventType::Tap { x, y } = &event.event_type {
+                                                    span {
+                                                        style: "font-size: 0.75em; color: #999;",
+                                                        {
+                                                            format!("Tap: ({}, {})", x, y)
+                                                        }
+                                                    }
+                                                }
                                             }
 
                                             div { style: "color: #87ceeb; font-weight: bold;",
@@ -399,7 +407,7 @@ fn render_tap_interval_controls(
     event: &TimedEvent,
     automation_command_tx: Signal<Option<mpsc::Sender<AutomationCommand>>>,
 ) -> Element {
-    if let TimedEventType::Tap { x, y } = &event.event_type {
+    if let TimedEventType::Tap { .. } = &event.event_type {
         let interval_secs = event.interval.as_secs();
         let adjust_step = interval_adjust_step(interval_secs);
         let step_label = format_interval_short(adjust_step);
@@ -411,74 +419,66 @@ fn render_tap_interval_controls(
         let event_id_down = event.id.clone();
 
         rsx! {
-            div { style: "display: flex; align-items: center; gap: 6px;",
-                div { style: "display: flex; flex-direction: column; gap: 2px;",
-                    button {
-                        style: if can_increase {
-                            "background: rgba(255,255,255,0.08); color: #87ceeb; border: 1px solid rgba(135,206,235,0.45); border-radius: 4px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 0.55em; cursor: pointer; transition: all 0.2s ease;"
-                        } else {
-                            "background: rgba(255,255,255,0.03); color: #666; border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 0.55em; cursor: not-allowed;"
-                        },
-                        disabled: !can_increase,
-                        title: if can_increase {
-                            format!("Increase interval by {}", step_label.clone())
-                        } else {
-                            format!("Maximum interval is {}", format_interval_short(MAX_TAP_INTERVAL_SECONDS))
-                        },
-                        onclick: {
-                            let event_id = event_id_up.clone();
-                            let delta = increase_delta;
-                            move |_| {
-                                if let Some(tx) = automation_command_tx.read().as_ref() {
-                                    let tx = tx.clone();
-                                    let event_id = event_id.clone();
-                                    spawn(async move {
-                                        let _ = tx.send(AutomationCommand::AdjustTimedEventInterval {
-                                            id: event_id,
-                                            delta_seconds: delta,
-                                        }).await;
-                                    });
-                                }
+            div { style: "display: flex; gap: 4px; align-items: center;",
+                button {
+                    style: if can_increase {
+                        "background: rgba(255,255,255,0.08); color: #87ceeb; border: 1px solid rgba(135,206,235,0.45); border-radius: 3px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 0.55em; cursor: pointer; transition: all 0.2s ease;"
+                    } else {
+                        "background: rgba(255,255,255,0.03); color: #666; border: 1px solid rgba(255,255,255,0.1); border-radius: 3px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 0.55em; cursor: not-allowed;"
+                    },
+                    disabled: !can_increase,
+                    title: if can_increase {
+                        format!("Increase interval by {}", step_label.clone())
+                    } else {
+                        format!("Maximum interval is {}", format_interval_short(MAX_TAP_INTERVAL_SECONDS))
+                    },
+                    onclick: {
+                        let event_id = event_id_up.clone();
+                        let delta = increase_delta;
+                        move |_| {
+                            if let Some(tx) = automation_command_tx.read().as_ref() {
+                                let tx = tx.clone();
+                                let event_id = event_id.clone();
+                                spawn(async move {
+                                    let _ = tx.send(AutomationCommand::AdjustTimedEventInterval {
+                                        id: event_id,
+                                        delta_seconds: delta,
+                                    }).await;
+                                });
                             }
-                        },
-                        "▲"
-                    }
-                    button {
-                        style: if can_decrease {
-                            "background: rgba(255,255,255,0.08); color: #87ceeb; border: 1px solid rgba(135,206,235,0.45); border-radius: 4px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 0.55em; cursor: pointer; transition: all 0.2s ease;"
-                        } else {
-                            "background: rgba(255,255,255,0.03); color: #666; border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 0.55em; cursor: not-allowed;"
-                        },
-                        disabled: !can_decrease,
-                        title: if can_decrease {
-                            format!("Decrease interval by {}", step_label)
-                        } else {
-                            format!("Minimum interval is {}", format_interval_short(MIN_TAP_INTERVAL_SECONDS))
-                        },
-                        onclick: {
-                            let event_id = event_id_down.clone();
-                            let delta = decrease_delta;
-                            move |_| {
-                                if let Some(tx) = automation_command_tx.read().as_ref() {
-                                    let tx = tx.clone();
-                                    let event_id = event_id.clone();
-                                    spawn(async move {
-                                        let _ = tx.send(AutomationCommand::AdjustTimedEventInterval {
-                                            id: event_id,
-                                            delta_seconds: delta,
-                                        }).await;
-                                    });
-                                }
-                            }
-                        },
-                        "▼"
-                    }
+                        }
+                    },
+                    "▲"
                 }
-                span {
-                    style: "font-size: 0.75em; color: #999;",
-                    {
-                        format!("Tap: ({}, {})", x, y)
-                    }
+                button {
+                    style: if can_decrease {
+                        "background: rgba(255,255,255,0.08); color: #87ceeb; border: 1px solid rgba(135,206,235,0.45); border-radius: 3px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 0.55em; cursor: pointer; transition: all 0.2s ease;"
+                    } else {
+                        "background: rgba(255,255,255,0.03); color: #666; border: 1px solid rgba(255,255,255,0.1); border-radius: 3px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 0.55em; cursor: not-allowed;"
+                    },
+                    disabled: !can_decrease,
+                    title: if can_decrease {
+                        format!("Decrease interval by {}", step_label)
+                    } else {
+                        format!("Minimum interval is {}", format_interval_short(MIN_TAP_INTERVAL_SECONDS))
+                    },
+                    onclick: {
+                        let event_id = event_id_down.clone();
+                        let delta = decrease_delta;
+                        move |_| {
+                            if let Some(tx) = automation_command_tx.read().as_ref() {
+                                let tx = tx.clone();
+                                let event_id = event_id.clone();
+                                spawn(async move {
+                                    let _ = tx.send(AutomationCommand::AdjustTimedEventInterval {
+                                        id: event_id,
+                                        delta_seconds: delta,
+                                    }).await;
+                                });
+                            }
+                        }
+                    },
+                    "▼"
                 }
             }
         }

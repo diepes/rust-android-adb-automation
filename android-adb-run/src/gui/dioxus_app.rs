@@ -23,10 +23,37 @@ pub fn is_debug_mode() -> bool {
     *DEBUG_MODE.get().unwrap_or(&false)
 }
 
+fn ensure_gui_environment() -> Result<(), String> {
+    ensure_gui_environment_inner()
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_gui_environment_inner() -> Result<(), String> {
+    let has_display =
+        std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some();
+
+    if has_display {
+        Ok(())
+    } else {
+        Err("GUI launch requires an available X11/Wayland display on Linux".to_string())
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn ensure_gui_environment_inner() -> Result<(), String> {
+    Ok(())
+}
+
 pub fn run_gui(debug_mode: bool) {
     DEBUG_MODE
         .set(debug_mode)
         .expect("DEBUG_MODE should only be set once");
+
+    if let Err(message) = ensure_gui_environment() {
+        eprintln!("❌ {message}");
+        eprintln!("Hint: launch with --screenshot for CLI mode or set DISPLAY/WAYLAND_DISPLAY.");
+        return;
+    }
 
     use dioxus::desktop::{Config, WindowBuilder};
     let enable_borderless = false; // Use custom borderless window for better cross-platform control
