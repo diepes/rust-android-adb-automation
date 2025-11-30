@@ -92,18 +92,18 @@ pub fn screenshot_panel() -> Element {
             if screen_x == 0 || screen_y == 0 {
                 return (0.0, 0.0);
             }
-            let max_display_width = 400.0;
-            let max_display_height = 600.0;
+            let max_content_width = 400.0;
+            let max_content_height = 600.0;
             let border_px = 8.0;
             let image_aspect = screen_x as f32 / screen_y as f32;
-            let container_aspect = max_display_width / max_display_height;
-            let (outer_w, outer_h) = if image_aspect > container_aspect {
-                (max_display_width, max_display_width / image_aspect)
+            let container_aspect = max_content_width / max_content_height;
+            let (content_w, content_h) = if image_aspect > container_aspect {
+                (max_content_width, max_content_width / image_aspect)
             } else {
-                (max_display_height * image_aspect, max_display_height)
+                (max_content_height * image_aspect, max_content_height)
             };
-            let displayed_w = (outer_w - border_px * 2.0).max(1.0);
-            let displayed_h = (outer_h - border_px * 2.0).max(1.0);
+            let displayed_w = content_w.max(1.0);
+            let displayed_h = content_h.max(1.0);
             let scale_x = displayed_w / screen_x as f32;
             let scale_y = displayed_h / screen_y as f32;
             let px = device_x as f32 * scale_x + border_px;

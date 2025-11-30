@@ -82,7 +82,7 @@ impl GameAutomation {
         // Define timed taps with flexible intervals
         // Format: (id, x, y, interval_type, interval_value)
         let tap_definitions = vec![
-            ("claim_5d_tap", 110, 1300, "minutes", 2), // Every 2 minutes
+            ("claim_5d_tap", 120, 1250, "minutes", 2), // Every 2 minutes
             ("restart_tap", 110, 1600, "minutes", 9),  // Every 9 minutes
             ("claim_1d_tap", 350, 628, "seconds", 10), // Every 90 seconds (1.5 min)
                                                        // Add more taps here as needed with seconds or minutes

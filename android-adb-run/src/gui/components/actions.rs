@@ -1,6 +1,6 @@
 // gui/components/actions.rs
 use crate::game_automation::types::{
-    TimedEvent, TimedEventType, MAX_TAP_INTERVAL_SECONDS, MIN_TAP_INTERVAL_SECONDS,
+    MAX_TAP_INTERVAL_SECONDS, MIN_TAP_INTERVAL_SECONDS, TimedEvent, TimedEventType,
 };
 use crate::game_automation::{AutomationCommand, GameState};
 use crate::gui::dioxus_app::AppContext;

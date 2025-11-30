@@ -1,12 +1,12 @@
 use crate::adb::{AdbBackend, AdbClient};
 use crate::game_automation::types::TimedEvent;
 use crate::game_automation::{
-    create_automation_channels, AutomationCommand, AutomationEvent, GameAutomation, GameState,
+    AutomationCommand, AutomationEvent, GameAutomation, GameState, create_automation_channels,
 };
 use crate::gui::components::{
     actions::Actions,
     device_info::DeviceInfo,
-    screenshot_panel::{screenshot_panel, TapMarker},
+    screenshot_panel::{TapMarker, screenshot_panel},
 };
 use crate::gui::util::base64_encode;
 use dioxus::html::geometry::ElementPoint;
@@ -159,21 +159,20 @@ fn App() -> Element {
         screen_x: u32,
         screen_y: u32,
     ) -> (u32, u32) {
-        let max_display_width = 400.0;
-        let max_display_height = 600.0;
+        let max_content_width = 400.0;
+        let max_content_height = 600.0;
         let border_px = 8.0; // image border thickness
 
-        // Derive displayed image (content) size from aspect ratio constraints
+        // Derive displayed image (content) size from aspect ratio constraints (excludes border)
         let image_aspect = screen_x as f32 / screen_y as f32;
-        let container_aspect = max_display_width / max_display_height;
-        let (outer_w, outer_h) = if image_aspect > container_aspect {
-            (max_display_width, max_display_width / image_aspect)
+        let container_aspect = max_content_width / max_content_height;
+        let (content_w, content_h) = if image_aspect > container_aspect {
+            (max_content_width, max_content_width / image_aspect)
         } else {
-            (max_display_height * image_aspect, max_display_height)
+            (max_content_height * image_aspect, max_content_height)
         };
-        // Remove border from both sides
-        let displayed_w = (outer_w - border_px * 2.0).max(1.0);
-        let displayed_h = (outer_h - border_px * 2.0).max(1.0);
+        let displayed_w = content_w.max(1.0);
+        let displayed_h = content_h.max(1.0);
 
         // Adjust raw coordinates by border offset
         let raw_x = element_rect.x as f32 - border_px;
