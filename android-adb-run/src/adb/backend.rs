@@ -1,11 +1,21 @@
-// Simplified ADB backend - Pure Rust implementation only
-// The shell implementation has been removed as the pure Rust implementation is now stable and working well.
+// ADB backend - direct USB only (no daemon required)
+use super::types::AdbClient;
+use super::usb_impl::UsbAdb;
 
-use super::rust_impl::RustAdb;
+/// AdbBackend is now just a type alias for UsbAdb (direct USB connection)
+pub type AdbBackend = UsbAdb;
 
-/// AdbBackend is now just a type alias for RustAdb for backward compatibility
-/// This allows existing code to continue using AdbBackend without changes
-pub type AdbBackend = RustAdb;
+impl AdbBackend {
+    /// Connect to the first available USB device
+    pub async fn connect_first() -> Result<Self, String> {
+        let devices = Self::list_devices().await?;
+        let first = devices
+            .into_iter()
+            .next()
+            .ok_or_else(|| "No USB devices found".to_string())?;
+        Self::new_with_device(&first.name).await
+    }
+}
 
 // Re-export Backend alias for backward compatibility
 pub use AdbBackend as Backend;

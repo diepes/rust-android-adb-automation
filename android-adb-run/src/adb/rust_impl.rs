@@ -749,11 +749,113 @@ impl RustAdb {
             .ok_or_else(|| "No devices found".to_string())?;
         Self::new_with_device(&first.name).await
     }
+
+    /// Get ADB server connection, starting daemon if needed
+    async fn get_or_start_adb_server() -> Result<ADBServer, String> {
+        // Try to connect to existing daemon first with timeout
+        let test_future = tokio::task::spawn_blocking(|| {
+            let mut server = ADBServer::default();
+            server.devices().map(|_| ())
+        });
+
+        let test_result = match tokio::time::timeout(Duration::from_secs(2), test_future).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(e)) => return Err(format!("RustAdb: spawn_blocking error: {e}")),
+            Err(_) => return Err("RustAdb: daemon connection check timed out".to_string()),
+        };
+
+        match test_result {
+            Ok(_) => {
+                // Connection successful, daemon already running
+                return Ok(ADBServer::default());
+            }
+            Err(e) => {
+                // Check if it's a connection error
+                let err_str = e.to_string();
+                if err_str.contains("Connection refused") || err_str.contains("os error 111") {
+                    // Daemon not running, silently try to start it
+                    // (Don't spam warnings - backend handles overall connection messaging)
+                } else {
+                    // Some other error, return it
+                    return Err(format!("RustAdb: ADB server error: {e}"));
+                }
+            }
+        }
+
+        // Try to start the ADB daemon - try multiple common paths
+        let home_adb_path = format!("{}/Android/Sdk/platform-tools/adb", std::env::var("HOME").unwrap_or_default());
+        let adb_paths = vec![
+            "adb",  // Try PATH first
+            "/usr/lib/android-sdk/platform-tools/adb",
+            "/opt/android-sdk/platform-tools/adb",
+            "/usr/local/bin/adb",
+            &home_adb_path,
+        ];
+
+        let mut last_error = String::new();
+        let mut adb_started = false;
+
+        for adb_path in &adb_paths {
+            let start_result = tokio::process::Command::new(adb_path)
+                .arg("start-server")
+                .output()
+                .await;
+
+            match start_result {
+                Ok(output) => {
+                    if output.status.success() {
+                        if crate::gui::dioxus_app::is_debug_mode() {
+                            eprintln!("✅ ADB daemon started successfully using: {}", adb_path);
+                        }
+                        adb_started = true;
+                        break;
+                    } else {
+                        last_error = format!(
+                            "Failed to start ADB daemon with {}: {}",
+                            adb_path,
+                            String::from_utf8_lossy(&output.stderr)
+                        );
+                    }
+                }
+                Err(e) => {
+                    // Only log "not found" errors in debug mode to avoid spam
+                    if crate::gui::dioxus_app::is_debug_mode() && !e.to_string().contains("No such file") {
+                        eprintln!("Could not execute {}: {}", adb_path, e);
+                    }
+                    last_error = format!("Failed to find or execute adb: {}", e);
+                }
+            }
+        }
+
+        if !adb_started {
+            return Err(format!(
+                "Could not start ADB daemon. Last error: {}",
+                last_error
+            ));
+        }
+
+        // Wait a moment for daemon to initialize
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        // Try connecting again with timeout
+        let final_future = tokio::task::spawn_blocking(|| {
+            let mut server = ADBServer::default();
+            server.devices().map(|_| server)
+        });
+
+        let final_result = match tokio::time::timeout(Duration::from_secs(3), final_future).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(e)) => return Err(format!("RustAdb: spawn_blocking error after daemon start: {e}")),
+            Err(_) => return Err("RustAdb: daemon connection timed out after starting".to_string()),
+        };
+
+        final_result.map_err(|e| format!("RustAdb: Failed to connect to ADB daemon after starting it: {e}"))
+    }
 }
 
 impl AdbClient for RustAdb {
     async fn list_devices() -> Result<Vec<Device>, String> {
-        let mut server = ADBServer::default();
+        let mut server = Self::get_or_start_adb_server().await?;
         let result = tokio::task::spawn_blocking(move || server.devices())
             .await
             .map_err(|e| format!("RustAdb: join error: {e}"))?;
@@ -769,7 +871,7 @@ impl AdbClient for RustAdb {
     }
 
     async fn new_with_device(device_name: &str) -> Result<Self, String> {
-        let mut server = ADBServer::default();
+        let mut server = Self::get_or_start_adb_server().await?;
         // get_device_by_name or get_device depending on provided name
         let server_device = tokio::task::spawn_blocking({
             let name = device_name.to_string();

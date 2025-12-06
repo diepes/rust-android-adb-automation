@@ -11,8 +11,8 @@ use crate::gui::components::{
 use crate::gui::util::base64_encode;
 use dioxus::html::geometry::ElementPoint;
 use dioxus::prelude::*;
-use std::sync::OnceLock;
-use tokio::sync::mpsc;
+use std::sync::{Arc, OnceLock};
+use tokio::sync::{Mutex, mpsc};
 
 const APP_VERSION: &str = env!("APP_VERSION_DISPLAY");
 const BUILD_YEAR: &str = env!("APP_BUILD_YEAR");
@@ -118,6 +118,10 @@ fn App() -> Element {
     let auto_update_on_touch = use_signal(|| true);
     let select_box = use_signal(|| false);
     let mut is_loading_screenshot = use_signal(|| false);
+    // Single shared ADB connection (prevents USB protocol conflicts)
+    let mut shared_adb_client = use_signal(|| None::<Arc<Mutex<AdbBackend>>>);
+    // Force GUI update trigger
+    let mut force_update = use_signal(|| 0u32);
 
     // Game automation state
     let automation_state = use_signal(|| GameState::Idle);
@@ -229,30 +233,30 @@ fn App() -> Element {
                 let devices = match AdbBackend::list_devices().await {
                     Ok(devices) if !devices.is_empty() => devices,
                     Ok(_) => {
-                        // Countdown timer for retry (10 seconds)
-                        for seconds_remaining in (1..=10).rev() {
+                        // Countdown timer for retry (5 seconds - faster retry for USB devices)
+                        for seconds_remaining in (1..=5).rev() {
                             status.set(format!(
                                 "🔌 No Device Connected - Retrying in {}s...",
                                 seconds_remaining
                             ));
                             screenshot_status.set(format!(
-                                "⏳ Connect your device via USB... ({}/10)",
-                                11 - seconds_remaining
+                                "⏳ Connect your device via USB and authorize... ({}/5)",
+                                6 - seconds_remaining
                             ));
                             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                         }
                         continue; // Retry
                     }
                     Err(e) => {
-                        // Countdown timer for retry (10 seconds)
-                        for seconds_remaining in (1..=10).rev() {
+                        // Countdown timer for retry (5 seconds - faster retry)
+                        for seconds_remaining in (1..=5).rev() {
                             status.set(format!(
                                 "❌ Error: {} - Retrying in {}s...",
                                 e, seconds_remaining
                             ));
                             screenshot_status.set(format!(
-                                "⏳ Connect your device via USB... ({}/10)",
-                                11 - seconds_remaining
+                                "⏳ Connect your device via USB and authorize... ({}/5)",
+                                6 - seconds_remaining
                             ));
                             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                         }
@@ -271,94 +275,130 @@ fn App() -> Element {
                 // Step 3: Start connection process
                 status.set(format!("🔌 Connecting to {}...", first_device.name));
 
-                // Step 4: Connect to device in background, update GUI when ready
-                spawn({
-                    let device_name = first_device.name.clone();
-                    async move {
-                        match AdbBackend::new_with_device(&device_name).await {
-                            Ok(client) => {
-                                // Step 4: Connection successful, update device info immediately
-                                let (sx, sy) = client.screen_dimensions();
-                                device_info.set(Some((
-                                    client.device_name().to_string(),
-                                    client.transport_id(),
-                                    sx,
-                                    sy,
-                                )));
-                                status.set("✅ Connected".to_string());
+                // Step 4: Try to connect to device
+                let device_name = first_device.name.clone();
+                let debug_mode = *DEBUG_MODE.get().unwrap_or(&false);
+                if debug_mode {
+                    eprintln!("🔌 [GUI] Attempting to connect to device: {}", device_name);
+                }
+                match AdbBackend::new_with_device(&device_name).await {
+                    Ok(client) => {
+                        // Step 4: Connection successful, update device info immediately
+                        let (sx, sy) = client.screen_dimensions();
+                        if debug_mode {
+                            eprintln!("✅ [GUI] ADB connected successfully: {}x{}", sx, sy);
+                        }
+                        device_info.set(Some((
+                            client.device_name().to_string(),
+                            client.transport_id(),
+                            sx,
+                            sy,
+                        )));
+                        status.set("✅ Connected".to_string());
+                        // Force GUI to re-render by updating counter
+                        force_update.with_mut(|v| *v = v.wrapping_add(1));
+                        if debug_mode {
+                            eprintln!(
+                                "✅ [GUI] device_info and status signals updated, force_update triggered"
+                            );
+                        }
 
-                                // Step 5: Take initial screenshot in background, don't block UI
-                                spawn(async move {
-                                    is_loading_screenshot.set(true);
-                                    screenshot_status
-                                        .set("📸 Taking initial screenshot...".to_string());
-                                    let start = std::time::Instant::now();
+                        // Give Dioxus a moment to process signal updates
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-                                    match client.screen_capture_bytes().await {
-                                        Ok(bytes) => {
-                                            // Move heavy base64 encoding to background thread
-                                            let bytes_clone = bytes.clone();
-                                            let base64_result =
-                                                tokio::task::spawn_blocking(move || {
-                                                    base64_encode(&bytes_clone)
-                                                })
-                                                .await;
+                        // Store shared connection for both GUI and automation
+                        let shared_client = Arc::new(Mutex::new(client));
+                        shared_adb_client.set(Some(shared_client.clone()));
+                        if debug_mode {
+                            eprintln!("📦 [GUI] Shared ADB connection stored for automation");
+                        }
 
-                                            match base64_result {
-                                                Ok(base64_string) => {
-                                                    let duration_ms = start.elapsed().as_millis();
-                                                    let counter_val =
-                                                        screenshot_counter.with_mut(|c| {
-                                                            *c += 1;
-                                                            *c
-                                                        });
-                                                    screenshot_data.set(Some(base64_string));
-                                                    screenshot_bytes.set(Some(bytes));
-                                                    screenshot_status.set(format!(
-                                                        "✅ Initial screenshot #{} ({}ms)",
-                                                        counter_val, duration_ms
-                                                    ));
-                                                }
-                                                Err(_) => {
-                                                    screenshot_status.set(
-                                                        "❌ Failed to encode screenshot"
-                                                            .to_string(),
-                                                    );
-                                                }
+                        // Step 5: Take initial screenshot in background, don't block UI
+                        spawn(async move {
+                            if debug_mode {
+                                eprintln!("📸 [GUI] Starting initial screenshot capture...");
+                            }
+                            is_loading_screenshot.set(true);
+                            screenshot_status.set("📸 Taking initial screenshot...".to_string());
+
+                            // Give UI a moment to update
+                            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+                            let start = std::time::Instant::now();
+
+                            let client_lock = shared_client.lock().await;
+                            match client_lock.screen_capture_bytes().await {
+                                Ok(bytes) => {
+                                    // Move heavy base64 encoding to background thread
+                                    let bytes_clone = bytes.clone();
+                                    let base64_result = tokio::task::spawn_blocking(move || {
+                                        base64_encode(&bytes_clone)
+                                    })
+                                    .await;
+
+                                    match base64_result {
+                                        Ok(base64_string) => {
+                                            let duration_ms = start.elapsed().as_millis();
+                                            let counter_val = screenshot_counter.with_mut(|c| {
+                                                *c += 1;
+                                                *c
+                                            });
+                                            if debug_mode {
+                                                eprintln!(
+                                                    "✅ [GUI] Initial screenshot captured in {}ms",
+                                                    duration_ms
+                                                );
+                                                eprintln!(
+                                                    "✅ [GUI] GUI initialization complete - ready for use"
+                                                );
                                             }
-                                            is_loading_screenshot.set(false);
-                                        }
-                                        Err(e) => {
+                                            screenshot_data.set(Some(base64_string));
+                                            screenshot_bytes.set(Some(bytes));
                                             screenshot_status.set(format!(
-                                                "❌ Initial screenshot failed: {}",
-                                                e
+                                                "✅ Initial screenshot #{} ({}ms)",
+                                                counter_val, duration_ms
                                             ));
-                                            is_loading_screenshot.set(false);
+                                        }
+                                        Err(_) => {
+                                            screenshot_status
+                                                .set("❌ Failed to encode screenshot".to_string());
                                         }
                                     }
-                                });
-                            }
-                            Err(e) => {
-                                // Countdown timer for retry (10 seconds)
-                                for seconds_remaining in (1..=10).rev() {
-                                    status.set(format!(
-                                        "❌ Connection failed: {} - Retrying in {}s...",
-                                        e, seconds_remaining
-                                    ));
-                                    screenshot_status.set(format!(
-                                        "⏳ Waiting for device... ({}/10)",
-                                        11 - seconds_remaining
-                                    ));
-                                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                                    is_loading_screenshot.set(false);
                                 }
-                                // Continue to retry loop
+                                Err(e) => {
+                                    if debug_mode {
+                                        eprintln!("❌ [GUI] Screenshot capture failed: {}", e);
+                                    }
+                                    screenshot_status
+                                        .set(format!("❌ Initial screenshot failed: {}", e));
+                                    is_loading_screenshot.set(false);
+                                }
                             }
-                        }
-                    }
-                });
+                        });
 
-                // If we reach here, connection was successful - break the retry loop
-                break;
+                        // Connection successful - break the retry loop
+                        break;
+                    }
+                    Err(e) => {
+                        if debug_mode {
+                            eprintln!("❌ [GUI] Failed to connect to {}: {}", device_name, e);
+                        }
+                        // Countdown timer for retry (5 seconds for faster recovery after auth)
+                        for seconds_remaining in (1..=5).rev() {
+                            status.set(format!(
+                                "❌ Connection failed: {} - Retrying in {}s...",
+                                e, seconds_remaining
+                            ));
+                            screenshot_status.set(format!(
+                                "⏳ Waiting for USB authorization... ({}/5)",
+                                6 - seconds_remaining
+                            ));
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        }
+                        // Continue to retry loop - will try again
+                    }
+                }
             }
         });
     });
@@ -379,6 +419,7 @@ fn App() -> Element {
         let mut touch_timeout_remaining_clone = touch_timeout_remaining;
         let mut status_clone = status;
         let mut device_info_clone = device_info;
+        let shared_adb_client_clone = shared_adb_client;
 
         spawn(async move {
             // Create automation channels
@@ -390,27 +431,31 @@ fn App() -> Element {
             // Start automation task
             let mut automation = GameAutomation::new(cmd_rx, event_tx, debug_mode);
 
-            // Retry loop for automation ADB initialization
-            loop {
-                match automation.initialize_adb().await {
-                    Ok(_) => {
-                        if debug_mode {
-                            println!("✅ Automation ADB initialized successfully");
-                        }
-                        break; // Success - exit retry loop
+            // Wait for GUI to establish shared ADB connection
+            if debug_mode {
+                println!("⏳ Automation waiting for shared ADB connection...");
+            }
+            let shared_client = loop {
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+                // Check if shared ADB connection is available
+                if let Some(client) = shared_adb_client_clone.read().clone() {
+                    if debug_mode {
+                        println!(
+                            "✅ Using shared ADB connection for automation (no duplicate USB connection)"
+                        );
                     }
-                    Err(e) => {
-                        if debug_mode {
-                            println!(
-                                "❌ Failed to initialize automation ADB: {} - will retry...",
-                                e
-                            );
-                        }
-                        // Wait 10 seconds before retrying
-                        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-                        // Loop will retry
-                    }
+                    break client;
                 }
+            };
+
+            // Pass the shared connection to automation (no new USB connection created)
+            if let Err(e) = automation.set_shared_adb_client(shared_client).await {
+                if debug_mode {
+                    println!("❌ Failed to set shared automation ADB client: {}", e);
+                }
+            } else if debug_mode {
+                println!("✅ Automation initialized with shared connection");
             }
 
             // Spawn automation FSM loop
@@ -655,6 +700,7 @@ fn App() -> Element {
 
     // Prepare compact status display variables
     let current_status = status.read().clone();
+    let _update_trigger = force_update.read(); // Read to make this component reactive to force_update changes
     let status_label = if current_status.contains("Connected") {
         "Connected"
     } else if current_status.contains("Error") {

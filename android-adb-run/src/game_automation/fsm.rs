@@ -149,62 +149,77 @@ impl GameAutomation {
         }
     }
 
+    /// Accept a shared ADB client reference (prevents creating multiple USB connections)
+    pub async fn set_shared_adb_client(
+        &mut self,
+        shared_client: Arc<Mutex<AdbBackend>>,
+    ) -> Result<(), String> {
+        // Get screen dimensions from the shared client
+        let (screen_width, screen_height) = {
+            let client_guard = shared_client.lock().await;
+            client_guard.screen_dimensions()
+        };
+
+        // Update detector with actual screen dimensions
+        let mut config = create_default_config();
+        config.debug_enabled = self.debug_enabled;
+        self.game_detector = GameStateDetector::new(screen_width, screen_height, config);
+
+        // Load templates from current directory
+        match self.game_detector.load_templates(".") {
+            Ok(count) => {
+                debug_print!(
+                    self.debug_enabled,
+                    "✅ Loaded {} templates for game state detection",
+                    count
+                );
+                // Create template names for GUI notification
+                let template_names: Vec<String> =
+                    (0..count).map(|i| format!("template_{}", i)).collect();
+                let _ = self
+                    .event_tx
+                    .send(AutomationEvent::TemplatesUpdated(template_names))
+                    .await;
+            }
+            Err(e) => {
+                debug_print!(self.debug_enabled, "⚠️ Template loading warning: {}", e);
+            }
+        }
+
+        // Use the shared connection directly (no new Arc creation)
+        self.adb_client = Some(shared_client);
+
+        // Start touch monitoring for automatic pause/resume
+        if let Some(client_arc) = &self.adb_client {
+            let client_guard = client_arc.lock().await;
+            if let Err(e) = client_guard.start_touch_monitoring().await {
+                debug_print!(
+                    self.debug_enabled,
+                    "⚠️ Failed to start touch monitoring: {}",
+                    e
+                );
+            } else {
+                debug_print!(
+                    self.debug_enabled,
+                    "👆 Touch monitoring started (30s timeout)"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Accept an owned ADB client (creates new Arc - prefer set_shared_adb_client for USB)
+    pub async fn set_adb_client(&mut self, client: AdbBackend) -> Result<(), String> {
+        self.set_shared_adb_client(Arc::new(Mutex::new(client)))
+            .await
+    }
+
+    /// Legacy method - kept for backward compatibility (creates new connection)
     pub async fn initialize_adb(&mut self) -> Result<(), String> {
         match AdbBackend::connect_first().await {
             Ok(client) => {
-                let (screen_width, screen_height) = client.screen_dimensions();
-
-                // Update detector with actual screen dimensions
-                let mut config = create_default_config();
-                config.debug_enabled = self.debug_enabled;
-                self.game_detector = GameStateDetector::new(screen_width, screen_height, config);
-
-                // Load templates from current directory
-                match self.game_detector.load_templates(".") {
-                    Ok(count) => {
-                        debug_print!(
-                            self.debug_enabled,
-                            "✅ Loaded {} templates for game state detection",
-                            count
-                        );
-                        // Create template names for GUI notification
-                        let template_names: Vec<String> =
-                            (0..count).map(|i| format!("template_{}", i)).collect();
-                        let _ = self
-                            .event_tx
-                            .send(AutomationEvent::TemplatesUpdated(template_names))
-                            .await;
-                    }
-                    Err(e) => {
-                        debug_print!(self.debug_enabled, "⚠️ Template loading warning: {}", e);
-                    }
-                }
-
-                self.adb_client = Some(Arc::new(Mutex::new(client)));
-
-                // Start touch monitoring for automatic pause/resume
-                if let Some(client_arc) = &self.adb_client {
-                    let client_guard = client_arc.lock().await;
-                    if let Err(e) = client_guard.start_touch_monitoring().await {
-                        debug_print!(
-                            self.debug_enabled,
-                            "⚠️ Failed to start touch monitoring: {}",
-                            e
-                        );
-                    } else {
-                        debug_print!(
-                            self.debug_enabled,
-                            "👆 Touch monitoring started (30s timeout)"
-                        );
-                    }
-                }
-
-                debug_print!(
-                    self.debug_enabled,
-                    "🤖 Game automation initialized ({}x{})",
-                    screen_width,
-                    screen_height
-                );
+                self.set_adb_client(client).await?;
+                debug_print!(self.debug_enabled, "🤖 Game automation initialized");
                 Ok(())
             }
             Err(e) => {

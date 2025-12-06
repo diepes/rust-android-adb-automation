@@ -123,12 +123,15 @@ See [LICENSE](LICENSE) for full legal terms.
 
 ---
 
-### Why Dual License?
+### Why Comercial License?
 
 We believe in open source, but also need to sustain development. This model allows:
-- ✅ **Free use** for hobbyists and open-source projects
 - ✅ **Fair compensation** for commercial use
 - ✅ **Active development** and support from revenue
-- ✅ **Community contributions** from open-source users
 
-Similar to how MongoDB, GitLab, and Qt are licensed.
+
+### ADB
+
+ 7D:09:CA:9D:59:C5:75:EA:E6:69:EF:78:03:A5:EB:5C
+
+ 

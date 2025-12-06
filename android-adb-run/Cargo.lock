@@ -74,10 +74,11 @@ dependencies = [
 
 [[package]]
 name = "android-adb-run"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "adb_client",
  "dioxus",
+ "homedir",
  "image",
  "imageproc",
  "rcgen",

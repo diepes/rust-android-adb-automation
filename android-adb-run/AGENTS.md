@@ -2,18 +2,7 @@
 
 ## Goal
 
-* Creations of automation library in Rust, that used the installed adb android developer bridge to controll a android phone.
-
-## adb
-
-* after usb setup connection to phone from commandline with
-
-      adb connect oneplus6:5555
-
-* verify connection with 
-
-      adb devices
-
+* Mobile phone automation library, that uses rust adb_client module to connect to Android phone that is in debug mode over usb
 
 ## Coding guidance
 
