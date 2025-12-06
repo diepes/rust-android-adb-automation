@@ -42,47 +42,44 @@ impl UsbAdb {
     }
 
     async fn capture_screen_bytes_internal(&self) -> Result<Vec<u8>, String> {
-        // For devices with compressed framebuffer that screencap hangs on,
-        // we create a blank placeholder PNG with device info
-        if crate::gui::dioxus_app::is_debug_mode() {
-            eprintln!("📸 Creating placeholder screenshot (device has compressed framebuffer format)");
-        }
-        
-        // Create a simple placeholder PNG image
-        use image::{ImageBuffer, Rgba, codecs::png::PngEncoder};
-        use std::io::Cursor;
-        
-        // Create a small placeholder image (200x200) with device info text
-        let width = 400u32;
-        let height = 200u32;
-        
-        let img = ImageBuffer::from_fn(width, height, |x, y| {
-            // Create a dark background
-            if y < 50 || x < 10 || x >= width - 10 || y >= height - 10 {
-                Rgba([40u8, 44u8, 52u8, 255u8]) // Border
-            } else {
-                Rgba([30u8, 33u8, 39u8, 255u8]) // Background
+        let mut dev = self.usb_device.lock().await;
+
+        // Try the faster framebuffer_bytes() method first
+        match dev.framebuffer_bytes() {
+            Ok(framebuffer_data) => {
+                drop(dev); // Release the lock early
+                match self.framebuffer_to_png(framebuffer_data).await {
+                    Ok(png_data) => return Ok(png_data),
+                    Err(e) => {
+                        if crate::gui::dioxus_app::is_debug_mode() {
+                            eprintln!(
+                                "Framebuffer conversion failed: {}, falling back to screencap",
+                                e
+                            );
+                        }
+                        // Continue to fallback method below
+                    }
+                }
             }
-        });
-        
-        // Encode to PNG
-        let mut png_data = Vec::new();
-        let mut cursor = Cursor::new(&mut png_data);
-        let encoder = PngEncoder::new(&mut cursor);
-        
-        img.write_with_encoder(encoder)
-            .map_err(|e| format!("Failed to create placeholder PNG: {}", e))?;
-        
-        if crate::gui::dioxus_app::is_debug_mode() {
-            eprintln!("✅ Placeholder screenshot created: {} bytes", png_data.len());
-            eprintln!("💡 Device framebuffer uses compressed format not yet supported");
-            eprintln!("💡 Automation will work without screenshots. Image matching may not work.");
+            Err(e) => {
+                if crate::gui::dioxus_app::is_debug_mode() {
+                    eprintln!(
+                        "Framebuffer capture failed: {}, falling back to screencap",
+                        e
+                    );
+                }
+                // Continue to fallback method below
+            }
         }
-        
-        Ok(png_data)
+
+        // Fallback to shell screencap method
+        let mut dev = self.usb_device.lock().await;
+        let mut out: Vec<u8> = Vec::new();
+        dev.shell_command(&["screencap", "-p"], &mut out)
+            .map_err(|e| format!("UsbAdb: screencap fallback failed: {e}"))?;
+        Ok(out)
     }
     
-    #[allow(dead_code)]
     async fn framebuffer_to_png(&self, framebuffer_data: Vec<u8>) -> Result<Vec<u8>, String> {
         use image::{ImageBuffer, codecs::png::PngEncoder};
         use std::io::Cursor;
@@ -90,17 +87,58 @@ impl UsbAdb {
         let pixel_count = (self.screen_x * self.screen_y) as usize;
         let data_len = framebuffer_data.len();
 
+        // Print debug info to understand the framebuffer format (only when --debug flag is used)
         if crate::gui::dioxus_app::is_debug_mode() {
             eprintln!("DEBUG: Framebuffer analysis:");
-            eprintln!("  Total data length: {} bytes", data_len);
             eprintln!(
-                "  Screen resolution: {}x{} = {} pixels",
+                "  Screen dimensions: {}x{} = {} pixels",
                 self.screen_x, self.screen_y, pixel_count
             );
+            eprintln!("  Data length: {} bytes", data_len);
             eprintln!(
-                "  Bytes per pixel (raw): {:.2}",
+                "  Ratio: {:.2} bytes per pixel",
                 data_len as f64 / pixel_count as f64
             );
+        }
+
+        // Check if this might be compressed data or a different format
+        if data_len < pixel_count {
+            // Check if the data is already in PNG format
+            if framebuffer_data.len() >= 8 && &framebuffer_data[0..8] == b"\x89PNG\r\n\x1a\n" {
+                if crate::gui::dioxus_app::is_debug_mode() {
+                    eprintln!("DEBUG: Framebuffer data is already PNG format, returning as-is");
+                }
+                return Ok(framebuffer_data);
+            }
+
+            // Check if the data is in JPEG format
+            if framebuffer_data.len() >= 2
+                && framebuffer_data[0] == 0xFF
+                && framebuffer_data[1] == 0xD8
+            {
+                if crate::gui::dioxus_app::is_debug_mode() {
+                    eprintln!("DEBUG: Framebuffer data is JPEG format, converting to PNG");
+                }
+                return self.jpeg_to_png(framebuffer_data).await;
+            }
+
+            return Err(format!(
+                "Framebuffer data appears to be compressed or in unsupported format: {} bytes for {} pixels ({:.2} bytes/pixel)",
+                data_len,
+                pixel_count,
+                data_len as f64 / pixel_count as f64
+            ));
+        }
+
+        // Handle case where framebuffer data doesn't perfectly divide by pixel count
+        // This can happen when there's header information or padding
+        if data_len < pixel_count * 2 {
+            return Err(format!(
+                "Framebuffer data too small for raw format: {} bytes for {} pixels (minimum {} bytes for RGB565)",
+                data_len,
+                pixel_count,
+                pixel_count * 2
+            ));
         }
 
         // Try different header sizes - some devices have variable headers
@@ -234,6 +272,24 @@ impl UsbAdb {
         };
 
         Ok(png_data)
+    }
+
+    async fn jpeg_to_png(&self, jpeg_data: Vec<u8>) -> Result<Vec<u8>, String> {
+        use image::{ImageFormat, codecs::png::PngEncoder};
+        use std::io::Cursor;
+
+        // Decode JPEG
+        let img = image::load_from_memory_with_format(&jpeg_data, ImageFormat::Jpeg)
+            .map_err(|e| format!("Failed to decode JPEG: {e}"))?;
+
+        // Encode as PNG
+        let mut data = Vec::new();
+        let mut cursor = Cursor::new(&mut data);
+        let encoder = PngEncoder::new(&mut cursor);
+        img.write_with_encoder(encoder)
+            .map_err(|e| format!("Failed to encode JPEG as PNG: {e}"))?;
+
+        Ok(data)
     }
 }
 

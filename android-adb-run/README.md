@@ -4,75 +4,163 @@ Rust library, CLI, and Dioxus desktop GUI for automating Android devices. Suppor
 
 ## Implementations
 
-Two ADB backends behind the `AdbClient` trait:
+**USB Direct ADB Backend** (default): Pure Rust via `adb_client` crate with direct USB connection. No ADB daemon required.
 
-- `rust` (default): Pure Rust via `adb_client` crate. Does not invoke external `adb`.
-- `shell`: Uses external `adb` binary (must be in PATH). Provides transport_id field.
+Key features:
+- Direct USB communication using `ADBUSBDevice`
+- Persistent ADB key support (~/.android/adbkey)
+- Automatic retry logic for connection handshake errors
+- Authentication validation before proceeding
+- Smart framebuffer handling:
+  - Detects PNG/JPEG formats automatically
+  - Supports RGB565, RGB, RGBA raw formats
+  - Falls back to screencap when needed
 
 Select backend via CLI flag or environment variable:
 ```bash
-./android-adb-run --screenshot --impl=rust   # default
-./android-adb-run --screenshot --impl=shell
-ADB_IMPL=shell ./android-adb-run --gui       # force shell in GUI
+./android-adb-run --screenshot              # default USB direct
+./android-adb-run --screenshot --impl=usb
+ADB_IMPL=usb ./android-adb-run --gui        # explicit USB in GUI
 ```
-If unset, GUI inherits value set by `main.rs` (defaults to `rust`).
+If unset, GUI defaults to USB direct implementation.
 
 ## Features
 
-- Device discovery
-- Screen size detection
-- PNG screen capture (in‑memory bytes)
-- Tap & swipe input
-- GUI: live screenshot, tap markers (centered), selection rectangle, swipe vs tap detection
-- Auto-update screenshot after interactions (toggle)
-- Modular Dioxus components (`src/gui/components/`)
-- Enum based backend dispatch (`AdbBackend`)
+- **Device Discovery**: Direct USB device detection with retry logic
+- **Persistent Authentication**: Uses ~/.android/adbkey for seamless connections
+- **Screen Capture**: Smart framebuffer handling
+  - Auto-detects PNG/JPEG formats returned by device
+  - Converts RGB565/RGB/RGBA raw formats to PNG
+  - Falls back to screencap command when needed
+- **Input Control**: Tap & swipe with precise coordinates
+- **GUI Features**:
+  - Live screenshot display
+  - Tap markers (centered circles)
+  - Selection rectangle for region capture
+  - Swipe vs tap detection (>=10px threshold)
+  - Auto-refresh toggle
+- **Touch Monitoring**: Pauses automation on human interaction
+- **Modular Architecture**: Dioxus components in `src/gui/components/`
 
 ## Project Layout
 
 ```
 android-adb-run/
   src/
-    adb.rs          # AdbClient trait + Device definition (re-export shell impl as Adb)
-    adb_shell.rs    # Shell implementation (external adb)
-    adb_rust.rs     # Pure Rust implementation using adb_client
-    adb_backend.rs  # Enum AdbBackend for runtime selection
-    gui/            # Dioxus GUI components
-    main.rs         # CLI / entrypoint (parses --impl)
+    adb/
+      mod.rs          # Module exports and AdbClient trait
+      types.rs        # Device, AdbClient trait, TouchActivityMonitor
+      usb_impl.rs     # Direct USB implementation (ADBUSBDevice) - active backend
+      backend.rs      # Type alias for UsbAdb
+      selector.rs     # Backend selection logic
+    gui/              # Dioxus GUI components
+      dioxus_app.rs   # Main GUI application
+      components/     # Modular UI components
+    game_automation/  # FSM and image matching
+    main.rs           # CLI entrypoint
+  examples/
+    test_adb_connection.rs      # Connection diagnostics
+    test_adb_image_capture.rs   # Screenshot format testing
 ```
 
 ## Building
 
 ```bash
-cargo build
+cargo build --release
 ```
 
 Run GUI:
 ```bash
-./target/debug/android-adb-run --gui
+./target/release/android-adb-run --gui
+# Or with debug output:
+./target/release/android-adb-run --gui --debug
 ```
-Or simply run without flags for GUI (default mode).
 
 Take screenshot (saved as `cli-screenshot.png`):
 ```bash
-./target/debug/android-adb-run --screenshot
+./target/release/android-adb-run --screenshot
 ```
 
-Explicit shell backend:
+## Testing & Diagnostics
+
+Two test examples are provided for troubleshooting:
+
+### Test ADB Connection
 ```bash
-./target/debug/android-adb-run --screenshot --impl=shell
+cargo run --example test_adb_connection
+```
+Tests:
+- ADB key existence
+- USB device detection
+- Connection with retry logic
+- Authentication validation
+- Screenshot capture with timeout
+
+### Test Image Capture Methods
+```bash
+cargo run --example test_adb_image_capture
+```
+Tests:
+- Framebuffer format detection (PNG/JPEG/RAW)
+- Format conversion (RGB565/RGB/RGBA to PNG)
+- Screencap PNG method
+- Screencap JPEG method
+- Saves test files for manual inspection
+
+Output includes detailed diagnostics about bytes per pixel, format detection, and timing information.
+
+## Prerequisites
+
+### ADB Key Setup
+The USB implementation requires a persistent ADB key for authentication:
+
+```bash
+# Generate ADB key (run once)
+adb devices
+
+# This creates ~/.android/adbkey and ~/.android/adbkey.pub
 ```
 
-## Backend Notes
+### Linux USB Permissions
+Add udev rule for your device (example for OnePlus):
 
-- Rust backend obtains devices and executes shell commands internally (screencap, wm size, input) via `ADBServerDevice.shell_command`.
-- Shell backend validates external `adb` availability (`ensure_adb_available`) and surfaces friendly errors.
-
-## Conditional Prerequisite
-
-Only for `--impl=shell`:
 ```bash
-sudo apt install adb  # or add platform-tools to PATH
+# Find your device's USB vendor ID
+lsusb | grep -i android
+
+# Create udev rule (replace 2a70 with your vendor ID)
+echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="2a70", MODE="0666", GROUP="plugdev"' | \
+  sudo tee /etc/udev/rules.d/51-android.rules
+
+# Reload udev rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+
+# Reconnect device
+```
+
+### First Connection
+On first connection, you'll see "Allow USB debugging?" popup on device:
+- Check "Always allow from this computer"
+- Tap "Allow" within 10 seconds
+- Connection will retry automatically if needed
+
+## Screenshot Implementation Details
+
+The framebuffer capture has been optimized to handle various device formats:
+
+1. **Format Detection**: Checks for PNG/JPEG magic bytes first
+2. **Raw Conversion**: Handles RGB565 (2 bpp), RGB (3 bpp), RGBA (4 bpp)
+3. **Header Handling**: Tries different header sizes (0, 12, 16, 20, 24 bytes)
+4. **Screencap Fallback**: Falls back to `screencap -p` if framebuffer fails
+
+Debug output (with `--debug` flag) shows format analysis:
+```
+DEBUG: Framebuffer analysis:
+  Screen dimensions: 1080x2280 = 2462400 pixels
+  Data length: 9854054 bytes
+  Ratio: 4.00 bytes per pixel
+  Detected format: 4 bytes per pixel (RGBA)
 ```
 
 ## GUI Highlights
