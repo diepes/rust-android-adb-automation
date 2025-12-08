@@ -3,10 +3,12 @@
 // using direct USB connection (no daemon required).
 
 pub mod backend;
+pub mod error;
 pub mod types;
 pub mod usb_impl;
 
 // Re-export the main types and functions for easy access
 pub use backend::AdbBackend;
+pub use error::{AdbError, AdbResult};
 pub use types::{AdbClient, Device, ImageCapture};
 pub use usb_impl::UsbAdb;

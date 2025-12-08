@@ -1,8 +1,11 @@
 use android_adb_run::adb::AdbClient;
-use android_adb_run::gui::dioxus_app::run_gui; // updated after rename
+use android_adb_run::gui::dioxus_app::run_gui;
 use std::env;
 
 fn main() {
+    // Initialize the logger
+    env_logger::init();
+
     let args: Vec<String> = env::args().collect();
 
     // Defaults
@@ -15,7 +18,7 @@ fn main() {
             print_help();
             return;
         } else if arg == "--version" || arg == "-v" {
-            println!("Android ADB Run v{}", env!("APP_VERSION_DISPLAY"));
+            println!("Android ADB Run v{}", env!("CARGO_PKG_VERSION"));
             return;
         } else if arg == "--debug" {
             debug_mode = true;
@@ -24,7 +27,7 @@ fn main() {
         } else if arg == "--screenshot" || arg == "-s" {
             mode = Some("screenshot");
         } else {
-            println!("❌ Unknown argument: {}", arg);
+            eprintln!("❌ Unknown argument: {}", arg);
             print_help();
             return;
         }
@@ -44,24 +47,26 @@ fn main() {
                                 println!("📱 Device: {} size: {}x{}", client.device_name(), sx, sy);
                                 match client.screen_capture().await {
                                     Ok(cap) => {
-                                        if let Err(e) = tokio::fs::write("cli-screenshot.png", &cap.bytes).await {
-                                            println!("❌ Write failed: {e}");
+                                        if let Err(e) =
+                                            tokio::fs::write("cli-screenshot.png", &cap.bytes)
+                                                .await
+                                        {
+                                            eprintln!("❌ Write failed: {e}");
                                         } else {
                                             println!(
                                                 "✅ Screenshot #{} ({}ms) saved to cli-screenshot.png",
-                                                cap.index,
-                                                cap.duration_ms
+                                                cap.index, cap.duration_ms
                                             );
                                         }
                                     }
-                                    Err(e) => println!("❌ Screenshot failed: {e}"),
+                                    Err(e) => eprintln!("❌ Screenshot failed: {e}"),
                                 }
                             }
-                            Err(e) => println!("❌ Open device error: {e}"),
+                            Err(e) => eprintln!("❌ Open device error: {e}"),
                         }
                     }
-                    Ok(_) => println!("❌ No devices found"),
-                    Err(e) => println!("❌ List error: {e}"),
+                    Ok(_) => eprintln!("❌ No devices found"),
+                    Err(e) => eprintln!("❌ List error: {e}"),
                 }
             });
         }

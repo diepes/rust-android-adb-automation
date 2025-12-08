@@ -1,0 +1,63 @@
+# Use the official lightweight Rust image
+FROM rust:1.91-slim-trixie
+
+# Avoid stuck builds because of interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install basic tools + node.js (required for the gemini CLI)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    git \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    sudo \
+    && curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install the official Google Gemini CLI (gemini)
+# See: https://github.com/google-gemini/gemini-cli
+RUN npm install -g @google/gemini-cli
+
+# Optional: make it easier to use (some people prefer gemini instead of google-gemini)
+RUN ln -s /usr/bin/google-gemini /usr/local/bin/gemini 2>/dev/null || true
+
+# Install rust app dev dependencies
+RUN apt-get update \
+    && apt-get install -y \
+            libgtk-3-dev\
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            pkg-config \
+            libxdo-dev
+
+# Set up a non-root user (highly recommended for dev containers)
+ARG USERNAME=dev
+ARG USER_UID=1000
+ARG USER_GID=$USER_UID
+
+RUN groupadd --gid $USER_GID $USERNAME \
+    && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME \
+    && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME \
+    && chmod 0440 /etc/sudoers.d/$USERNAME
+
+# Switch to the non-root user
+USER $USERNAME
+
+# Default working directory where you'll mount your code
+WORKDIR /workspace
+
+# Pre-install some useful cargo tools (optional but nice)
+RUN cargo install cargo-watch cargo-edit cargo-expand cargo-nextest
+
+# Tell gemini to store its config inside the container (or you can mount ~/.gemini too)
+ENV GEMINI_CONFIG_DIR=/workspace/.gemini
+
+# Default command: open a shell
+ENTRYPOINT ["bash", "-c"]
+CMD ["gemini"]

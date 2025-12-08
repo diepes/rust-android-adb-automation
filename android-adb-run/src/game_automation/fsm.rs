@@ -578,7 +578,7 @@ impl GameAutomation {
                                             e
                                         );
                                         // Check if this is a disconnect error
-                                        if is_disconnect_error(&e) {
+                                        if is_disconnect_error(&e.to_string()) {
                                             debug_print!(
                                                 self.debug_enabled,
                                                 "🔌 Device disconnect detected during manual tap trigger: {}",
@@ -792,7 +792,7 @@ impl GameAutomation {
                 );
 
                 // Check if this is a disconnect error
-                if is_disconnect_error(&e) {
+                if is_disconnect_error(&e.to_string()) {
                     debug_print!(
                         self.debug_enabled,
                         "🔌 Device disconnect detected during timed event: {}",
@@ -987,7 +987,7 @@ impl GameAutomation {
 
             // Load templates (this is also potentially blocking)
             if let Err(e) = temp_detector.load_templates(".") {
-                return Err(format!("Failed to load templates: {}", e));
+                return Err(format!("Failed to load templates: {}", e.to_string()));
             }
 
             // Perform the analysis
@@ -1233,7 +1233,7 @@ impl GameAutomation {
             }
             Err(e) => {
                 debug_print!(self.debug_enabled, "❌ Reconnection failed: {}", e);
-                Err(e)
+                Err(e.to_string())
             }
         }
     }

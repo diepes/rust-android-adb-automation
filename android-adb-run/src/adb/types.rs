@@ -1,3 +1,5 @@
+use super::error::AdbResult;
+
 // Core ADB types and traits
 use serde::Serialize;
 use std::sync::Arc;
@@ -77,18 +79,18 @@ pub type TouchActivityMonitor = Arc<RwLock<TouchActivityState>>;
 // Trait defining ADB capabilities (shell or rust implementations)
 #[allow(async_fn_in_trait)]
 pub trait AdbClient: Send + Sync {
-    async fn list_devices() -> Result<Vec<Device>, String>
+    async fn list_devices() -> AdbResult<Vec<Device>>
     where
         Self: Sized;
-    async fn new_with_device(device_name: &str) -> Result<Self, String>
+    async fn new_with_device(device_name: &str) -> AdbResult<Self>
     where
         Self: Sized;
 
     // Raw backend-specific capture (implemented per backend)
-    async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String>;
+    async fn screen_capture_bytes(&self) -> AdbResult<Vec<u8>>;
 
     // Default high-level capture with timing (index now managed by GUI)
-    async fn screen_capture(&self) -> Result<ImageCapture, String> {
+    async fn screen_capture(&self) -> AdbResult<ImageCapture> {
         let start = std::time::Instant::now();
         let bytes = self.screen_capture_bytes().await?;
         let dur = start.elapsed().as_millis();
@@ -99,7 +101,7 @@ pub trait AdbClient: Send + Sync {
         })
     }
 
-    async fn tap(&self, x: u32, y: u32) -> Result<(), String>;
+    async fn tap(&self, x: u32, y: u32) -> AdbResult<()>;
     async fn swipe(
         &self,
         x1: u32,
@@ -107,16 +109,16 @@ pub trait AdbClient: Send + Sync {
         x2: u32,
         y2: u32,
         duration: Option<u32>,
-    ) -> Result<(), String>;
-    async fn get_device_ip(&self) -> Result<String, String>;
+    ) -> AdbResult<()>;
+    async fn get_device_ip(&self) -> AdbResult<String>;
 
     // Touch activity monitoring methods
     async fn is_human_touching(&self) -> bool;
     async fn get_touch_timeout_remaining(&self) -> Option<u64>;
-    async fn clear_touch_activity(&self) -> Result<(), String>;
-    async fn register_touch_activity(&self) -> Result<(), String>; // NEW: Marks touch to pause automation
-    async fn start_touch_monitoring(&self) -> Result<(), String>;
-    async fn stop_touch_monitoring(&self) -> Result<(), String>;
+    async fn clear_touch_activity(&self) -> AdbResult<()>;
+    async fn register_touch_activity(&self) -> AdbResult<()>; // NEW: Marks touch to pause automation
+    async fn start_touch_monitoring(&self) -> AdbResult<()>;
+    async fn stop_touch_monitoring(&self) -> AdbResult<()>;
 
     fn screen_dimensions(&self) -> (u32, u32);
     fn device_name(&self) -> &str;

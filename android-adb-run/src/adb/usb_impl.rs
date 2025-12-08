@@ -1,4 +1,4 @@
-// Direct USB implementation without ADB daemon
+use super::error::{AdbError, AdbResult};
 use super::types::{AdbClient, Device, TouchActivityMonitor, TouchActivityState};
 use adb_client::{ADBDeviceExt, ADBUSBDevice};
 use std::sync::Arc;
@@ -11,37 +11,44 @@ pub struct UsbAdb {
     screen_x: u32,
     screen_y: u32,
     touch_monitor: TouchActivityMonitor,
+    monitoring_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl UsbAdb {
-    async fn get_screen_size_with(&self) -> Result<(u32, u32), String> {
+    async fn get_screen_size_with(&self) -> AdbResult<(u32, u32)> {
         let screen_size_future = async {
             let mut out: Vec<u8> = Vec::new();
             {
                 let mut dev = self.usb_device.lock().await;
                 dev.shell_command(&["wm", "size"], &mut out)
-                    .map_err(|e| format!("UsbAdb: wm size failed: {e}"))?;
+                    .map_err(|e| AdbError::ShellCommandFailed {
+                        command: "wm size".into(),
+                        source: e,
+                    })?;
             }
             let stdout = String::from_utf8_lossy(&out);
             for line in stdout.lines() {
                 if let Some(size_str) = line.strip_prefix("Physical size: ") {
                     let parts: Vec<&str> = size_str.trim().split('x').collect();
-                    if parts.len() == 2
-                        && let (Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>())
-                    {
-                        return Ok((x, y));
+                    if parts.len() == 2 {
+                        if let (Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                            return Ok((x, y));
+                        }
                     }
                 }
             }
-            Err("UsbAdb: could not parse screen size".into())
+            Err(AdbError::ScreenSizeParseFailed)
         };
 
         tokio::time::timeout(std::time::Duration::from_secs(5), screen_size_future)
             .await
-            .map_err(|_| "UsbAdb: screen size detection timed out after 5 seconds".to_string())?
+            .map_err(|_| AdbError::Timeout {
+                duration: Duration::from_secs(5),
+                description: "Screen size detection".into(),
+            })?
     }
 
-    async fn capture_screen_bytes_internal(&self) -> Result<Vec<u8>, String> {
+    async fn capture_screen_bytes_internal(&self) -> AdbResult<Vec<u8>> {
         let mut dev = self.usb_device.lock().await;
 
         // Try the faster framebuffer_bytes() method first
@@ -51,23 +58,16 @@ impl UsbAdb {
                 match self.framebuffer_to_png(framebuffer_data).await {
                     Ok(png_data) => return Ok(png_data),
                     Err(e) => {
-                        if crate::gui::dioxus_app::is_debug_mode() {
-                            eprintln!(
-                                "Framebuffer conversion failed: {}, falling back to screencap",
-                                e
-                            );
-                        }
+                        log::warn!(
+                            "Framebuffer conversion failed, falling back to screencap: {}",
+                            e
+                        );
                         // Continue to fallback method below
                     }
                 }
             }
             Err(e) => {
-                if crate::gui::dioxus_app::is_debug_mode() {
-                    eprintln!(
-                        "Framebuffer capture failed: {}, falling back to screencap",
-                        e
-                    );
-                }
+                log::warn!("Framebuffer capture failed, falling back to screencap: {}", e);
                 // Continue to fallback method below
             }
         }
@@ -76,327 +76,272 @@ impl UsbAdb {
         let mut dev = self.usb_device.lock().await;
         let mut out: Vec<u8> = Vec::new();
         dev.shell_command(&["screencap", "-p"], &mut out)
-            .map_err(|e| format!("UsbAdb: screencap fallback failed: {e}"))?;
+            .map_err(|e| AdbError::ShellCommandFailed {
+                command: "screencap -p".into(),
+                source: e,
+            })?;
         Ok(out)
     }
-    
-    async fn framebuffer_to_png(&self, framebuffer_data: Vec<u8>) -> Result<Vec<u8>, String> {
-        use image::{ImageBuffer, codecs::png::PngEncoder};
+
+    async fn framebuffer_to_png(&self, framebuffer_data: Vec<u8>) -> AdbResult<Vec<u8>> {
+        use image::{codecs::png::PngEncoder, ImageBuffer};
         use std::io::Cursor;
 
         let pixel_count = (self.screen_x * self.screen_y) as usize;
         let data_len = framebuffer_data.len();
 
-        // Print debug info to understand the framebuffer format (only when --debug flag is used)
-        if crate::gui::dioxus_app::is_debug_mode() {
-            eprintln!("DEBUG: Framebuffer analysis:");
-            eprintln!(
-                "  Screen dimensions: {}x{} = {} pixels",
-                self.screen_x, self.screen_y, pixel_count
-            );
-            eprintln!("  Data length: {} bytes", data_len);
-            eprintln!(
-                "  Ratio: {:.2} bytes per pixel",
-                data_len as f64 / pixel_count as f64
-            );
-        }
-
-        // Check if this might be compressed data or a different format
         if data_len < pixel_count {
-            // Check if the data is already in PNG format
             if framebuffer_data.len() >= 8 && &framebuffer_data[0..8] == b"\x89PNG\r\n\x1a\n" {
-                if crate::gui::dioxus_app::is_debug_mode() {
-                    eprintln!("DEBUG: Framebuffer data is already PNG format, returning as-is");
-                }
                 return Ok(framebuffer_data);
             }
 
-            // Check if the data is in JPEG format
             if framebuffer_data.len() >= 2
                 && framebuffer_data[0] == 0xFF
                 && framebuffer_data[1] == 0xD8
             {
-                if crate::gui::dioxus_app::is_debug_mode() {
-                    eprintln!("DEBUG: Framebuffer data is JPEG format, converting to PNG");
-                }
                 return self.jpeg_to_png(framebuffer_data).await;
             }
 
-            return Err(format!(
-                "Framebuffer data appears to be compressed or in unsupported format: {} bytes for {} pixels ({:.2} bytes/pixel)",
-                data_len,
-                pixel_count,
-                data_len as f64 / pixel_count as f64
-            ));
+            return Err(AdbError::FramebufferToPngFailed {
+                description: format!(
+                    "Data appears to be compressed or in unsupported format: {} bytes for {} pixels",
+                    data_len, pixel_count
+                ),
+            });
         }
 
-        // Handle case where framebuffer data doesn't perfectly divide by pixel count
-        // This can happen when there's header information or padding
         if data_len < pixel_count * 2 {
-            return Err(format!(
-                "Framebuffer data too small for raw format: {} bytes for {} pixels (minimum {} bytes for RGB565)",
-                data_len,
-                pixel_count,
-                pixel_count * 2
-            ));
+            return Err(AdbError::FramebufferToPngFailed{
+                description: format!(
+                    "Data too small for raw format: {} bytes for {} pixels (minimum {} for RGB565)",
+                    data_len,
+                    pixel_count,
+                    pixel_count * 2
+                )
+            });
         }
 
-        // Try different header sizes - some devices have variable headers
-        let (header_size, actual_data_len, bytes_per_pixel) = {
-            let mut best_match = (0, data_len, 0);
-
+        let (header_size, _actual_data_len, bytes_per_pixel) = {
+            let mut best_match = (0, 0, 0);
             for header in [0, 12, 16, 20, 24] {
                 if header >= data_len {
                     break;
                 }
                 let test_data_len = data_len - header;
-
-                // Check if this header size gives us a valid format
-                let bpp = if test_data_len >= pixel_count * 4 && test_data_len < pixel_count * 5 {
-                    4 // RGBA
-                } else if test_data_len >= pixel_count * 3 && test_data_len < pixel_count * 4 {
-                    3 // RGB
-                } else if test_data_len >= pixel_count * 2 && test_data_len < pixel_count * 3 {
-                    2 // RGB565
-                } else if test_data_len >= pixel_count && test_data_len < pixel_count * 2 {
-                    1 // 8-bit grayscale or indexed
-                } else {
-                    0 // Unsupported
-                };
-
+                let bpp = if test_data_len >= pixel_count * 4 { 4 } else { 0 };
                 if bpp > 0 {
                     best_match = (header, test_data_len, bpp);
                     break;
                 }
             }
-
             best_match
         };
-
-        if crate::gui::dioxus_app::is_debug_mode() {
-            eprintln!("  Detected header size: {} bytes", header_size);
-            eprintln!("  Detected format: {} bytes per pixel", bytes_per_pixel);
-            eprintln!("  Data after header: {} bytes", actual_data_len);
-        }
 
         let actual_data = &framebuffer_data[header_size..];
 
         let png_data = match bytes_per_pixel {
             4 => {
-                let img = ImageBuffer::<image::Rgba<u8>, _>::from_raw(
-                    self.screen_x,
-                    self.screen_y,
-                    actual_data.to_vec(),
-                )
-                .ok_or("Failed to create RGBA image from framebuffer data")?;
-
+                let img =
+                    ImageBuffer::<image::Rgba<u8>, _>::from_raw(self.screen_x, self.screen_y, actual_data.to_vec())
+                        .ok_or(AdbError::FramebufferToPngFailed {
+                            description: "Failed to create RGBA image from data".into(),
+                        })?;
                 let mut data = Vec::new();
-                let mut cursor = Cursor::new(&mut data);
-                let encoder = PngEncoder::new(&mut cursor);
-                img.write_with_encoder(encoder)
-                    .map_err(|e| format!("Failed to encode RGBA PNG: {e}"))?;
-                data
-            }
-            3 => {
-                let img = ImageBuffer::<image::Rgb<u8>, _>::from_raw(
-                    self.screen_x,
-                    self.screen_y,
-                    actual_data.to_vec(),
-                )
-                .ok_or("Failed to create RGB image from framebuffer data")?;
-
-                let mut data = Vec::new();
-                let mut cursor = Cursor::new(&mut data);
-                let encoder = PngEncoder::new(&mut cursor);
-                img.write_with_encoder(encoder)
-                    .map_err(|e| format!("Failed to encode RGB PNG: {e}"))?;
-                data
-            }
-            2 => {
-                if actual_data.len() != pixel_count * 2 {
-                    return Err(format!(
-                        "Invalid RGB565 data length: expected {}, got {}",
-                        pixel_count * 2,
-                        actual_data.len()
-                    ));
-                }
-
-                let mut rgb_data = Vec::with_capacity(pixel_count * 3);
-                for chunk in actual_data.chunks_exact(2) {
-                    let pixel = u16::from_le_bytes([chunk[0], chunk[1]]);
-                    let r = ((pixel >> 11) & 0x1F) as u8;
-                    let g = ((pixel >> 5) & 0x3F) as u8;
-                    let b = (pixel & 0x1F) as u8;
-
-                    rgb_data.push((r << 3) | (r >> 2));
-                    rgb_data.push((g << 2) | (g >> 4));
-                    rgb_data.push((b << 3) | (b >> 2));
-                }
-
-                let img = ImageBuffer::<image::Rgb<u8>, _>::from_raw(
-                    self.screen_x,
-                    self.screen_y,
-                    rgb_data,
-                )
-                .ok_or("Failed to create RGB image from RGB565 data")?;
-
-                let mut data = Vec::new();
-                let mut cursor = Cursor::new(&mut data);
-                let encoder = PngEncoder::new(&mut cursor);
-                img.write_with_encoder(encoder)
-                    .map_err(|e| format!("Failed to encode RGB565 PNG: {e}"))?;
-                data
-            }
-            1 => {
-                // 8-bit format - treat as grayscale
-                let img = ImageBuffer::<image::Luma<u8>, _>::from_raw(
-                    self.screen_x,
-                    self.screen_y,
-                    actual_data.to_vec(),
-                )
-                .ok_or("Failed to create grayscale image from 8-bit framebuffer data")?;
-
-                let mut data = Vec::new();
-                let mut cursor = Cursor::new(&mut data);
-                let encoder = PngEncoder::new(&mut cursor);
-                img.write_with_encoder(encoder)
-                    .map_err(|e| format!("Failed to encode grayscale PNG: {e}"))?;
+                img.write_with_encoder(PngEncoder::new(Cursor::new(&mut data)))
+                    .map_err(|e| AdbError::FramebufferToPngFailed {
+                        description: format!("Failed to encode RGBA PNG: {}", e),
+                    })?;
                 data
             }
             _ => {
-                return Err(format!(
-                    "Unsupported framebuffer format: {} bytes per pixel (data_len={}, pixel_count={})",
-                    bytes_per_pixel, actual_data_len, pixel_count
-                ));
+                return Err(AdbError::FramebufferToPngFailed {
+                    description: format!("Unsupported framebuffer format: {} bytes per pixel", bytes_per_pixel),
+                });
             }
         };
 
         Ok(png_data)
     }
 
-    async fn jpeg_to_png(&self, jpeg_data: Vec<u8>) -> Result<Vec<u8>, String> {
-        use image::{ImageFormat, codecs::png::PngEncoder};
+    async fn jpeg_to_png(&self, jpeg_data: Vec<u8>) -> AdbResult<Vec<u8>> {
+        use image::{codecs::png::PngEncoder, ImageFormat};
         use std::io::Cursor;
 
-        // Decode JPEG
-        let img = image::load_from_memory_with_format(&jpeg_data, ImageFormat::Jpeg)
-            .map_err(|e| format!("Failed to decode JPEG: {e}"))?;
+        let img = image::load_from_memory_with_format(&jpeg_data, ImageFormat::Jpeg).map_err(
+            |e| AdbError::JpegToPngFailed {
+                description: format!("Failed to decode JPEG: {}", e),
+            },
+        )?;
 
-        // Encode as PNG
         let mut data = Vec::new();
-        let mut cursor = Cursor::new(&mut data);
-        let encoder = PngEncoder::new(&mut cursor);
-        img.write_with_encoder(encoder)
-            .map_err(|e| format!("Failed to encode JPEG as PNG: {e}"))?;
-
+        img.write_with_encoder(PngEncoder::new(Cursor::new(&mut data)))
+            .map_err(|e| AdbError::JpegToPngFailed {
+                description: format!("Failed to encode JPEG as PNG: {}", e),
+            })?;
         Ok(data)
+    }
+
+    async fn monitor_touch_activity_loop(
+        touch_monitor: TouchActivityMonitor,
+        usb_device: Arc<Mutex<ADBUSBDevice>>,
+    ) -> AdbResult<()> {
+        let event_device = Self::find_touch_event_device(usb_device.clone()).await?;
+        Self::stream_touch_events_polling(usb_device, &event_device, touch_monitor).await
+    }
+
+    async fn stream_touch_events_polling(
+        usb_device: Arc<Mutex<ADBUSBDevice>>,
+        event_device: &str,
+        touch_monitor: TouchActivityMonitor,
+    ) -> AdbResult<()> {
+        let check_interval = Duration::from_millis(100);
+        loop {
+            if !touch_monitor.read().await.is_monitoring {
+                break;
+            }
+            if touch_monitor.read().await.has_activity_expired() {
+                touch_monitor.write().await.last_touch_time = None;
+            }
+
+            let mut out = Vec::new();
+            if let Ok(_) = usb_device.lock().await.shell_command(
+                &["getevent", "-lt", "-c", "5", event_device],
+                &mut out,
+            ) {
+                if !out.is_empty()
+                    && String::from_utf8_lossy(&out)
+                        .lines()
+                        .any(Self::is_touch_event_line)
+                {
+                    touch_monitor.write().await.update_activity();
+                }
+            }
+            tokio::time::sleep(check_interval).await;
+        }
+        Ok(())
+    }
+
+    fn is_touch_event_line(line: &str) -> bool {
+        line.contains("ABS_MT")
+            || line.contains("BTN_TOUCH")
+            || line.contains("BTN_TOOL_FINGER")
+            || line.contains("ABS_X")
+            || line.contains("ABS_Y")
+            || (line.contains("0003") && (line.contains("0035") || line.contains("0036")))
+    }
+
+    async fn find_touch_event_device(usb_device: Arc<Mutex<ADBUSBDevice>>) -> AdbResult<String> {
+        let mut out = Vec::new();
+        usb_device
+            .lock()
+            .await
+            .shell_command(&["getevent", "-p"], &mut out)
+            .map_err(|e| AdbError::ShellCommandFailed {
+                command: "getevent -p".into(),
+                source: e,
+            })?;
+
+        let output = String::from_utf8_lossy(&out);
+        let mut current_device: Option<String> = None;
+        let mut has_touch_events = false;
+        let mut best_device: Option<String> = None;
+
+        for line in output.lines() {
+            if line.starts_with("add device") {
+                if has_touch_events {
+                    best_device = current_device.clone();
+                }
+                if let Some(path_start) = line.find("/dev/input/event") {
+                    current_device = Some(line[path_start..].to_string());
+                    has_touch_events = false;
+                }
+            } else if line.contains("0035") || line.contains("0036") {
+                has_touch_events = true;
+            }
+        }
+        if has_touch_events {
+            best_device = current_device;
+        }
+
+        best_device.ok_or(AdbError::NoTouchDeviceFound)
     }
 }
 
 impl AdbClient for UsbAdb {
-    async fn list_devices() -> Result<Vec<Device>, String> {
-        // Use blocking task for USB device enumeration with timeout
-        let list_future = tokio::task::spawn_blocking(|| match adb_client::search_adb_devices() {
-            Ok(Some((vendor_id, product_id))) => Ok(vec![Device {
-                name: format!("{:04x}:{:04x}", vendor_id, product_id),
-                transport_id: None,
-            }]),
-            Ok(None) => Ok(vec![]),
-            Err(e) => Err(format!("UsbAdb: device enumeration failed: {e}")),
-        });
+    async fn list_devices() -> AdbResult<Vec<Device>> {
+        let list_future =
+            tokio::task::spawn_blocking(
+                || match adb_client::search_adb_devices() {
+                    Ok(Some((vendor_id, product_id))) => Ok(vec![Device {
+                        name: format!("{:04x}:{:04x}", vendor_id, product_id),
+                        transport_id: None,
+                    }]),
+                    Ok(None) => Ok(vec![]),
+                    Err(e) => Err(AdbError::DeviceEnumerationFailed { source: e }),
+                },
+            );
 
         match tokio::time::timeout(Duration::from_secs(2), list_future).await {
             Ok(Ok(result)) => result,
-            Ok(Err(e)) => Err(format!("UsbAdb: join error: {e}")),
-            Err(_) => Err("UsbAdb: device enumeration timed out after 2 seconds".to_string()),
+            Ok(Err(e)) => Err(AdbError::from(e)),
+            Err(_) => Err(AdbError::Timeout {
+                duration: Duration::from_secs(2),
+                description: "Device enumeration".into(),
+            }),
         }
     }
 
-    async fn new_with_device(device_name: &str) -> Result<Self, String> {
-        // Get persistent ADB key path (same as ADB daemon uses)
+    async fn new_with_device(device_name: &str) -> AdbResult<Self> {
         let key_path = homedir::my_home()
             .ok()
             .flatten()
             .map(|home| home.join(".android").join("adbkey"))
-            .ok_or("Failed to determine home directory for ADB key")?;
+            .ok_or(AdbError::HomeDirectoryNotFound)?;
 
         if !key_path.exists() {
-            return Err(format!(
-                "ADB key not found at {}. Please run 'adb devices' once to generate it.",
-                key_path.display()
-            ));
-        }
-
-        // Try USB connection with retry logic for AUTH/CNXN/CLSE handshake issues
-        eprintln!("📱 Connecting to USB device...");
-        eprintln!("   Using persistent ADB key: {}", key_path.display());
-        if crate::gui::dioxus_app::is_debug_mode() {
-            eprintln!("   ⏱️  If you see 'Allow USB debugging?' popup, you have 10 seconds to accept");
-            eprintln!("   📱 Check 'Always allow from this computer' to avoid future popups");
+            return Err(AdbError::KeyNotFound { path: key_path });
         }
 
         let mut usb_device = None;
         let max_attempts = 5;
 
-        for attempt in 1..=max_attempts {
+        for _ in 1..=max_attempts {
             let key_path_clone = key_path.clone();
             let usb_future = tokio::task::spawn_blocking(move || {
                 ADBUSBDevice::autodetect_with_custom_private_key(key_path_clone)
             });
 
-            match tokio::time::timeout(Duration::from_secs(30), usb_future).await {
-                Ok(Ok(device_result)) => {
-                    match device_result {
-                        Ok(device) => {
-                            usb_device = Some(device);
-                            if attempt > 1 && crate::gui::dioxus_app::is_debug_mode() {
-                                eprintln!("   ✅ Connected on attempt {}", attempt);
-                            }
-                            break;
-                        }
-                        Err(e) => {
-                            let err_msg = format!("{}", e);
-                            // Retry on common handshake errors (AUTH/CLSE/CNXN) and busy USB
-                            let should_retry = attempt < max_attempts && (
-                                err_msg.contains("Resource busy") ||
-                                err_msg.contains("AUTH") ||
-                                err_msg.contains("CLSE") ||
-                                err_msg.contains("CNXN")
-                            );
-                            
-                            if should_retry {
-                                if crate::gui::dioxus_app::is_debug_mode() {
-                                    if attempt == 1 {
-                                        eprintln!("   ⚠️  Connection attempt {} failed: {}", attempt, err_msg);
-                                        eprintln!("       (This is normal for first connection, retrying...)");
-                                    } else {
-                                        eprintln!("   ⚠️  Attempt {}/{}: {}", attempt, max_attempts, err_msg);
-                                    }
-                                }
-                                tokio::time::sleep(Duration::from_secs(2)).await;
-                            } else {
-                                return Err(format!("UsbAdb: failed to connect after {} attempts: {}. Make sure USB debugging is authorized on your phone.", attempt, e));
-                            }
-                        }
+            match tokio::time::timeout(Duration::from_secs(10), usb_future).await {
+                Ok(Ok(device_result)) => match device_result {
+                    Ok(device) => {
+                        usb_device = Some(device);
+                        break;
                     }
+                    Err(e) => {
+                        log::warn!("Connection attempt failed: {}. Retrying...", e);
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
+                },
+                Ok(Err(e)) => return Err(AdbError::from(e)),
+                Err(_) => {
+                    return Err(AdbError::ConnectionTimeout {
+                        duration: Duration::from_secs(10),
+                    })
                 }
-                Ok(Err(e)) => return Err(format!("UsbAdb: join error: {e}")),
-                Err(_) => return Err("UsbAdb: USB device connection timed out after 30 seconds. Make sure to authorize USB debugging on your phone when prompted.".to_string()),
             }
         }
 
-        let mut usb_device =
-            usb_device.ok_or("UsbAdb: failed to establish USB connection after retries")?;
+        let mut usb_device = usb_device.ok_or_else(|| AdbError::ConnectionFailed {
+            source: adb_client::RustADBError::IOError(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "No USB devices found after retries"
+            )),
+        })?;
 
-        // Test the connection with a simple command to ensure it's fully authorized
-        eprintln!("🔐 Validating connection authorization...");
         let mut test_output = Vec::new();
-        usb_device.shell_command(&["echo", "test"], &mut test_output)
-            .map_err(|e| format!("UsbAdb: connection validation failed: {}. The device may not be properly authorized.", e))?;
-
-        if crate::gui::dioxus_app::is_debug_mode() {
-            eprintln!("✅ Connection validated - device is authorized and responsive");
-        }
+        usb_device
+            .shell_command(&["echo", "test"], &mut test_output)
+            .map_err(|e| AdbError::ConnectionValidationFailed { source: e })?;
 
         let tmp = UsbAdb {
             device: Device {
@@ -407,14 +352,10 @@ impl AdbClient for UsbAdb {
             screen_x: 0,
             screen_y: 0,
             touch_monitor: Arc::new(RwLock::new(TouchActivityState::new(30))),
+            monitoring_task: Arc::new(Mutex::new(None)),
         };
 
         let (sx, sy) = tmp.get_screen_size_with().await?;
-
-        // Only log success in debug mode - backend will log the overall connection type
-        if crate::gui::dioxus_app::is_debug_mode() {
-            eprintln!("🔌 USB device connected: {}x{}", sx, sy);
-        }
 
         Ok(UsbAdb {
             screen_x: sx,
@@ -423,37 +364,42 @@ impl AdbClient for UsbAdb {
         })
     }
 
-    async fn screen_capture_bytes(&self) -> Result<Vec<u8>, String> {
+    async fn screen_capture_bytes(&self) -> AdbResult<Vec<u8>> {
         let capture_future = self.capture_screen_bytes_internal();
-
-        // Increased timeout to 30s to accommodate slow screencap fallback
         match tokio::time::timeout(Duration::from_secs(30), capture_future).await {
             Ok(result) => result,
-            Err(_) => Err("UsbAdb: screenshot capture timed out after 30 seconds".to_string()),
+            Err(_) => Err(AdbError::Timeout {
+                duration: Duration::from_secs(30),
+                description: "Screenshot capture".into(),
+            }),
         }
     }
 
-    async fn tap(&self, x: u32, y: u32) -> Result<(), String> {
+    async fn tap(&self, x: u32, y: u32) -> AdbResult<()> {
         if x > self.screen_x || y > self.screen_y {
-            return Err(format!("UsbAdb: tap out of bounds x={x} y={y}"));
+            return Err(AdbError::TapOutOfBounds { x, y });
         }
-
         let usb_device = Arc::clone(&self.usb_device);
-
-        let tap_future = tokio::task::spawn_blocking(move || -> Result<(), String> {
-            let mut out: Vec<u8> = Vec::new();
+        let tap_future = tokio::task::spawn_blocking(move || -> AdbResult<()> {
+            let mut out = Vec::new();
             let mut dev = usb_device.blocking_lock();
             let xs = x.to_string();
             let ys = y.to_string();
             dev.shell_command(&["input", "tap", &xs, &ys], &mut out)
-                .map_err(|e| format!("UsbAdb: tap failed: {e}"))?;
+                .map_err(|e| AdbError::ShellCommandFailed {
+                    command: "input tap".into(),
+                    source: e,
+                })?;
             Ok(())
         });
 
         match tokio::time::timeout(Duration::from_secs(5), tap_future).await {
             Ok(Ok(result)) => result,
-            Ok(Err(e)) => Err(format!("UsbAdb: tap task failed: {e}")),
-            Err(_) => Err("UsbAdb: tap timed out after 5 seconds".to_string()),
+            Ok(Err(e)) => Err(AdbError::from(e)),
+            Err(_) => Err(AdbError::Timeout {
+                duration: Duration::from_secs(5),
+                description: "Tap command".into(),
+            }),
         }
     }
 
@@ -464,12 +410,11 @@ impl AdbClient for UsbAdb {
         x2: u32,
         y2: u32,
         duration: Option<u32>,
-    ) -> Result<(), String> {
+    ) -> AdbResult<()> {
         let usb_device = Arc::clone(&self.usb_device);
         let duration_ms = duration.unwrap_or(300);
-
-        let swipe_future = tokio::task::spawn_blocking(move || -> Result<(), String> {
-            let mut out: Vec<u8> = Vec::new();
+        let swipe_future = tokio::task::spawn_blocking(move || -> AdbResult<()> {
+            let mut out = Vec::new();
             let mut dev = usb_device.blocking_lock();
             let x1s = x1.to_string();
             let y1s = y1.to_string();
@@ -477,49 +422,74 @@ impl AdbClient for UsbAdb {
             let y2s = y2.to_string();
             let durs = duration_ms.to_string();
             dev.shell_command(&["input", "swipe", &x1s, &y1s, &x2s, &y2s, &durs], &mut out)
-                .map_err(|e| format!("UsbAdb: swipe failed: {e}"))?;
+                .map_err(|e| AdbError::ShellCommandFailed {
+                    command: "input swipe".into(),
+                    source: e,
+                })?;
             Ok(())
         });
 
         match tokio::time::timeout(Duration::from_secs(10), swipe_future).await {
             Ok(Ok(result)) => result,
-            Ok(Err(e)) => Err(format!("UsbAdb: swipe task failed: {e}")),
-            Err(_) => Err("UsbAdb: swipe timed out after 10 seconds".to_string()),
+            Ok(Err(e)) => Err(AdbError::from(e)),
+            Err(_) => Err(AdbError::Timeout {
+                duration: Duration::from_secs(10),
+                description: "Swipe command".into(),
+            }),
         }
     }
 
-    async fn get_device_ip(&self) -> Result<String, String> {
-        Err("UsbAdb: get_device_ip not supported for USB devices".to_string())
+    async fn get_device_ip(&self) -> AdbResult<String> {
+        Err(AdbError::UnsupportedUsbOperation {
+            operation: "get_device_ip".into(),
+        })
     }
 
     async fn is_human_touching(&self) -> bool {
-        let monitor = self.touch_monitor.read().await;
-        monitor.is_human_active()
+        self.touch_monitor.read().await.is_human_active()
     }
 
     async fn get_touch_timeout_remaining(&self) -> Option<u64> {
-        let monitor = self.touch_monitor.read().await;
-        monitor.get_remaining_seconds()
+        self.touch_monitor.read().await.get_remaining_seconds()
     }
 
-    async fn clear_touch_activity(&self) -> Result<(), String> {
+    async fn clear_touch_activity(&self) -> AdbResult<()> {
+        self.touch_monitor.write().await.clear_touch_activity();
+        Ok(())
+    }
+
+    async fn register_touch_activity(&self) -> AdbResult<()> {
+        self.touch_monitor.write().await.mark_touch_activity();
+        Ok(())
+    }
+
+    async fn start_touch_monitoring(&self) -> AdbResult<()> {
         let mut monitor = self.touch_monitor.write().await;
-        monitor.clear_touch_activity();
+        if monitor.is_monitoring {
+            return Ok(());
+        }
+        monitor.is_monitoring = true;
+        drop(monitor);
+
+        let touch_monitor = Arc::clone(&self.touch_monitor);
+        let usb_device = Arc::clone(&self.usb_device);
+
+        let task = tokio::spawn(async move {
+            if let Err(e) = Self::monitor_touch_activity_loop(touch_monitor.clone(), usb_device).await {
+                log::error!("Touch monitoring ended: {}", e);
+            }
+            touch_monitor.write().await.is_monitoring = false;
+        });
+
+        *self.monitoring_task.lock().await = Some(task);
         Ok(())
     }
 
-    async fn register_touch_activity(&self) -> Result<(), String> {
-        let mut monitor = self.touch_monitor.write().await;
-        monitor.mark_touch_activity();
-        Ok(())
-    }
-
-    async fn start_touch_monitoring(&self) -> Result<(), String> {
-        // Touch monitoring not implemented for USB yet
-        Ok(())
-    }
-
-    async fn stop_touch_monitoring(&self) -> Result<(), String> {
+    async fn stop_touch_monitoring(&self) -> AdbResult<()> {
+        self.touch_monitor.write().await.is_monitoring = false;
+        if let Some(task) = self.monitoring_task.lock().await.take() {
+            task.abort();
+        }
         Ok(())
     }
 
