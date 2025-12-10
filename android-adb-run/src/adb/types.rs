@@ -6,9 +6,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
-// Tap command for queued processing
-#[derive(Debug, Clone)]
-pub enum TapCommand {
+// Unified USB command queue to serialize all USB operations
+#[derive(Debug)]
+pub enum UsbCommand {
     Tap {
         x: u32,
         y: u32,
@@ -20,7 +20,17 @@ pub enum TapCommand {
         y2: u32,
         duration: Option<u32>,
     },
+    Screenshot {
+        response_tx: tokio::sync::oneshot::Sender<AdbResult<Vec<u8>>>,
+    },
+    CheckTouchEvent {
+        event_device: String,
+        response_tx: tokio::sync::oneshot::Sender<AdbResult<bool>>,
+    },
 }
+
+// Backwards compatibility alias
+pub type TapCommand = UsbCommand;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ImageCapture {

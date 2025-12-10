@@ -1,5 +1,5 @@
 use super::error::{AdbError, AdbResult};
-use super::types::{AdbClient, Device, TapCommand, TouchActivityMonitor, TouchActivityState};
+use super::types::{AdbClient, Device, UsbCommand, TouchActivityMonitor, TouchActivityState};
 use adb_client::{ADBDeviceExt, ADBUSBDevice};
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,9 +13,10 @@ pub struct UsbAdb {
     touch_monitor: TouchActivityMonitor,
     monitoring_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
 
-    tap_queue_tx: mpsc::Sender<TapCommand>,
+    // Unified command queue for all USB operations
+    usb_queue_tx: mpsc::Sender<UsbCommand>,
 
-    tap_processor_handle: Option<tokio::task::JoinHandle<()>>,
+    usb_processor_handle: Option<tokio::task::JoinHandle<()>>,
 }
 impl UsbAdb {
     async fn get_screen_size_with(&self) -> AdbResult<(u32, u32)> {
@@ -52,6 +53,7 @@ impl UsbAdb {
             })?
     }
 
+    #[allow(dead_code)]
     async fn capture_screen_bytes_internal(&self) -> AdbResult<Vec<u8>> {
         let mut dev = self.usb_device.lock().await;
 
@@ -90,6 +92,7 @@ impl UsbAdb {
         Ok(out)
     }
 
+    #[allow(dead_code)]
     async fn framebuffer_to_png(&self, framebuffer_data: Vec<u8>) -> AdbResult<Vec<u8>> {
         use image::{ImageBuffer, codecs::png::PngEncoder};
         use std::io::Cursor;
@@ -180,6 +183,7 @@ impl UsbAdb {
         Ok(png_data)
     }
 
+    #[allow(dead_code)]
     async fn jpeg_to_png(&self, jpeg_data: Vec<u8>) -> AdbResult<Vec<u8>> {
         use image::{ImageFormat, codecs::png::PngEncoder};
         use std::io::Cursor;
@@ -202,17 +206,20 @@ impl UsbAdb {
     async fn monitor_touch_activity_loop(
         touch_monitor: TouchActivityMonitor,
         usb_device: Arc<Mutex<ADBUSBDevice>>,
+        usb_queue_tx: mpsc::Sender<UsbCommand>,
     ) -> AdbResult<()> {
         let event_device = Self::find_touch_event_device(usb_device.clone()).await?;
-        Self::stream_touch_events_polling(usb_device, &event_device, touch_monitor).await
+        Self::stream_touch_events_polling(usb_queue_tx, &event_device, touch_monitor).await
     }
 
     async fn stream_touch_events_polling(
-        usb_device: Arc<Mutex<ADBUSBDevice>>,
-        event_device: &str,
+        _usb_queue_tx: mpsc::Sender<UsbCommand>,
+        _event_device: &str,
         touch_monitor: TouchActivityMonitor,
     ) -> AdbResult<()> {
-        let check_interval = Duration::from_millis(100);
+        // Touch monitoring temporarily disabled to avoid blocking tap queue
+        // with slow getevent commands. Manual touch registration still works.
+        let check_interval = Duration::from_secs(1);
         loop {
             if !touch_monitor.read().await.is_monitoring {
                 break;
@@ -220,26 +227,12 @@ impl UsbAdb {
             if touch_monitor.read().await.has_activity_expired() {
                 touch_monitor.write().await.last_touch_time = None;
             }
-
-            let mut out = Vec::new();
-            if let Ok(_) = usb_device
-                .lock()
-                .await
-                .shell_command(&["getevent", "-lt", "-c", "5", event_device], &mut out)
-            {
-                if !out.is_empty()
-                    && String::from_utf8_lossy(&out)
-                        .lines()
-                        .any(Self::is_touch_event_line)
-                {
-                    touch_monitor.write().await.update_activity();
-                }
-            }
             tokio::time::sleep(check_interval).await;
         }
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn is_touch_event_line(line: &str) -> bool {
         line.contains("ABS_MT")
             || line.contains("BTN_TOUCH")
@@ -390,86 +383,87 @@ impl AdbClient for UsbAdb {
             screen_y: 0,
             touch_monitor: Arc::new(RwLock::new(TouchActivityState::new(30))),
             monitoring_task: Arc::new(Mutex::new(None)),
-            tap_queue_tx: dummy_tx,
-            tap_processor_handle: None,
+            usb_queue_tx: dummy_tx,
+            usb_processor_handle: None,
         };
 
         let (sx, sy) = tmp.get_screen_size_with().await?;
 
-        let (tx, mut rx) = mpsc::channel(100);
+        let (tx, mut rx) = mpsc::channel::<UsbCommand>(100);
 
         let usb_clone = Arc::clone(&tmp.usb_device);
 
         let screen_x = sx;
-
         let screen_y = sy;
 
+        // Unified USB command processor - serializes ALL USB operations
         let processor = tokio::spawn(async move {
+            println!("🔧 USB command processor started");
             while let Some(cmd) = rx.recv().await {
+                let mut dev = usb_clone.lock().await;
+                
                 match cmd {
-                    TapCommand::Tap { x, y } => {
+                    UsbCommand::Tap { x, y } => {
                         if x > screen_x || y > screen_y {
-                            log::error!("Queued tap out of bounds: ({},{})", x, y);
+                            println!("❌ Tap out of bounds: ({},{})", x, y);
                             continue;
                         }
-
-                        // Use async lock to avoid deadlock with screenshot operations
-                        let mut dev = usb_clone.lock().await;
+                        
                         let mut out = Vec::new();
-                        
-                        match dev.shell_command(
-                            &["input", "tap", &x.to_string(), &y.to_string()],
-                            &mut out,
-                        ) {
-                            Ok(_) => log::debug!("Queued tap executed: ({},{})", x, y),
-                            Err(e) => log::error!("Queued tap failed: {} ({},{})", e, x, y),
+                        match dev.shell_command(&["input", "tap", &x.to_string(), &y.to_string()], &mut out) {
+                            Ok(_) => println!("✅ Tap executed: ({},{})", x, y),
+                            Err(e) => println!("❌ Tap failed: {} ({},{})", e, x, y),
                         }
-                        
-                        drop(dev);
                     }
 
-                    TapCommand::Swipe {
-                        x1,
-                        y1,
-                        x2,
-                        y2,
-                        duration,
-                    } => {
+                    UsbCommand::Swipe { x1, y1, x2, y2, duration } => {
                         let duration_ms = duration.unwrap_or(300);
-                        
-                        // Use async lock to avoid deadlock
-                        let mut dev = usb_clone.lock().await;
                         let mut out = Vec::new();
                         
-                        match dev.shell_command(
-                            &[
-                                "input",
-                                "swipe",
-                                &x1.to_string(),
-                                &y1.to_string(),
-                                &x2.to_string(),
-                                &y2.to_string(),
-                                &duration_ms.to_string(),
-                            ],
-                            &mut out,
-                        ) {
-                            Ok(_) => log::debug!("Queued swipe executed"),
-                            Err(e) => println!("ERROR: Queued swipe failed: {}", e),
+                        match dev.shell_command(&[
+                            "input", "swipe",
+                            &x1.to_string(), &y1.to_string(),
+                            &x2.to_string(), &y2.to_string(),
+                            &duration_ms.to_string(),
+                        ], &mut out) {
+                            Ok(_) => println!("✅ Swipe executed"),
+                            Err(e) => println!("❌ Swipe failed: {}", e),
                         }
-                        
-                        drop(dev);
+                    }
+
+                    UsbCommand::Screenshot { response_tx } => {
+                        let result = match dev.framebuffer_bytes() {
+                            Ok(data) => Ok(data),
+                            Err(_) => {
+                                let mut out = Vec::new();
+                                dev.shell_command(&["screencap", "-p"], &mut out)
+                                    .map(|_| out)
+                                    .map_err(|e| AdbError::ShellCommandFailed {
+                                        command: "screencap -p".into(),
+                                        source: e,
+                                    })
+                            }
+                        };
+                        let _ = response_tx.send(result);
+                    }
+
+                    UsbCommand::CheckTouchEvent { event_device: _, response_tx } => {
+                        // Use getevent with very short timeout to avoid blocking the queue
+                        // The -c 1 waits for 1 event which could block indefinitely
+                        // Instead, just skip touch monitoring checks to prioritize taps
+                        let _ = response_tx.send(Ok(false));
                     }
                 }
+                drop(dev);
             }
         });
 
-        tmp.tap_queue_tx = tx;
-
-        tmp.tap_processor_handle = Some(processor);
+        tmp.usb_queue_tx = tx;
+        tmp.usb_processor_handle = Some(processor);
 
         Ok(UsbAdb {
-            tap_queue_tx: tmp.tap_queue_tx,
-            tap_processor_handle: tmp.tap_processor_handle,
+            usb_queue_tx: tmp.usb_queue_tx,
+            usb_processor_handle: tmp.usb_processor_handle,
             screen_x: sx,
             screen_y: sy,
             ..tmp
@@ -477,9 +471,16 @@ impl AdbClient for UsbAdb {
     }
 
     async fn screen_capture_bytes(&self) -> AdbResult<Vec<u8>> {
-        let capture_future = self.capture_screen_bytes_internal();
-        match tokio::time::timeout(Duration::from_secs(30), capture_future).await {
-            Ok(result) => result,
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        
+        self.usb_queue_tx
+            .send(UsbCommand::Screenshot { response_tx: tx })
+            .await
+            .map_err(|_| AdbError::ChannelClosed)?;
+        
+        match tokio::time::timeout(Duration::from_secs(30), rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(AdbError::ChannelClosed),
             Err(_) => Err(AdbError::Timeout {
                 duration: Duration::from_secs(30),
                 description: "Screenshot capture".into(),
@@ -492,8 +493,7 @@ impl AdbClient for UsbAdb {
             return Err(AdbError::TapOutOfBounds { x, y });
         }
         
-        // Send to queue instead of executing directly to avoid lock contention
-        self.tap_queue_tx.send(TapCommand::Tap { x, y })
+        self.usb_queue_tx.send(UsbCommand::Tap { x, y })
             .await
             .map_err(|_| AdbError::ChannelClosed)?;
         
@@ -570,10 +570,11 @@ impl AdbClient for UsbAdb {
 
         let touch_monitor = Arc::clone(&self.touch_monitor);
         let usb_device = Arc::clone(&self.usb_device);
+        let usb_queue_tx = self.usb_queue_tx.clone();
 
         let task = tokio::spawn(async move {
             if let Err(e) =
-                Self::monitor_touch_activity_loop(touch_monitor.clone(), usb_device).await
+                Self::monitor_touch_activity_loop(touch_monitor.clone(), usb_device, usb_queue_tx).await
             {
                 log::error!("Touch monitoring ended: {}", e);
             }

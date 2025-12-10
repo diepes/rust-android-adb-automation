@@ -2,28 +2,29 @@
 
 ## Goal
 
-* Mobile phone automation library, that uses rust adb_client module to connect to Android phone that is in debug mode over usb
+- Mobile phone automation library, that uses rust adb_client module to connect to Android phone that is in debug mode over usb
 
 ## Coding guidance
 
-* Keep the code modular and clean using rust structs where required
+- Keep the code modular and clean using rust structs where required
 
-* Prefer that will simplify changes
+- Prefer that will simplify changes
 
-* Try to use TTD where we create a test before we implement the item.
+- Try to use TTD where we create a test before we implement the item.
 
-* Keep changes to small managable tasks that requires limited effort to achieve, trying to avoid big changes.
+- Keep changes to small managable tasks that requires limited effort to achieve, trying to avoid big changes.
+
+- Check that tests pass after changes
 
 ## Testing
 
 ### Timeout Flag
+
 For testing automation timing without manual intervention:
-```bash
-cargo run -- --timeout=25
-```
-The app will auto-exit after 25 seconds. Use this instead of shell `timeout` command.
+If you need to run the app with a timeout, dont use `timout x cargo run ...` rather use the timeout built into the app `cargo run -- --timeout=25`
 
 ### Running Tests
+
 ```bash
 # Unit tests
 cargo test --lib
@@ -35,6 +36,7 @@ cargo run --release -- --timeout=25 2>&1 | grep -E "claim_1d_tap|Loop alive"
 ### Test Coverage
 
 #### Hardware Access Layer (22 tests)
+
 - **Touch Activity Monitoring** (7 tests)
   - `test_touch_state_initial` - Initial state verification
   - `test_touch_activity_detection` - Touch event detection
@@ -74,6 +76,7 @@ cargo run --release -- --timeout=25 2>&1 | grep -E "claim_1d_tap|Loop alive"
   - `test_detect_framebuffer_format` - Format detection (RGB/RGBA/RGB565)
 
 #### FSM & Timing (3 tests)
+
 - `test_timed_event_interval_tracking` - Verifies TimedEvent state transitions
 - `test_multiple_timed_events` - Tests independent event tracking  
 - `test_lock_scope_prevents_deadlock` - Validates async lock patterns

@@ -274,10 +274,15 @@ impl GameAutomation {
         let start_time = std::time::Instant::now();
 
         if let Some(client) = &self.adb_client {
-            let client_guard = client.lock().await;
-            match client_guard.screen_capture_bytes().await {
+            let (screenshot_result, duration_ms) = {
+                let client_guard = client.lock().await;
+                let result = client_guard.screen_capture_bytes().await;
+                let duration = start_time.elapsed().as_millis();
+                (result, duration)
+            }; // Lock released here
+            
+            match screenshot_result {
                 Ok(bytes) => {
-                    let duration_ms = start_time.elapsed().as_millis();
 
                     debug_print!(
                         self.debug_enabled,
@@ -765,13 +770,18 @@ impl GameAutomation {
     async fn process_timed_events(&mut self) {
         // Check if human is currently touching the device
         if let Some(client) = &self.adb_client {
-            let client_guard = client.lock().await;
-            let human_touching = client_guard.is_human_touching().await;
+            let (human_touching, remaining_seconds) = {
+                let client_guard = client.lock().await;
+                let touching = client_guard.is_human_touching().await;
+                let remaining = if touching {
+                    client_guard.get_touch_timeout_remaining().await
+                } else {
+                    None
+                };
+                (touching, remaining)
+            }; // Lock released here
 
             if human_touching {
-                // Get remaining seconds for countdown
-                let remaining_seconds = client_guard.get_touch_timeout_remaining().await;
-
                 debug_print!(
                     self.debug_enabled,
                     "🚫 AUTOMATION PAUSED: Human touch detected - skipping timed events"
@@ -820,6 +830,22 @@ impl GameAutomation {
                 events_to_execute.push((id.clone(), event.event_type.clone()));
             }
         }
+        
+        // Sort events: Screenshot first, then CountdownUpdate, then Taps
+        // This ensures screenshot doesn't compete with tap processor for USB lock
+        events_to_execute.sort_by(|a, b| {
+            let order_a = match a.1 {
+                TimedEventType::Screenshot => 0,
+                TimedEventType::CountdownUpdate => 1,
+                TimedEventType::Tap { .. } => 2,
+            };
+            let order_b = match b.1 {
+                TimedEventType::Screenshot => 0,
+                TimedEventType::CountdownUpdate => 1,
+                TimedEventType::Tap { .. } => 2,
+            };
+            order_a.cmp(&order_b)
+        });
 
         if events_to_execute.is_empty() {
             // Check why no events are ready
@@ -892,14 +918,54 @@ impl GameAutomation {
 
         match event_type {
             TimedEventType::Screenshot => {
-                match self.take_screenshot().await {
-                    Ok(_) => {
-                        // Trigger image analysis after screenshot
-                        if let Some(screenshot_bytes) = self.latest_screenshot.clone() {
-                            let _ = self.analyze_and_act(&screenshot_bytes).await;
+                // Screenshot can take time and may contend for USB lock with tap processor
+                // Run asynchronously to avoid blocking the automation loop
+                
+                // Take screenshot asynchronously to avoid blocking the automation loop
+                // Note: We don't await here to prevent blocking, screenshot updates signals when done
+                if let Some(client) = &self.adb_client {
+                    let client_clone = client.clone();
+                    let screenshot_data = self.screenshot_data;
+                    let screenshot_bytes_sig = self.screenshot_bytes;
+                    let screenshot_status = self.screenshot_status;
+                    let mut screenshot_counter = self.screenshot_counter;
+                    
+                    dioxus::prelude::spawn(async move {
+                        let start = std::time::Instant::now();
+                        match timeout(Duration::from_secs(10), async {
+                            let guard = client_clone.lock().await;
+                            guard.screen_capture_bytes().await
+                        }).await {
+                            Ok(Ok(bytes)) => {
+                                let duration_ms = start.elapsed().as_millis();
+                                let counter_val = screenshot_counter.with_mut(|c| {
+                                    *c += 1;
+                                    *c
+                                });
+                                
+                                // Encode and update signals in background
+                                let bytes_clone = bytes.clone();
+                                dioxus::prelude::spawn(async move {
+                                    use crate::gui::util::base64_encode;
+                                    let base64_string = tokio::task::spawn_blocking(move || base64_encode(&bytes_clone))
+                                        .await
+                                        .unwrap_or_default();
+                                    *screenshot_data.write_unchecked() = Some(base64_string);
+                                    *screenshot_bytes_sig.write_unchecked() = Some(bytes);
+                                    *screenshot_status.write_unchecked() = format!(
+                                        "🤖 Automation screenshot #{} ({}ms)",
+                                        counter_val, duration_ms
+                                    );
+                                });
+                            }
+                            Ok(Err(e)) => {
+                                *screenshot_status.write_unchecked() = format!("❌ Screenshot failed: {}", e);
+                            }
+                            Err(_) => {
+                                *screenshot_status.write_unchecked() = "❌ Screenshot timeout (10s)".to_string();
+                            }
                         }
-                    }
-                    Err(e) => return Err(format!("Screenshot failed: {}", e)),
+                    });
                 }
             }
             TimedEventType::Tap { x, y } => {

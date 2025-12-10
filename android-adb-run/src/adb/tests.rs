@@ -3,7 +3,7 @@
 
 #[cfg(test)]
 mod hardware_access_tests {
-    use super::super::types::{TouchActivityState, TapCommand};
+    use super::super::types::{TouchActivityState, UsbCommand};
     use std::time::Duration;
     use tokio::sync::{mpsc, RwLock};
     use std::sync::Arc;
@@ -123,15 +123,15 @@ mod hardware_access_tests {
         let (tx, mut rx) = mpsc::channel(10);
         
         // Send some tap commands
-        tx.send(TapCommand::Tap { x: 100, y: 200 }).await.unwrap();
-        tx.send(TapCommand::Tap { x: 300, y: 400 }).await.unwrap();
+        tx.send(UsbCommand::Tap { x: 100, y: 200 }).await.unwrap();
+        tx.send(UsbCommand::Tap { x: 300, y: 400 }).await.unwrap();
         
         // Receive them
         let tap1 = rx.recv().await.unwrap();
         let tap2 = rx.recv().await.unwrap();
         
         match tap1 {
-            TapCommand::Tap { x, y } => {
+            UsbCommand::Tap { x, y } => {
                 assert_eq!(x, 100);
                 assert_eq!(y, 200);
             }
@@ -139,7 +139,7 @@ mod hardware_access_tests {
         }
         
         match tap2 {
-            TapCommand::Tap { x, y } => {
+            UsbCommand::Tap { x, y } => {
                 assert_eq!(x, 300);
                 assert_eq!(y, 400);
             }
@@ -153,14 +153,14 @@ mod hardware_access_tests {
         
         // Send commands in order
         for i in 0..5 {
-            tx.send(TapCommand::Tap { x: i * 10, y: i * 20 }).await.unwrap();
+            tx.send(UsbCommand::Tap { x: i * 10, y: i * 20 }).await.unwrap();
         }
         
         // Verify ordering
         for i in 0..5 {
             let cmd = rx.recv().await.unwrap();
             match cmd {
-                TapCommand::Tap { x, y } => {
+                UsbCommand::Tap { x, y } => {
                     assert_eq!(x, i * 10);
                     assert_eq!(y, i * 20);
                 }
@@ -174,11 +174,11 @@ mod hardware_access_tests {
         let (tx, mut rx) = mpsc::channel(2); // Small buffer
         
         // Fill the buffer
-        tx.send(TapCommand::Tap { x: 1, y: 1 }).await.unwrap();
-        tx.send(TapCommand::Tap { x: 2, y: 2 }).await.unwrap();
+        tx.send(UsbCommand::Tap { x: 1, y: 1 }).await.unwrap();
+        tx.send(UsbCommand::Tap { x: 2, y: 2 }).await.unwrap();
         
         // Try to send one more (should apply backpressure)
-        let send_future = tx.send(TapCommand::Tap { x: 3, y: 3 });
+        let send_future = tx.send(UsbCommand::Tap { x: 3, y: 3 });
         
         // Start receiver task
         let receiver = tokio::spawn(async move {
@@ -210,17 +210,17 @@ mod hardware_access_tests {
         let (tx, mut rx) = mpsc::channel(10);
         
         // Send mixed commands
-        tx.send(TapCommand::Tap { x: 100, y: 100 }).await.unwrap();
-        tx.send(TapCommand::Swipe { 
+        tx.send(UsbCommand::Tap { x: 100, y: 100 }).await.unwrap();
+        tx.send(UsbCommand::Swipe { 
             x1: 100, y1: 100, 
             x2: 200, y2: 200, 
             duration: Some(300) 
         }).await.unwrap();
-        tx.send(TapCommand::Tap { x: 300, y: 300 }).await.unwrap();
+        tx.send(UsbCommand::Tap { x: 300, y: 300 }).await.unwrap();
         
         // Verify order and types
         match rx.recv().await.unwrap() {
-            TapCommand::Tap { x, y } => {
+            UsbCommand::Tap { x, y } => {
                 assert_eq!(x, 100);
                 assert_eq!(y, 100);
             }
@@ -228,7 +228,7 @@ mod hardware_access_tests {
         }
         
         match rx.recv().await.unwrap() {
-            TapCommand::Swipe { x1, y1, x2, y2, duration } => {
+            UsbCommand::Swipe { x1, y1, x2, y2, duration } => {
                 assert_eq!(x1, 100);
                 assert_eq!(y1, 100);
                 assert_eq!(x2, 200);
@@ -239,7 +239,7 @@ mod hardware_access_tests {
         }
         
         match rx.recv().await.unwrap() {
-            TapCommand::Tap { x, y } => {
+            UsbCommand::Tap { x, y } => {
                 assert_eq!(x, 300);
                 assert_eq!(y, 300);
             }
@@ -255,16 +255,18 @@ mod hardware_access_tests {
             let mut processed = 0;
             while let Some(cmd) = rx.recv().await {
                 match cmd {
-                    TapCommand::Tap { .. } => processed += 1,
-                    TapCommand::Swipe { .. } => processed += 1,
+                    UsbCommand::Tap { .. } => processed += 1,
+                    UsbCommand::Swipe { .. } => processed += 1,
+                    UsbCommand::Screenshot { .. } => {},
+                    UsbCommand::CheckTouchEvent { .. } => {},
                 }
             }
             processed
         });
         
         // Send some commands
-        tx.send(TapCommand::Tap { x: 1, y: 1 }).await.unwrap();
-        tx.send(TapCommand::Tap { x: 2, y: 2 }).await.unwrap();
+        tx.send(UsbCommand::Tap { x: 1, y: 1 }).await.unwrap();
+        tx.send(UsbCommand::Tap { x: 2, y: 2 }).await.unwrap();
         
         // Close the sender
         drop(tx);
@@ -448,7 +450,7 @@ mod hardware_access_tests {
         let (tap_tx, mut tap_rx) = mpsc::channel(10);
         
         // Simulate automation wanting to tap
-        tap_tx.send(TapCommand::Tap { x: 100, y: 100 }).await.unwrap();
+        tap_tx.send(UsbCommand::Tap { x: 100, y: 100 }).await.unwrap();
         
         // Mark human touch activity
         touch_monitor.write().await.mark_touch_activity();
@@ -467,7 +469,7 @@ mod hardware_access_tests {
         // Verify tap is still in queue
         let cmd = tap_rx.recv().await.unwrap();
         match cmd {
-            TapCommand::Tap { x, y } => {
+            UsbCommand::Tap { x, y } => {
                 assert_eq!(x, 100);
                 assert_eq!(y, 100);
             }
