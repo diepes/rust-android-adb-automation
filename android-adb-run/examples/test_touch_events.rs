@@ -36,7 +36,10 @@ fn main() {
             let output = String::from_utf8_lossy(&out);
             println!("Output from getevent -p:");
             for line in output.lines().take(50) {
-                if line.contains("/dev/input/event") || line.contains("name:") || line.contains("ABS") {
+                if line.contains("/dev/input/event")
+                    || line.contains("name:")
+                    || line.contains("ABS")
+                {
                     println!("  {}", line);
                 }
             }
@@ -46,7 +49,7 @@ fn main() {
 
     println!("\n📱 Test 2: Testing getevent with timeout...");
     println!("   Please TAP the screen NOW (you have 3 seconds)...\n");
-    
+
     let mut out = Vec::new();
     let command = "timeout 3s getevent -lt /dev/input/event2 2>/dev/null || true";
     match device.shell_command(&["sh", "-c", command], &mut out) {
@@ -69,7 +72,7 @@ fn main() {
 
     println!("\n📱 Test 3: Testing getevent WITHOUT timeout...");
     println!("   Please TAP the screen NOW (you have 2 seconds)...\n");
-    
+
     let mut _out: Vec<u8> = Vec::new();
     // Use a background thread to run getevent, with manual timeout
     let (tx, rx) = std::sync::mpsc::channel();
@@ -81,7 +84,7 @@ fn main() {
             .join("adbkey");
         let mut dev = ADBUSBDevice::autodetect_with_custom_private_key(key_path).unwrap();
         let mut out = Vec::new();
-        
+
         // Start getevent in background
         let _ = dev.shell_command(&["getevent", "-lt", "/dev/input/event2"], &mut out);
         tx.send(out).ok();
@@ -100,14 +103,19 @@ fn main() {
                 }
             }
         }
-        Err(_) => println!("   ⏱️  Timeout (command is still running - this means getevent is blocking)"),
+        Err(_) => {
+            println!("   ⏱️  Timeout (command is still running - this means getevent is blocking)")
+        }
     }
 
     println!("\n📱 Test 4: Testing with -c 10 (count limit)...");
     println!("   Please TAP the screen NOW...\n");
-    
+
     let mut out = Vec::new();
-    match device.shell_command(&["getevent", "-lt", "-c", "10", "/dev/input/event2"], &mut out) {
+    match device.shell_command(
+        &["getevent", "-lt", "-c", "10", "/dev/input/event2"],
+        &mut out,
+    ) {
         Ok(_) => {
             let output = String::from_utf8_lossy(&out);
             if output.trim().is_empty() {

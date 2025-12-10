@@ -109,7 +109,11 @@ fn main() {
             let format_detected = if fb_data.len() >= 8 && &fb_data[0..8] == b"\x89PNG\r\n\x1a\n" {
                 println!("   🎨 Format detected: PNG (magic bytes verified)");
                 "PNG"
-            } else if fb_data.len() >= 3 && fb_data[0] == 0xFF && fb_data[1] == 0xD8 && fb_data[2] == 0xFF {
+            } else if fb_data.len() >= 3
+                && fb_data[0] == 0xFF
+                && fb_data[1] == 0xD8
+                && fb_data[2] == 0xFF
+            {
                 println!("   🎨 Format detected: JPEG");
                 "JPEG"
             } else {
@@ -137,7 +141,9 @@ fn main() {
 
                                 if format_detected == "RAW" {
                                     if bpp < 1.0 {
-                                        println!("   ⚠️  Compressed/encoded format (< 1 byte/pixel)");
+                                        println!(
+                                            "   ⚠️  Compressed/encoded format (< 1 byte/pixel)"
+                                        );
                                     } else if (1.9..2.1).contains(&bpp) {
                                         println!("   💡 Likely RGB565 format (2 bytes/pixel)");
                                     } else if (2.9..3.1).contains(&bpp) {
@@ -158,7 +164,7 @@ fn main() {
                 "JPEG" => "test_framebuffer.jpg",
                 _ => "test_framebuffer.raw",
             };
-            
+
             match fs::write(filename, &fb_data) {
                 Ok(_) => println!("   💾 Saved to: {}", filename),
                 Err(e) => println!("   ⚠️  Could not save: {}", e),
@@ -168,7 +174,11 @@ fn main() {
             if format_detected == "PNG" {
                 match image::load_from_memory(&fb_data) {
                     Ok(img) => {
-                        println!("   ✅ PNG successfully decoded: {}x{}", img.width(), img.height());
+                        println!(
+                            "   ✅ PNG successfully decoded: {}x{}",
+                            img.width(),
+                            img.height()
+                        );
                     }
                     Err(e) => {
                         println!("   ⚠️  PNG decode failed: {}", e);
@@ -202,7 +212,11 @@ fn main() {
     match rx.recv_timeout(std::time::Duration::from_secs(10)) {
         Ok(Ok(png_data)) => {
             let elapsed = start.elapsed().as_secs_f32();
-            println!("   ✅ Screencap captured: {} bytes in {:.1}s", png_data.len(), elapsed);
+            println!(
+                "   ✅ Screencap captured: {} bytes in {:.1}s",
+                png_data.len(),
+                elapsed
+            );
 
             // Validate PNG header
             if png_data.len() > 8 && &png_data[0..8] == b"\x89PNG\r\n\x1a\n" {
@@ -213,7 +227,11 @@ fn main() {
                         // Try to decode it
                         match image::load_from_memory(&png_data) {
                             Ok(img) => {
-                                println!("   ✅ PNG successfully decoded: {}x{}", img.width(), img.height());
+                                println!(
+                                    "   ✅ PNG successfully decoded: {}x{}",
+                                    img.width(),
+                                    img.height()
+                                );
                             }
                             Err(e) => {
                                 println!("   ⚠️  PNG decode failed: {}", e);
@@ -253,7 +271,11 @@ fn main() {
     match rx2.recv_timeout(std::time::Duration::from_secs(10)) {
         Ok(Ok(jpg_data)) => {
             let elapsed = start.elapsed().as_secs_f32();
-            println!("   ✅ Screencap JPEG captured: {} bytes in {:.1}s", jpg_data.len(), elapsed);
+            println!(
+                "   ✅ Screencap JPEG captured: {} bytes in {:.1}s",
+                jpg_data.len(),
+                elapsed
+            );
 
             // Validate JPEG header (FF D8 FF)
             if jpg_data.len() > 3 && jpg_data[0] == 0xFF && jpg_data[1] == 0xD8 {
@@ -264,7 +286,11 @@ fn main() {
                         // Try to decode it
                         match image::load_from_memory(&jpg_data) {
                             Ok(img) => {
-                                println!("   ✅ JPEG successfully decoded: {}x{}", img.width(), img.height());
+                                println!(
+                                    "   ✅ JPEG successfully decoded: {}x{}",
+                                    img.width(),
+                                    img.height()
+                                );
                             }
                             Err(e) => {
                                 println!("   ⚠️  JPEG decode failed: {}", e);

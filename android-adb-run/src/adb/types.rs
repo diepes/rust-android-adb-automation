@@ -6,6 +6,22 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
+// Tap command for queued processing
+#[derive(Debug, Clone)]
+pub enum TapCommand {
+    Tap {
+        x: u32,
+        y: u32,
+    },
+    Swipe {
+        x1: u32,
+        y1: u32,
+        x2: u32,
+        y2: u32,
+        duration: Option<u32>,
+    },
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ImageCapture {
     pub bytes: Vec<u8>,

@@ -19,25 +19,23 @@ pub enum AdbError {
     #[error("Failed to determine home directory for ADB key")]
     HomeDirectoryNotFound,
 
-    #[error("USB device connection timed out after {duration:?}. Make sure to authorize USB debugging on your phone.")]
+    #[error(
+        "USB device connection timed out after {duration:?}. Make sure to authorize USB debugging on your phone."
+    )]
     ConnectionTimeout { duration: std::time::Duration },
 
     #[error("Failed to connect to USB device: {source}")]
-    ConnectionFailed {
-        source: adb_client::RustADBError,
-    },
+    ConnectionFailed { source: adb_client::RustADBError },
 
     #[error("Connection validation failed. The device may not be properly authorized: {source}")]
-    ConnectionValidationFailed {
-        source: adb_client::RustADBError,
-    },
+    ConnectionValidationFailed { source: adb_client::RustADBError },
 
     #[error("Shell command '{command}' failed: {source}")]
     ShellCommandFailed {
         command: String,
         source: adb_client::RustADBError,
     },
-    
+
     #[error("Operation timed out after {duration:?}: {description}")]
     Timeout {
         duration: std::time::Duration,
@@ -54,9 +52,7 @@ pub enum AdbError {
     ScreenSizeParseFailed,
 
     #[error("Framebuffer capture failed: {source}")]
-    FramebufferCaptureFailed {
-        source: adb_client::RustADBError,
-    },
+    FramebufferCaptureFailed { source: adb_client::RustADBError },
 
     #[error("Failed to convert framebuffer to PNG: {description}")]
     FramebufferToPngFailed { description: String },
@@ -72,4 +68,10 @@ pub enum AdbError {
 
     #[error("This operation is not supported for USB devices: {operation}")]
     UnsupportedUsbOperation { operation: String },
+
+    #[error("Tap command channel closed")]
+    ChannelClosed,
+
+    #[error("Connection validation timeout - device may not be authorized")]
+    ConnectionValidationTimeout,
 }

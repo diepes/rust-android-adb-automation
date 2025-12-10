@@ -67,7 +67,12 @@ pub fn screenshot_panel() -> Element {
     let overlay_rect: Option<(i32, i32, i32, i32)> = if *select_box.read() {
         if let (Some(start), Some(end)) = (*selection_start.read(), *selection_end.read()) {
             let (left, top, w, h) = adjust_overlay(start, end);
-            Some((left.round() as i32, top.round() as i32, w.round() as i32, h.round() as i32))
+            Some((
+                left.round() as i32,
+                top.round() as i32,
+                w.round() as i32,
+                h.round() as i32,
+            ))
         } else {
             None
         }
@@ -75,24 +80,27 @@ pub fn screenshot_panel() -> Element {
         None
     };
 
-    let device_to_display = |device_x: u32, device_y: u32, screen_x: u32, screen_y: u32| -> (f32, f32) {
-        if screen_x == 0 || screen_y == 0 { return (0.0, 0.0); }
-        let max_content_width = 400.0;
-        let max_content_height = 600.0;
-        let border_px = 8.0;
-        let image_aspect = screen_x as f32 / screen_y as f32;
-        let container_aspect = max_content_width / max_content_height;
-        let (content_w, content_h) = if image_aspect > container_aspect {
-            (max_content_width, max_content_width / image_aspect)
-        } else {
-            (max_content_height * image_aspect, max_content_height)
+    let device_to_display =
+        |device_x: u32, device_y: u32, screen_x: u32, screen_y: u32| -> (f32, f32) {
+            if screen_x == 0 || screen_y == 0 {
+                return (0.0, 0.0);
+            }
+            let max_content_width = 400.0;
+            let max_content_height = 600.0;
+            let border_px = 8.0;
+            let image_aspect = screen_x as f32 / screen_y as f32;
+            let container_aspect = max_content_width / max_content_height;
+            let (content_w, content_h) = if image_aspect > container_aspect {
+                (max_content_width, max_content_width / image_aspect)
+            } else {
+                (max_content_height * image_aspect, max_content_height)
+            };
+            let scale_x = content_w.max(1.0) / screen_x as f32;
+            let scale_y = content_h.max(1.0) / screen_y as f32;
+            let px = device_x as f32 * scale_x + border_px;
+            let py = device_y as f32 * scale_y + border_px;
+            (px, py)
         };
-        let scale_x = content_w.max(1.0) / screen_x as f32;
-        let scale_y = content_h.max(1.0) / screen_y as f32;
-        let px = device_x as f32 * scale_x + border_px;
-        let py = device_y as f32 * scale_y + border_px;
-        (px, py)
-    };
 
     let hover_preview_point = {
         let preview_opt = *hover_tap_preview.read();

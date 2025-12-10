@@ -45,11 +45,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("   Error: {}", e);
 
             // Check error detection
-            if e.to_lowercase().contains("timeout") || e.to_lowercase().contains("timed out") {
+            if e.to_string().to_lowercase().contains("timeout")
+                || e.to_string().to_lowercase().contains("timed out")
+            {
                 println!("   ✅ Timeout detected correctly!");
-            } else if e.to_lowercase().contains("offline")
-                || e.to_lowercase().contains("disconnected")
-                || e.to_lowercase().contains("not found")
+            } else if e.to_string().to_lowercase().contains("offline")
+                || e.to_string().to_lowercase().contains("disconnected")
+                || e.to_string().to_lowercase().contains("not found")
             {
                 println!("   ✅ Disconnect detected correctly!");
             } else {

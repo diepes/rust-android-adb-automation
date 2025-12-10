@@ -9,7 +9,10 @@ impl AdbBackend {
     /// Connect to the first available USB device
     pub async fn connect_first() -> AdbResult<Self> {
         let devices = Self::list_devices().await?;
-        let first = devices.into_iter().next().ok_or(AdbError::NoTouchDeviceFound)?;
+        let first = devices
+            .into_iter()
+            .next()
+            .ok_or(AdbError::NoTouchDeviceFound)?;
         Self::new_with_device(&first.name).await
     }
 }

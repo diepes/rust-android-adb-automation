@@ -42,7 +42,9 @@ fn main() {
 
     // Step 3: Try to connect with custom key (with retry for busy USB)
     println!("\n🔌 Connecting with persistent ADB key...");
-    println!("   ⏱️  If you see 'Allow USB debugging?' popup on phone, you have 10 seconds to accept");
+    println!(
+        "   ⏱️  If you see 'Allow USB debugging?' popup on phone, you have 10 seconds to accept"
+    );
     println!("   📱 Check 'Always allow from this computer' to avoid future popups\n");
 
     let mut device = None;
@@ -58,13 +60,12 @@ fn main() {
             Err(e) => {
                 let err_msg = format!("{}", e);
                 // Retry on common connection errors (AUTH/CLSE are protocol handshake issues)
-                let should_retry = attempt < 5 && (
-                    err_msg.contains("Resource busy") ||
-                    err_msg.contains("AUTH") ||
-                    err_msg.contains("CLSE") ||
-                    err_msg.contains("CNXN")
-                );
-                
+                let should_retry = attempt < 5
+                    && (err_msg.contains("Resource busy")
+                        || err_msg.contains("AUTH")
+                        || err_msg.contains("CLSE")
+                        || err_msg.contains("CNXN"));
+
                 if should_retry {
                     if attempt == 1 {
                         println!("  ⚠️ Connection attempt {} failed: {}", attempt, err_msg);
@@ -77,7 +78,9 @@ fn main() {
                     println!("❌ Failed to connect after {} attempts: {}", attempt, e);
                     println!("\n💡 Troubleshooting:");
                     println!("  1. Make sure USB debugging is enabled on your phone");
-                    println!("  2. Check that the authorization popup appeared and you clicked 'Allow'");
+                    println!(
+                        "  2. Check that the authorization popup appeared and you clicked 'Allow'"
+                    );
                     println!("  3. Try unplugging and replugging the USB cable");
                     println!("  4. Check USB permissions: ls -l /dev/bus/usb/*/*");
                     return;
@@ -85,7 +88,7 @@ fn main() {
             }
         }
     }
-    
+
     let mut device = device.expect("Failed to connect after 5 retries");
 
     println!("✅ USB device connected!");
@@ -182,7 +185,7 @@ fn main() {
 
     // Test 6: Screenshot capture with timeout
     println!("\n📸 Testing screenshot capture:");
-    
+
     // Try framebuffer first (faster, doesn't hang)
     print!("  • Trying framebuffer... ");
     match device.framebuffer_bytes() {
@@ -196,14 +199,14 @@ fn main() {
             println!("❌ Framebuffer failed: {}", e);
         }
     }
-    
-    use std::time::{Duration, Instant};
-    use std::thread;
+
     use std::sync::mpsc;
-    
+    use std::thread;
+    use std::time::{Duration, Instant};
+
     let (tx, rx) = mpsc::channel();
     let mut device_clone = device;
-    
+
     print!("  • Capturing via screencap (10s timeout)... ");
     let handle = thread::spawn(move || {
         let mut out = Vec::new();
@@ -212,20 +215,20 @@ fn main() {
             Err(e) => tx.send(Err(format!("screencap failed: {}", e))).ok(),
         };
     });
-    
+
     let start = Instant::now();
     let result = rx.recv_timeout(Duration::from_secs(10));
-    
+
     match result {
         Ok(Ok(png_data)) => {
             let elapsed = start.elapsed().as_secs_f32();
             println!("✅ Got {} bytes in {:.1}s", png_data.len(), elapsed);
-            
+
             // Validate PNG header
             print!("  • Validating PNG format... ");
             if png_data.len() > 8 && &png_data[0..8] == b"\x89PNG\r\n\x1a\n" {
                 println!("✅ Valid PNG header");
-                
+
                 // Save to file
                 print!("  • Saving screenshot to test_screenshot.png... ");
                 match std::fs::write("test_screenshot.png", &png_data) {
@@ -233,8 +236,9 @@ fn main() {
                     Err(e) => println!("❌ Failed to save: {}", e),
                 }
             } else {
-                println!("❌ Invalid PNG header (got {} bytes, first bytes: {:02x?})", 
-                    png_data.len(), 
+                println!(
+                    "❌ Invalid PNG header (got {} bytes, first bytes: {:02x?})",
+                    png_data.len(),
                     &png_data[..8.min(png_data.len())]
                 );
             }
@@ -242,10 +246,12 @@ fn main() {
         Ok(Err(e)) => println!("❌ {}", e),
         Err(_) => {
             println!("❌ Timeout after 10 seconds");
-            println!("  💡 The screencap command is hanging - this is a known issue with some devices");
+            println!(
+                "  💡 The screencap command is hanging - this is a known issue with some devices"
+            );
         }
     }
-    
+
     handle.join().ok();
 
     println!("\n✅ All tests completed successfully!");

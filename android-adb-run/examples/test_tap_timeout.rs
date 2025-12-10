@@ -45,9 +45,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             // Check if error is detected as disconnect
-            if e.to_lowercase().contains("timeout")
-                || e.to_lowercase().contains("offline")
-                || e.to_lowercase().contains("disconnected")
+            if e.to_string().to_lowercase().contains("timeout")
+                || e.to_string().to_lowercase().contains("offline")
+                || e.to_string().to_lowercase().contains("disconnected")
             {
                 println!("   ✅ Error detected as disconnect");
             } else {

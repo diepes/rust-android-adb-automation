@@ -143,8 +143,19 @@ impl TimedEvent {
         }
 
         match self.last_executed {
-            None => true, // Never executed, ready to go
-            Some(last) => last.elapsed() >= self.interval,
+            None => {
+                // Never executed, ready to go
+                true
+            }
+            Some(last) => {
+                let elapsed = last.elapsed();
+                let ready = elapsed >= self.interval;
+                if ready && self.id != "countdown_update" && self.id != "screenshot" {
+                    println!("🔔 Event '{}' is ready: elapsed={:?}, interval={:?}", 
+                        self.id, elapsed, self.interval);
+                }
+                ready
+            }
         }
     }
 
@@ -207,22 +218,4 @@ pub enum AutomationCommand {
     RegisterTouchActivity,     // Register touch activity to pause automation for 30 seconds
     AdjustTimedEventInterval { id: String, delta_seconds: i64 }, // Adjust interval for timed tap events
     Shutdown,
-}
-
-#[derive(Debug, Clone)]
-pub enum AutomationEvent {
-    ScreenshotReady(Vec<u8>),
-    ScreenshotTaken(Vec<u8>, u64), // Screenshot data and timing in milliseconds
-    StateChanged(GameState),
-    Error(String),
-    DeviceDisconnected(String), // Device disconnected with error message
-    TemplatesUpdated(Vec<String>), // List of template files found
-    TimedTapExecuted(String, u32, u32), // ID, x, y of executed timed tap (for backward compatibility)
-    TimedTapCountdown(String, u64), // ID, seconds until next execution (for backward compatibility)
-    TimedEventsListed(Vec<TimedEvent>), // Response to ListTimedEvents command
-    TimedEventExecuted(String),     // ID of executed timed event
-    NextTimedEvent(String, u64),    // ID, seconds until next event
-    ManualActivityDetected(bool, Option<u64>), // (is_active, remaining_seconds) - True when human touch detected with countdown, false when timeout expires
-    ReconnectionAttempt(u64),                  // Seconds until next reconnection attempt
-    DeviceReconnected,                         // Device successfully reconnected
 }

@@ -1,10 +1,11 @@
 // Finite State Machine implementation for game automation - Event Driven Architecture
 use super::match_image::{GameStateDetector, MatchConfig, create_default_config};
 use super::types::{
-    AutomationCommand, AutomationEvent, GameState, MAX_TAP_INTERVAL_SECONDS,
-    MIN_TAP_INTERVAL_SECONDS, TimedEvent, TimedEventType,
+    AutomationCommand, GameState, MAX_TAP_INTERVAL_SECONDS, MIN_TAP_INTERVAL_SECONDS, TimedEvent,
+    TimedEventType,
 };
 use crate::adb::{AdbBackend, AdbClient};
+use dioxus::prelude::{Signal, WritableExt};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
@@ -43,7 +44,6 @@ pub struct GameAutomation {
     state: GameState,
     adb_client: Option<Arc<Mutex<AdbBackend>>>,
     command_rx: mpsc::Receiver<AutomationCommand>,
-    event_tx: mpsc::Sender<AutomationEvent>,
     is_running: bool,
     should_exit: bool,
     debug_enabled: bool,
@@ -55,13 +55,36 @@ pub struct GameAutomation {
     // Reconnection tracking
     last_reconnect_attempt: Option<std::time::Instant>,
     device_disconnected: bool,
+    // Direct signal updates (replacing event channel)
+    screenshot_data: Signal<Option<String>>,
+    screenshot_bytes: Signal<Option<Vec<u8>>>,
+    screenshot_status: Signal<String>,
+    automation_state: Signal<GameState>,
+    is_paused_by_touch: Signal<bool>,
+    touch_timeout_remaining: Signal<Option<u64>>,
+    timed_tap_countdown: Signal<Option<(String, u64)>>,
+    timed_events_list: Signal<Vec<TimedEvent>>,
+    device_info: Signal<Option<(String, Option<u32>, u32, u32)>>,
+    status: Signal<String>,
+    screenshot_counter: Signal<u64>,
 }
 
 impl GameAutomation {
     pub fn new(
         command_rx: mpsc::Receiver<AutomationCommand>,
-        event_tx: mpsc::Sender<AutomationEvent>,
         debug_enabled: bool,
+        // Direct signal references
+        screenshot_data: Signal<Option<String>>,
+        screenshot_bytes: Signal<Option<Vec<u8>>>,
+        screenshot_status: Signal<String>,
+        automation_state: Signal<GameState>,
+        is_paused_by_touch: Signal<bool>,
+        touch_timeout_remaining: Signal<Option<u64>>,
+        timed_tap_countdown: Signal<Option<(String, u64)>>,
+        timed_events_list: Signal<Vec<TimedEvent>>,
+        device_info: Signal<Option<(String, Option<u32>, u32, u32)>>,
+        status: Signal<String>,
+        screenshot_counter: Signal<u64>,
     ) -> Self {
         // Create default detector (will be updated with screen dimensions later)
         let config = create_default_config();
@@ -137,7 +160,6 @@ impl GameAutomation {
             state: GameState::Idle,
             adb_client: None,
             command_rx,
-            event_tx,
             is_running: false,
             should_exit: false,
             debug_enabled,
@@ -146,6 +168,17 @@ impl GameAutomation {
             timed_events,
             last_reconnect_attempt: None,
             device_disconnected: false,
+            screenshot_data,
+            screenshot_bytes,
+            screenshot_status,
+            automation_state,
+            is_paused_by_touch,
+            touch_timeout_remaining,
+            timed_tap_countdown,
+            timed_events_list,
+            device_info,
+            status,
+            screenshot_counter,
         }
     }
 
@@ -173,13 +206,7 @@ impl GameAutomation {
                     "✅ Loaded {} templates for game state detection",
                     count
                 );
-                // Create template names for GUI notification
-                let template_names: Vec<String> =
-                    (0..count).map(|i| format!("template_{}", i)).collect();
-                let _ = self
-                    .event_tx
-                    .send(AutomationEvent::TemplatesUpdated(template_names))
-                    .await;
+                // Templates loaded - no GUI notification needed (templates are internal)
             }
             Err(e) => {
                 debug_print!(self.debug_enabled, "⚠️ Template loading warning: {}", e);
@@ -224,10 +251,7 @@ impl GameAutomation {
             }
             Err(e) => {
                 let error = format!("Failed to initialize ADB for automation: {}", e);
-                let _ = self
-                    .event_tx
-                    .send(AutomationEvent::Error(error.clone()))
-                    .await;
+                *self.screenshot_status.write_unchecked() = format!("❌ {}", error);
                 Err(error)
             }
         }
@@ -242,10 +266,7 @@ impl GameAutomation {
                 new_state
             );
             self.state = new_state.clone();
-            let _ = self
-                .event_tx
-                .send(AutomationEvent::StateChanged(new_state))
-                .await;
+            *self.automation_state.write_unchecked() = new_state;
         }
     }
 
@@ -268,14 +289,33 @@ impl GameAutomation {
                     // Store the latest screenshot for image recognition
                     self.latest_screenshot = Some(bytes.clone());
 
-                    // Send screenshot ready event with timing information
-                    let _ = self
-                        .event_tx
-                        .send(AutomationEvent::ScreenshotTaken(
-                            bytes.clone(),
-                            duration_ms as u64,
-                        ))
-                        .await;
+                    // Update screenshot signals directly
+                    let bytes_for_encoding = bytes.clone();
+                    let bytes_for_signal = bytes.clone();
+                    let mut screenshot_counter_clone = self.screenshot_counter;
+                    let screenshot_data_clone = self.screenshot_data;
+                    let screenshot_bytes_clone = self.screenshot_bytes;
+                    let screenshot_status_clone = self.screenshot_status;
+
+                    // Spawn base64 encoding in background to avoid blocking
+                    dioxus::prelude::spawn(async move {
+                        use crate::gui::util::base64_encode;
+                        let counter_val = screenshot_counter_clone.with_mut(|c| {
+                            *c += 1;
+                            *c
+                        });
+                        let base64_string =
+                            tokio::task::spawn_blocking(move || base64_encode(&bytes_for_encoding))
+                                .await
+                                .unwrap_or_default();
+                        *screenshot_data_clone.write_unchecked() = Some(base64_string);
+                        *screenshot_bytes_clone.write_unchecked() = Some(bytes_for_signal);
+                        *screenshot_status_clone.write_unchecked() = format!(
+                            "🤖 Automation screenshot #{} ({}ms)",
+                            counter_val, duration_ms
+                        );
+                    });
+
                     Ok(bytes)
                 }
                 Err(e) => {
@@ -290,15 +330,16 @@ impl GameAutomation {
                         );
                         self.device_disconnected = true;
                         self.last_reconnect_attempt = None; // Reset for immediate reconnection attempt
-                        let _ = self
-                            .event_tx
-                            .send(AutomationEvent::DeviceDisconnected(error.clone()))
-                            .await;
+                        *self.device_info.write_unchecked() = None;
+                        *self.screenshot_data.write_unchecked() = None;
+                        *self.screenshot_bytes.write_unchecked() = None;
+                        *self.screenshot_status.write_unchecked() =
+                            format!("🔌 USB DISCONNECTED: {} - Please reconnect", error);
+                        *self.status.write_unchecked() =
+                            "🔌 Device Disconnected - Paused".to_string();
                     } else {
-                        let _ = self
-                            .event_tx
-                            .send(AutomationEvent::Error(error.clone()))
-                            .await;
+                        *self.screenshot_status.write_unchecked() =
+                            format!("🤖 Automation error: {}", error);
                     }
                     Err(error)
                 }
@@ -322,8 +363,16 @@ impl GameAutomation {
                     self.is_running
                 );
                 if !self.is_running {
+                    // Check if ADB client is available before starting
+                    if self.adb_client.is_none() {
+                        println!("⚠️ Cannot start automation: ADB client not initialized");
+                        return;
+                    }
+                    
                     self.is_running = true;
                     self.change_state(GameState::Running).await;
+                    println!("🚀 Game automation STARTED. is_running={}, state={:?}", self.is_running, self.state);
+                    
                     debug_print!(
                         self.debug_enabled,
                         "🚀 Game automation started. Timed events: {} configured",
@@ -409,11 +458,9 @@ impl GameAutomation {
                             self.debug_enabled,
                             "👆 Touch activity cleared - automation resuming"
                         );
-                        // Send event to update GUI
-                        let _ = self
-                            .event_tx
-                            .send(AutomationEvent::ManualActivityDetected(false, None))
-                            .await;
+                        // Update GUI signals
+                        *self.is_paused_by_touch.write_unchecked() = false;
+                        *self.touch_timeout_remaining.write_unchecked() = None;
                     }
                 }
             }
@@ -432,11 +479,9 @@ impl GameAutomation {
                             self.debug_enabled,
                             "👆 GUI touch registered - pausing automation for 30s"
                         );
-                        // Send event to update GUI with countdown
-                        let _ = self
-                            .event_tx
-                            .send(AutomationEvent::ManualActivityDetected(true, Some(30)))
-                            .await;
+                        // Update GUI signals with countdown
+                        *self.is_paused_by_touch.write_unchecked() = true;
+                        *self.touch_timeout_remaining.write_unchecked() = Some(30);
                     }
                 }
             }
@@ -451,13 +496,13 @@ impl GameAutomation {
                     "🧪 Manual image recognition test requested"
                 );
                 if let Err(e) = self.test_image_recognition().await {
-                    let _ = self.event_tx.send(AutomationEvent::Error(e)).await;
+                    *self.screenshot_status.write_unchecked() = format!("❌ {}", e);
                 }
             }
             AutomationCommand::RescanTemplates => {
                 debug_print!(self.debug_enabled, "🔄 Template rescan requested");
                 if let Err(e) = self.rescan_templates().await {
-                    let _ = self.event_tx.send(AutomationEvent::Error(e)).await;
+                    *self.screenshot_status.write_unchecked() = format!("❌ {}", e);
                 }
             }
             AutomationCommand::AddTimedEvent(event) => {
@@ -586,22 +631,18 @@ impl GameAutomation {
                                             );
                                             self.device_disconnected = true;
                                             self.last_reconnect_attempt = None;
-                                            let _ =
-                                                self.event_tx
-                                                    .send(AutomationEvent::DeviceDisconnected(
-                                                        format!("Tap trigger failed: {}", e),
-                                                    ))
-                                                    .await;
+                                            *self.device_info.write_unchecked() = None;
+                                            *self.screenshot_data.write_unchecked() = None;
+                                            *self.screenshot_bytes.write_unchecked() = None;
+                                            *self.screenshot_status.write_unchecked() = format!(
+                                                "🔌 USB DISCONNECTED: {} - Please reconnect",
+                                                e
+                                            );
+                                            *self.status.write_unchecked() =
+                                                "🔌 Device Disconnected - Paused".to_string();
                                         }
                                     } else {
-                                        let _ = self
-                                            .event_tx
-                                            .send(AutomationEvent::TimedTapExecuted(
-                                                id.clone(),
-                                                x,
-                                                y,
-                                            ))
-                                            .await;
+                                        // Tap executed successfully - no GUI notification needed for manual triggers
                                     }
                                 }
                             }
@@ -618,10 +659,7 @@ impl GameAutomation {
                             event.mark_executed();
                         }
                         self.send_timed_events_list().await;
-                        let _ = self
-                            .event_tx
-                            .send(AutomationEvent::TimedEventExecuted(id))
-                            .await;
+                        // Event executed successfully - list already updated
                     } else {
                         debug_print!(
                             self.debug_enabled,
@@ -660,10 +698,7 @@ impl GameAutomation {
                         next_time
                     );
                 }
-                let _ = self
-                    .event_tx
-                    .send(AutomationEvent::TimedEventsListed(events))
-                    .await;
+                *self.timed_events_list.write_unchecked() = events;
             }
             AutomationCommand::Shutdown => {
                 self.should_exit = true;
@@ -677,8 +712,15 @@ impl GameAutomation {
     /// New event-driven main loop with timeout-based command handling
     pub async fn run(&mut self) {
         debug_print!(self.debug_enabled, "🎮 Event-driven automation FSM started");
+        println!("🎮 Automation run() loop starting");
 
+        let mut loop_count = 0u32;
         loop {
+            loop_count += 1;
+            if loop_count % 10 == 0 {
+                println!("💓 Loop alive: {}, is_running={}", loop_count, self.is_running);
+            }
+            
             // Wait for commands with a 1-second timeout for responsive event processing
             match timeout(Duration::from_secs(1), self.command_rx.recv()).await {
                 Ok(Some(command)) => {
@@ -692,7 +734,6 @@ impl GameAutomation {
                 }
                 Err(_) => {
                     // Timeout occurred, continue to process timed events
-                    debug_print!(self.debug_enabled, "⏱️ Command timeout, processing events");
                 }
             }
 
@@ -704,6 +745,11 @@ impl GameAutomation {
             // Process timed events if automation is running and not paused
             if self.is_running && self.state != GameState::Paused {
                 self.process_timed_events().await;
+            } else {
+                static ONCE: std::sync::Once = std::sync::Once::new();
+                ONCE.call_once(|| {
+                    println!("⚠️ NOT processing events: is_running={}, state={:?}", self.is_running, self.state);
+                });
             }
 
             // Break the loop if shutdown was requested
@@ -730,14 +776,9 @@ impl GameAutomation {
                     self.debug_enabled,
                     "🚫 AUTOMATION PAUSED: Human touch detected - skipping timed events"
                 );
-                // Send notification that human activity is detected with countdown
-                let _ = self
-                    .event_tx
-                    .send(AutomationEvent::ManualActivityDetected(
-                        true,
-                        remaining_seconds,
-                    ))
-                    .await;
+                // Update GUI signals with countdown
+                *self.is_paused_by_touch.write_unchecked() = true;
+                *self.touch_timeout_remaining.write_unchecked() = remaining_seconds;
                 return; // Skip processing timed events while human is touching
             } else {
                 // Only send "no activity" notification if we haven't sent it recently
@@ -764,10 +805,8 @@ impl GameAutomation {
                         self.debug_enabled,
                         "✅ AUTOMATION ACTIVE: No human touch detected - processing events"
                     );
-                    let _ = self
-                        .event_tx
-                        .send(AutomationEvent::ManualActivityDetected(false, None))
-                        .await;
+                    *self.is_paused_by_touch.write_unchecked() = false;
+                    *self.touch_timeout_remaining.write_unchecked() = None;
                 }
             }
         }
@@ -777,7 +816,25 @@ impl GameAutomation {
         // Collect ready events
         for (id, event) in &self.timed_events {
             if event.is_ready() {
+                println!("✓ Event '{}' is READY", id);
                 events_to_execute.push((id.clone(), event.event_type.clone()));
+            }
+        }
+
+        if events_to_execute.is_empty() {
+            // Check why no events are ready
+            static EMPTY_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let count = EMPTY_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if count % 30 == 0 && count > 0 {
+                println!("📭 No events ready (checked {} times)", count);
+                for (id, event) in &self.timed_events {
+                    if let Some(last) = event.last_executed {
+                        let elapsed = last.elapsed();
+                        println!("  - {}: elapsed={:?} vs interval={:?}", id, elapsed, event.interval);
+                    } else {
+                        println!("  - {}: never executed", id);
+                    }
+                }
             }
         }
 
@@ -804,23 +861,17 @@ impl GameAutomation {
                     self.device_disconnected = true;
                     self.last_reconnect_attempt = None;
 
-                    // Send disconnect event to GUI
-                    let _ = self
-                        .event_tx
-                        .send(AutomationEvent::DeviceDisconnected(format!(
-                            "Timed event '{}' failed: {}",
-                            event_id, e
-                        )))
-                        .await;
+                    // Update disconnect signals
+                    *self.device_info.write_unchecked() = None;
+                    *self.screenshot_data.write_unchecked() = None;
+                    *self.screenshot_bytes.write_unchecked() = None;
+                    *self.screenshot_status.write_unchecked() =
+                        format!("🔌 USB DISCONNECTED: {} - Please reconnect", e);
+                    *self.status.write_unchecked() = "🔌 Device Disconnected - Paused".to_string();
                     return; // Stop processing further events on disconnect
                 } else {
-                    let _ = self
-                        .event_tx
-                        .send(AutomationEvent::Error(format!(
-                            "Timed event '{}' failed: {}",
-                            event_id, e
-                        )))
-                        .await;
+                    *self.screenshot_status.write_unchecked() =
+                        format!("❌ Timed event '{}' failed: {}", event_id, e);
                 }
             }
         }
@@ -853,26 +904,19 @@ impl GameAutomation {
             }
             TimedEventType::Tap { x, y } => {
                 if let Some(client) = &self.adb_client {
-                    let client_guard = client.lock().await;
-                    match client_guard.tap(*x, *y).await {
+                    println!("🎯 Queuing tap: {} at ({},{})", event_id, x, y);
+                    let result = {
+                        let client_guard = client.lock().await;
+                        client_guard.tap(*x, *y).await
+                    }; // Lock released here
+                    
+                    match result {
                         Ok(()) => {
-                            debug_print!(
-                                self.debug_enabled,
-                                "✅ Timed tap '{}' executed at ({},{})",
-                                event_id,
-                                x,
-                                y
-                            );
-                            let _ = self
-                                .event_tx
-                                .send(AutomationEvent::TimedTapExecuted(
-                                    event_id.to_string(),
-                                    *x,
-                                    *y,
-                                ))
-                                .await;
+                            println!("✅ {} queued", event_id);
                         }
-                        Err(e) => return Err(format!("ADB tap failed: {}", e)),
+                        Err(e) => {
+                            println!("❌ {} queue failed: {}", event_id, e);
+                        }
                     }
                 } else {
                     return Err("ADB client not available".to_string());
@@ -881,6 +925,21 @@ impl GameAutomation {
             TimedEventType::CountdownUpdate => {
                 self.send_timed_events_list().await;
                 self.send_timed_tap_countdowns().await;
+                
+                // Log tap event status
+                for (id, event) in &self.timed_events {
+                    if id.contains("tap") {
+                        if let Some(last) = event.last_executed {
+                            let elapsed = last.elapsed();
+                            let remaining = if elapsed < event.interval {
+                                event.interval - elapsed
+                            } else {
+                                Duration::from_secs(0)
+                            };
+                            println!("⏰ {}: {}s remaining", id, remaining.as_secs());
+                        }
+                    }
+                }
             }
         }
 
@@ -889,10 +948,7 @@ impl GameAutomation {
             event.mark_executed();
         }
 
-        let _ = self
-            .event_tx
-            .send(AutomationEvent::TimedEventExecuted(event_id.to_string()))
-            .await;
+        // Event executed - timing updates will be sent via countdown_update event
 
         Ok(())
     }
@@ -915,12 +971,7 @@ impl GameAutomation {
         match self.game_detector.reload_templates(".") {
             Ok(count) => {
                 debug_print!(self.debug_enabled, "🔄 Reloaded {} templates", count);
-                let template_paths: Vec<String> =
-                    (0..count).map(|i| format!("template_{}", i)).collect();
-                let _ = self
-                    .event_tx
-                    .send(AutomationEvent::TemplatesUpdated(template_paths))
-                    .await;
+                // Templates reloaded - no GUI notification needed (templates are internal)
                 Ok(())
             }
             Err(e) => {
@@ -1055,10 +1106,13 @@ impl GameAutomation {
                             );
                             self.device_disconnected = true;
                             self.last_reconnect_attempt = None;
-                            let _ = self
-                                .event_tx
-                                .send(AutomationEvent::DeviceDisconnected(error_msg.clone()))
-                                .await;
+                            *self.device_info.write_unchecked() = None;
+                            *self.screenshot_data.write_unchecked() = None;
+                            *self.screenshot_bytes.write_unchecked() = None;
+                            *self.screenshot_status.write_unchecked() =
+                                format!("🔌 USB DISCONNECTED: {} - Please reconnect", error_msg);
+                            *self.status.write_unchecked() =
+                                "🔌 Device Disconnected - Paused".to_string();
                         }
 
                         Err(error_msg)
@@ -1077,14 +1131,8 @@ impl GameAutomation {
     async fn send_timed_tap_countdowns(&self) {
         // Find the next tap to fire (excluding system events)
         if let Some((next_tap_id, seconds_remaining)) = self.get_next_tap_info() {
-            // Send the countdown for the next tap to fire
-            let _ = self
-                .event_tx
-                .send(AutomationEvent::TimedTapCountdown(
-                    next_tap_id,
-                    seconds_remaining,
-                ))
-                .await;
+            // Update countdown signal
+            *self.timed_tap_countdown.write_unchecked() = Some((next_tap_id, seconds_remaining));
         }
     }
 
@@ -1092,10 +1140,7 @@ impl GameAutomation {
     async fn send_timed_events_list(&self) {
         let events: Vec<crate::game_automation::types::TimedEvent> =
             self.timed_events.values().cloned().collect();
-        let _ = self
-            .event_tx
-            .send(AutomationEvent::TimedEventsListed(events))
-            .await;
+        *self.timed_events_list.write_unchecked() = events;
     }
 
     /// Get information about the next timed tap to fire (legacy compatibility)
@@ -1162,10 +1207,8 @@ impl GameAutomation {
             let elapsed = now.duration_since(last_attempt).as_secs();
             let remaining = RECONNECTION_INTERVAL_SECS.saturating_sub(elapsed);
 
-            let _ = self
-                .event_tx
-                .send(AutomationEvent::ReconnectionAttempt(remaining))
-                .await;
+            *self.screenshot_status.write_unchecked() =
+                format!("🔌 Device disconnected - Retrying in {}s...", remaining);
         }
     }
 
@@ -1221,8 +1264,20 @@ impl GameAutomation {
                     );
                 }
 
-                // Send reconnection event to GUI
-                let _ = self.event_tx.send(AutomationEvent::DeviceReconnected).await;
+                // Update reconnection signals
+                if let Some(client_arc) = &self.adb_client {
+                    let client_guard = client_arc.lock().await;
+                    let (sx, sy) = client_guard.screen_dimensions();
+                    *self.device_info.write_unchecked() = Some((
+                        client_guard.device_name().to_string(),
+                        client_guard.transport_id(),
+                        sx,
+                        sy,
+                    ));
+                }
+                *self.screenshot_status.write_unchecked() =
+                    "✅ Reconnected! Automation ready.".to_string();
+                *self.status.write_unchecked() = "✅ Device Reconnected - Resuming".to_string();
 
                 debug_print!(
                     self.debug_enabled,
