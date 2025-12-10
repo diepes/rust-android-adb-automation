@@ -22,7 +22,7 @@ fn main() {
 
     // Step 2: Search for USB devices
     println!("🔍 Searching for ADB devices...");
-    let (vendor_id, product_id) = match adb_client::search_adb_devices() {
+    let (_vendor_id, _product_id) = match adb_client::search_adb_devices() {
         Ok(Some((v, p))) => {
             println!("✅ Found device: {:04x}:{:04x}\n", v, p);
             (v, p)

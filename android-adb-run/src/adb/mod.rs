@@ -7,6 +7,9 @@ pub mod error;
 pub mod types;
 pub mod usb_impl;
 
+#[cfg(test)]
+mod tests;
+
 // Re-export the main types and functions for easy access
 pub use backend::AdbBackend;
 pub use error::{AdbError, AdbResult};

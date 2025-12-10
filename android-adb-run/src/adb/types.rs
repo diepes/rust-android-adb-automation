@@ -46,6 +46,14 @@ impl TouchActivityState {
         }
     }
 
+    pub fn new_with_duration(timeout_duration: Duration) -> Self {
+        Self {
+            last_touch_time: None,
+            is_monitoring: false,
+            timeout_duration,
+        }
+    }
+
     pub fn is_human_active(&self) -> bool {
         if let Some(last_touch) = self.last_touch_time {
             last_touch.elapsed() < self.timeout_duration

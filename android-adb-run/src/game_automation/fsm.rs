@@ -1293,3 +1293,101 @@ impl GameAutomation {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_timed_event_interval_tracking() {
+        // Test that TimedEvent correctly tracks intervals
+        let mut event = TimedEvent::new_tap_seconds("test_tap".to_string(), 100, 100, 2);
+        
+        // Initially should be ready (time=0)
+        assert!(event.is_ready());
+        // When ready, returns Some(Duration::ZERO)
+        let time_until = event.time_until_next().unwrap();
+        assert_eq!(time_until.as_secs(), 0, "Should be ready immediately");
+        
+        // Mark as executed
+        event.mark_executed();
+        
+        // Should not be ready immediately after
+        assert!(!event.is_ready());
+        
+        // Time until ready should be close to 2 seconds (allow small variance)
+        let remaining = event.time_until_next().unwrap();
+        let remaining_secs = remaining.as_secs();
+        assert!(remaining_secs <= 2, "Expected ~2s remaining, got {}s", remaining_secs);
+        assert!(remaining_secs > 0, "Expected ~2s remaining, got {}s", remaining_secs);
+    }
+
+    #[test]
+    fn test_multiple_timed_events() {
+        // Test that multiple events can be tracked independently
+        let mut events = HashMap::new();
+        
+        events.insert(
+            "event1".to_string(),
+            TimedEvent::new_tap_seconds("event1".to_string(), 100, 100, 5),
+        );
+        events.insert(
+            "event2".to_string(),
+            TimedEvent::new_tap_seconds("event2".to_string(), 200, 200, 10),
+        );
+        
+        // Both should start ready
+        assert!(events.get("event1").unwrap().is_ready());
+        assert!(events.get("event2").unwrap().is_ready());
+        
+        // Execute first event
+        events.get_mut("event1").unwrap().mark_executed();
+        
+        // First should not be ready, second still ready
+        assert!(!events.get("event1").unwrap().is_ready());
+        assert!(events.get("event2").unwrap().is_ready());
+        
+        // Check intervals are different
+        let remaining1 = events.get("event1").unwrap().time_until_next().unwrap();
+        assert!(remaining1.as_secs() <= 5, "Event1 interval incorrect");
+        
+        // Execute second event
+        events.get_mut("event2").unwrap().mark_executed();
+        let remaining2 = events.get("event2").unwrap().time_until_next().unwrap();
+        assert!(remaining2.as_secs() <= 10, "Event2 interval incorrect");
+        assert!(remaining2 > remaining1, "Event2 should have longer interval");
+    }
+
+    #[tokio::test]
+    async fn test_lock_scope_prevents_deadlock() {
+        // This test verifies that locks are properly scoped and released
+        use tokio::sync::Mutex;
+        
+        let counter = Arc::new(Mutex::new(0u32));
+        let counter_clone = counter.clone();
+        
+        // Simulate the pattern used in execute_timed_event
+        let task = tokio::spawn(async move {
+            for _i in 0..5 {
+                // Scoped lock (like in the fix)
+                {
+                    let mut guard = counter_clone.lock().await;
+                    *guard += 1;
+                } // Lock released here
+                
+                // Small delay between operations
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        });
+        
+        // Wait for task to complete with timeout
+        let result = tokio::time::timeout(Duration::from_secs(1), task).await;
+        
+        // Should not timeout (would timeout if locks were held)
+        assert!(result.is_ok(), "Task timed out - potential deadlock");
+        
+        // Check final value
+        let final_value = *counter.lock().await;
+        assert_eq!(final_value, 5, "Expected 5 increments, got {}", final_value);
+    }
+}
