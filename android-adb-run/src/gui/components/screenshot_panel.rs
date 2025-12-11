@@ -198,6 +198,14 @@ pub fn screenshot_panel() -> Element {
                                                     let client = client_arc.lock().await;
                                                     if distance < 10.0 {
                                                         client.tap(sx0, sy0).await?;
+                                                        
+                                                        // Add marker at tap location
+                                                        tap_markers.with_mut(|markers| {
+                                                            markers.push(TapMarker {
+                                                                point: r,
+                                                                timestamp: Instant::now(),
+                                                            });
+                                                        });
                                                     } else {
                                                         client.swipe(sx0, sy0, ex, ey, Some(300)).await?;
                                                     }
