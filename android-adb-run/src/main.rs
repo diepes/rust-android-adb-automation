@@ -86,7 +86,7 @@ fn main() {
                 "🚀 Launching Android ADB Control GUI{}...",
                 if debug_mode { " [DEBUG MODE]" } else { "" }
             );
-            
+
             if let Some(secs) = timeout_secs {
                 println!("⏱️  Auto-exit after {} seconds", secs);
                 std::thread::spawn(move || {
@@ -95,7 +95,7 @@ fn main() {
                     std::process::exit(0);
                 });
             }
-            
+
             run_gui(debug_mode);
         }
         _ => unreachable!(),

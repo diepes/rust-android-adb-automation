@@ -1,5 +1,5 @@
 use super::error::{AdbError, AdbResult};
-use super::types::{AdbClient, Device, UsbCommand, TouchActivityMonitor, TouchActivityState};
+use super::types::{AdbClient, Device, TouchActivityMonitor, TouchActivityState, UsbCommand};
 use adb_client::{ADBDeviceExt, ADBUSBDevice};
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,10 +35,10 @@ impl UsbAdb {
             for line in stdout.lines() {
                 if let Some(size_str) = line.strip_prefix("Physical size: ") {
                     let parts: Vec<&str> = size_str.trim().split('x').collect();
-                    if parts.len() == 2 {
-                        if let (Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
-                            return Ok((x, y));
-                        }
+                    if parts.len() == 2
+                        && let (Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+                    {
+                        return Ok((x, y));
                     }
                 }
             }
@@ -401,31 +401,46 @@ impl AdbClient for UsbAdb {
             println!("🔧 USB command processor started");
             while let Some(cmd) = rx.recv().await {
                 let mut dev = usb_clone.lock().await;
-                
+
                 match cmd {
                     UsbCommand::Tap { x, y } => {
                         if x > screen_x || y > screen_y {
                             println!("❌ Tap out of bounds: ({},{})", x, y);
                             continue;
                         }
-                        
+
                         let mut out = Vec::new();
-                        match dev.shell_command(&["input", "tap", &x.to_string(), &y.to_string()], &mut out) {
+                        match dev.shell_command(
+                            &["input", "tap", &x.to_string(), &y.to_string()],
+                            &mut out,
+                        ) {
                             Ok(_) => println!("✅ Tap executed: ({},{})", x, y),
                             Err(e) => println!("❌ Tap failed: {} ({},{})", e, x, y),
                         }
                     }
 
-                    UsbCommand::Swipe { x1, y1, x2, y2, duration } => {
+                    UsbCommand::Swipe {
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        duration,
+                    } => {
                         let duration_ms = duration.unwrap_or(300);
                         let mut out = Vec::new();
-                        
-                        match dev.shell_command(&[
-                            "input", "swipe",
-                            &x1.to_string(), &y1.to_string(),
-                            &x2.to_string(), &y2.to_string(),
-                            &duration_ms.to_string(),
-                        ], &mut out) {
+
+                        match dev.shell_command(
+                            &[
+                                "input",
+                                "swipe",
+                                &x1.to_string(),
+                                &y1.to_string(),
+                                &x2.to_string(),
+                                &y2.to_string(),
+                                &duration_ms.to_string(),
+                            ],
+                            &mut out,
+                        ) {
                             Ok(_) => println!("✅ Swipe executed"),
                             Err(e) => println!("❌ Swipe failed: {}", e),
                         }
@@ -447,7 +462,10 @@ impl AdbClient for UsbAdb {
                         let _ = response_tx.send(result);
                     }
 
-                    UsbCommand::CheckTouchEvent { event_device: _, response_tx } => {
+                    UsbCommand::CheckTouchEvent {
+                        event_device: _,
+                        response_tx,
+                    } => {
                         // Use getevent with very short timeout to avoid blocking the queue
                         // The -c 1 waits for 1 event which could block indefinitely
                         // Instead, just skip touch monitoring checks to prioritize taps
@@ -472,12 +490,12 @@ impl AdbClient for UsbAdb {
 
     async fn screen_capture_bytes(&self) -> AdbResult<Vec<u8>> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        
+
         self.usb_queue_tx
             .send(UsbCommand::Screenshot { response_tx: tx })
             .await
             .map_err(|_| AdbError::ChannelClosed)?;
-        
+
         match tokio::time::timeout(Duration::from_secs(30), rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(AdbError::ChannelClosed),
@@ -492,11 +510,12 @@ impl AdbClient for UsbAdb {
         if x > self.screen_x || y > self.screen_y {
             return Err(AdbError::TapOutOfBounds { x, y });
         }
-        
-        self.usb_queue_tx.send(UsbCommand::Tap { x, y })
+
+        self.usb_queue_tx
+            .send(UsbCommand::Tap { x, y })
             .await
             .map_err(|_| AdbError::ChannelClosed)?;
-        
+
         Ok(())
     }
 
@@ -574,7 +593,8 @@ impl AdbClient for UsbAdb {
 
         let task = tokio::spawn(async move {
             if let Err(e) =
-                Self::monitor_touch_activity_loop(touch_monitor.clone(), usb_device, usb_queue_tx).await
+                Self::monitor_touch_activity_loop(touch_monitor.clone(), usb_device, usb_queue_tx)
+                    .await
             {
                 log::error!("Touch monitoring ended: {}", e);
             }

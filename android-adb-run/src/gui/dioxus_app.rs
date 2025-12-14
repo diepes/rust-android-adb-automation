@@ -1,5 +1,5 @@
 use crate::adb::{AdbBackend, AdbClient};
-use crate::game_automation::types::TimedEvent;
+use crate::game_automation::types::{DeviceInfo, TimedEvent};
 use crate::game_automation::{AutomationCommand, GameAutomation, GameState};
 use crate::gui::components::{
     actions::Actions,
@@ -27,7 +27,7 @@ pub struct AppContext {
     pub screenshot_status: Signal<String>,
     pub screenshot_data: Signal<Option<String>>,
     pub screenshot_bytes: Signal<Option<Vec<u8>>>,
-    pub device_info: Signal<Option<(String, Option<u32>, u32, u32)>>,
+    pub device_info: Signal<Option<DeviceInfo>>,
     pub device_coords: Signal<Option<(u32, u32)>>,
     pub mouse_coords: Signal<Option<(i32, i32)>>,
     pub is_loading_screenshot: Signal<bool>,
@@ -358,22 +358,21 @@ fn App() -> Element {
             let (cmd_tx, cmd_rx) = mpsc::channel(32);
             automation_command_tx_clone.set(Some(cmd_tx.clone()));
 
-            // Create GameAutomation with direct signal references
-            let mut automation = GameAutomation::new(
-                cmd_rx,
-                debug_mode,
-                screenshot_data_clone,
-                screenshot_bytes_clone,
-                screenshot_status_clone,
-                automation_state_clone,
-                is_paused_by_touch_clone,
-                touch_timeout_remaining_clone,
-                timed_tap_countdown_clone,
-                timed_events_list_clone,
-                device_info_clone,
-                status_clone,
-                screenshot_counter_clone,
-            );
+            // Create GameAutomation with signal bundle
+            let signals = crate::game_automation::types::AutomationSignals {
+                screenshot_data: screenshot_data_clone,
+                screenshot_bytes: screenshot_bytes_clone,
+                screenshot_status: screenshot_status_clone,
+                automation_state: automation_state_clone,
+                is_paused_by_touch: is_paused_by_touch_clone,
+                touch_timeout_remaining: touch_timeout_remaining_clone,
+                timed_tap_countdown: timed_tap_countdown_clone,
+                timed_events_list: timed_events_list_clone,
+                device_info: device_info_clone,
+                status: status_clone,
+                screenshot_counter: screenshot_counter_clone,
+            };
+            let mut automation = GameAutomation::new(cmd_rx, debug_mode, signals);
 
             // Wait for shared client to be available
             let shared_client = loop {

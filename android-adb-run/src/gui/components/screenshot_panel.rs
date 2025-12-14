@@ -198,7 +198,7 @@ pub fn screenshot_panel() -> Element {
                                                     let client = client_arc.lock().await;
                                                     if distance < 10.0 {
                                                         client.tap(sx0, sy0).await?;
-                                                        
+
                                                         // Add marker at tap location
                                                         tap_markers.with_mut(|markers| {
                                                             markers.push(TapMarker {
@@ -232,7 +232,7 @@ pub fn screenshot_panel() -> Element {
                                                             screenshot_status.set(format!("✅ Action successful - Screenshot #{} ({}ms)", counter_val, duration_ms));
                                                             is_loading_screenshot.set(false);
                                                         } else {
-                                                            screenshot_status.set(format!("✅ Action successful"));
+                                                            screenshot_status.set("✅ Action successful".to_string());
                                                         }
                                                     }
                                                     Err(e) => {

@@ -1,8 +1,8 @@
 // Finite State Machine implementation for game automation - Event Driven Architecture
 use super::match_image::{GameStateDetector, MatchConfig, create_default_config};
 use super::types::{
-    AutomationCommand, GameState, MAX_TAP_INTERVAL_SECONDS, MIN_TAP_INTERVAL_SECONDS, TimedEvent,
-    TimedEventType,
+    AutomationCommand, DeviceInfo, GameState, MAX_TAP_INTERVAL_SECONDS, MIN_TAP_INTERVAL_SECONDS,
+    TimedEvent, TimedEventType,
 };
 use crate::adb::{AdbBackend, AdbClient};
 use dioxus::prelude::{Signal, WritableExt};
@@ -64,7 +64,7 @@ pub struct GameAutomation {
     touch_timeout_remaining: Signal<Option<u64>>,
     timed_tap_countdown: Signal<Option<(String, u64)>>,
     timed_events_list: Signal<Vec<TimedEvent>>,
-    device_info: Signal<Option<(String, Option<u32>, u32, u32)>>,
+    device_info: Signal<Option<DeviceInfo>>,
     status: Signal<String>,
     screenshot_counter: Signal<u64>,
 }
@@ -73,18 +73,7 @@ impl GameAutomation {
     pub fn new(
         command_rx: mpsc::Receiver<AutomationCommand>,
         debug_enabled: bool,
-        // Direct signal references
-        screenshot_data: Signal<Option<String>>,
-        screenshot_bytes: Signal<Option<Vec<u8>>>,
-        screenshot_status: Signal<String>,
-        automation_state: Signal<GameState>,
-        is_paused_by_touch: Signal<bool>,
-        touch_timeout_remaining: Signal<Option<u64>>,
-        timed_tap_countdown: Signal<Option<(String, u64)>>,
-        timed_events_list: Signal<Vec<TimedEvent>>,
-        device_info: Signal<Option<(String, Option<u32>, u32, u32)>>,
-        status: Signal<String>,
-        screenshot_counter: Signal<u64>,
+        signals: super::types::AutomationSignals,
     ) -> Self {
         // Create default detector (will be updated with screen dimensions later)
         let config = create_default_config();
@@ -168,17 +157,17 @@ impl GameAutomation {
             timed_events,
             last_reconnect_attempt: None,
             device_disconnected: false,
-            screenshot_data,
-            screenshot_bytes,
-            screenshot_status,
-            automation_state,
-            is_paused_by_touch,
-            touch_timeout_remaining,
-            timed_tap_countdown,
-            timed_events_list,
-            device_info,
-            status,
-            screenshot_counter,
+            screenshot_data: signals.screenshot_data,
+            screenshot_bytes: signals.screenshot_bytes,
+            screenshot_status: signals.screenshot_status,
+            automation_state: signals.automation_state,
+            is_paused_by_touch: signals.is_paused_by_touch,
+            touch_timeout_remaining: signals.touch_timeout_remaining,
+            timed_tap_countdown: signals.timed_tap_countdown,
+            timed_events_list: signals.timed_events_list,
+            device_info: signals.device_info,
+            status: signals.status,
+            screenshot_counter: signals.screenshot_counter,
         }
     }
 
@@ -280,10 +269,9 @@ impl GameAutomation {
                 let duration = start_time.elapsed().as_millis();
                 (result, duration)
             }; // Lock released here
-            
+
             match screenshot_result {
                 Ok(bytes) => {
-
                     debug_print!(
                         self.debug_enabled,
                         "📸 Game automation captured screenshot ({} bytes) in {}ms",
@@ -373,11 +361,14 @@ impl GameAutomation {
                         println!("⚠️ Cannot start automation: ADB client not initialized");
                         return;
                     }
-                    
+
                     self.is_running = true;
                     self.change_state(GameState::Running).await;
-                    println!("🚀 Game automation STARTED. is_running={}, state={:?}", self.is_running, self.state);
-                    
+                    println!(
+                        "🚀 Game automation STARTED. is_running={}, state={:?}",
+                        self.is_running, self.state
+                    );
+
                     debug_print!(
                         self.debug_enabled,
                         "🚀 Game automation started. Timed events: {} configured",
@@ -722,10 +713,13 @@ impl GameAutomation {
         let mut loop_count = 0u32;
         loop {
             loop_count += 1;
-            if loop_count % 10 == 0 {
-                println!("💓 Loop alive: {}, is_running={}", loop_count, self.is_running);
+            if loop_count.is_multiple_of(10) {
+                println!(
+                    "💓 Loop alive: {}, is_running={}",
+                    loop_count, self.is_running
+                );
             }
-            
+
             // Wait for commands with a 1-second timeout for responsive event processing
             match timeout(Duration::from_secs(1), self.command_rx.recv()).await {
                 Ok(Some(command)) => {
@@ -753,7 +747,10 @@ impl GameAutomation {
             } else {
                 static ONCE: std::sync::Once = std::sync::Once::new();
                 ONCE.call_once(|| {
-                    println!("⚠️ NOT processing events: is_running={}, state={:?}", self.is_running, self.state);
+                    println!(
+                        "⚠️ NOT processing events: is_running={}, state={:?}",
+                        self.is_running, self.state
+                    );
                 });
             }
 
@@ -830,7 +827,7 @@ impl GameAutomation {
                 events_to_execute.push((id.clone(), event.event_type.clone()));
             }
         }
-        
+
         // Sort events: Screenshot first, then CountdownUpdate, then Taps
         // This ensures screenshot doesn't compete with tap processor for USB lock
         events_to_execute.sort_by(|a, b| {
@@ -851,12 +848,15 @@ impl GameAutomation {
             // Check why no events are ready
             static EMPTY_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             let count = EMPTY_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if count % 30 == 0 && count > 0 {
+            if count.is_multiple_of(30) && count > 0 {
                 println!("📭 No events ready (checked {} times)", count);
                 for (id, event) in &self.timed_events {
                     if let Some(last) = event.last_executed {
                         let elapsed = last.elapsed();
-                        println!("  - {}: elapsed={:?} vs interval={:?}", id, elapsed, event.interval);
+                        println!(
+                            "  - {}: elapsed={:?} vs interval={:?}",
+                            id, elapsed, event.interval
+                        );
                     } else {
                         println!("  - {}: never executed", id);
                     }
@@ -920,7 +920,7 @@ impl GameAutomation {
             TimedEventType::Screenshot => {
                 // Screenshot can take time and may contend for USB lock with tap processor
                 // Run asynchronously to avoid blocking the automation loop
-                
+
                 // Take screenshot asynchronously to avoid blocking the automation loop
                 // Note: We don't await here to prevent blocking, screenshot updates signals when done
                 if let Some(client) = &self.adb_client {
@@ -929,27 +929,31 @@ impl GameAutomation {
                     let screenshot_bytes_sig = self.screenshot_bytes;
                     let screenshot_status = self.screenshot_status;
                     let mut screenshot_counter = self.screenshot_counter;
-                    
+
                     dioxus::prelude::spawn(async move {
                         let start = std::time::Instant::now();
                         match timeout(Duration::from_secs(10), async {
                             let guard = client_clone.lock().await;
                             guard.screen_capture_bytes().await
-                        }).await {
+                        })
+                        .await
+                        {
                             Ok(Ok(bytes)) => {
                                 let duration_ms = start.elapsed().as_millis();
                                 let counter_val = screenshot_counter.with_mut(|c| {
                                     *c += 1;
                                     *c
                                 });
-                                
+
                                 // Encode and update signals in background
                                 let bytes_clone = bytes.clone();
                                 dioxus::prelude::spawn(async move {
                                     use crate::gui::util::base64_encode;
-                                    let base64_string = tokio::task::spawn_blocking(move || base64_encode(&bytes_clone))
-                                        .await
-                                        .unwrap_or_default();
+                                    let base64_string = tokio::task::spawn_blocking(move || {
+                                        base64_encode(&bytes_clone)
+                                    })
+                                    .await
+                                    .unwrap_or_default();
                                     *screenshot_data.write_unchecked() = Some(base64_string);
                                     *screenshot_bytes_sig.write_unchecked() = Some(bytes);
                                     *screenshot_status.write_unchecked() = format!(
@@ -959,10 +963,12 @@ impl GameAutomation {
                                 });
                             }
                             Ok(Err(e)) => {
-                                *screenshot_status.write_unchecked() = format!("❌ Screenshot failed: {}", e);
+                                *screenshot_status.write_unchecked() =
+                                    format!("❌ Screenshot failed: {}", e);
                             }
                             Err(_) => {
-                                *screenshot_status.write_unchecked() = "❌ Screenshot timeout (10s)".to_string();
+                                *screenshot_status.write_unchecked() =
+                                    "❌ Screenshot timeout (10s)".to_string();
                             }
                         }
                     });
@@ -975,7 +981,7 @@ impl GameAutomation {
                         let client_guard = client.lock().await;
                         client_guard.tap(*x, *y).await
                     }; // Lock released here
-                    
+
                     match result {
                         Ok(()) => {
                             println!("✅ {} queued", event_id);
@@ -991,19 +997,19 @@ impl GameAutomation {
             TimedEventType::CountdownUpdate => {
                 self.send_timed_events_list().await;
                 self.send_timed_tap_countdowns().await;
-                
+
                 // Log tap event status
                 for (id, event) in &self.timed_events {
-                    if id.contains("tap") {
-                        if let Some(last) = event.last_executed {
-                            let elapsed = last.elapsed();
-                            let remaining = if elapsed < event.interval {
-                                event.interval - elapsed
-                            } else {
-                                Duration::from_secs(0)
-                            };
-                            println!("⏰ {}: {}s remaining", id, remaining.as_secs());
-                        }
+                    if id.contains("tap")
+                        && let Some(last) = event.last_executed
+                    {
+                        let elapsed = last.elapsed();
+                        let remaining = if elapsed < event.interval {
+                            event.interval - elapsed
+                        } else {
+                            Duration::from_secs(0)
+                        };
+                        println!("⏰ {}: {}s remaining", id, remaining.as_secs());
                     }
                 }
             }
@@ -1104,7 +1110,7 @@ impl GameAutomation {
 
             // Load templates (this is also potentially blocking)
             if let Err(e) = temp_detector.load_templates(".") {
-                return Err(format!("Failed to load templates: {}", e.to_string()));
+                return Err(format!("Failed to load templates: {}", e));
             }
 
             // Perform the analysis
@@ -1368,31 +1374,39 @@ mod tests {
     fn test_timed_event_interval_tracking() {
         // Test that TimedEvent correctly tracks intervals
         let mut event = TimedEvent::new_tap_seconds("test_tap".to_string(), 100, 100, 2);
-        
+
         // Initially should be ready (time=0)
         assert!(event.is_ready());
         // When ready, returns Some(Duration::ZERO)
         let time_until = event.time_until_next().unwrap();
         assert_eq!(time_until.as_secs(), 0, "Should be ready immediately");
-        
+
         // Mark as executed
         event.mark_executed();
-        
+
         // Should not be ready immediately after
         assert!(!event.is_ready());
-        
+
         // Time until ready should be close to 2 seconds (allow small variance)
         let remaining = event.time_until_next().unwrap();
         let remaining_secs = remaining.as_secs();
-        assert!(remaining_secs <= 2, "Expected ~2s remaining, got {}s", remaining_secs);
-        assert!(remaining_secs > 0, "Expected ~2s remaining, got {}s", remaining_secs);
+        assert!(
+            remaining_secs <= 2,
+            "Expected ~2s remaining, got {}s",
+            remaining_secs
+        );
+        assert!(
+            remaining_secs > 0,
+            "Expected ~2s remaining, got {}s",
+            remaining_secs
+        );
     }
 
     #[test]
     fn test_multiple_timed_events() {
         // Test that multiple events can be tracked independently
         let mut events = HashMap::new();
-        
+
         events.insert(
             "event1".to_string(),
             TimedEvent::new_tap_seconds("event1".to_string(), 100, 100, 5),
@@ -1401,37 +1415,40 @@ mod tests {
             "event2".to_string(),
             TimedEvent::new_tap_seconds("event2".to_string(), 200, 200, 10),
         );
-        
+
         // Both should start ready
         assert!(events.get("event1").unwrap().is_ready());
         assert!(events.get("event2").unwrap().is_ready());
-        
+
         // Execute first event
         events.get_mut("event1").unwrap().mark_executed();
-        
+
         // First should not be ready, second still ready
         assert!(!events.get("event1").unwrap().is_ready());
         assert!(events.get("event2").unwrap().is_ready());
-        
+
         // Check intervals are different
         let remaining1 = events.get("event1").unwrap().time_until_next().unwrap();
         assert!(remaining1.as_secs() <= 5, "Event1 interval incorrect");
-        
+
         // Execute second event
         events.get_mut("event2").unwrap().mark_executed();
         let remaining2 = events.get("event2").unwrap().time_until_next().unwrap();
         assert!(remaining2.as_secs() <= 10, "Event2 interval incorrect");
-        assert!(remaining2 > remaining1, "Event2 should have longer interval");
+        assert!(
+            remaining2 > remaining1,
+            "Event2 should have longer interval"
+        );
     }
 
     #[tokio::test]
     async fn test_lock_scope_prevents_deadlock() {
         // This test verifies that locks are properly scoped and released
         use tokio::sync::Mutex;
-        
+
         let counter = Arc::new(Mutex::new(0u32));
         let counter_clone = counter.clone();
-        
+
         // Simulate the pattern used in execute_timed_event
         let task = tokio::spawn(async move {
             for _i in 0..5 {
@@ -1440,18 +1457,18 @@ mod tests {
                     let mut guard = counter_clone.lock().await;
                     *guard += 1;
                 } // Lock released here
-                
+
                 // Small delay between operations
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         });
-        
+
         // Wait for task to complete with timeout
         let result = tokio::time::timeout(Duration::from_secs(1), task).await;
-        
+
         // Should not timeout (would timeout if locks were held)
         assert!(result.is_ok(), "Task timed out - potential deadlock");
-        
+
         // Check final value
         let final_value = *counter.lock().await;
         assert_eq!(final_value, 5, "Expected 5 increments, got {}", final_value);

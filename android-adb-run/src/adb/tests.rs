@@ -4,9 +4,9 @@
 #[cfg(test)]
 mod hardware_access_tests {
     use super::super::types::{TouchActivityState, UsbCommand};
-    use std::time::Duration;
-    use tokio::sync::{mpsc, RwLock};
     use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::{RwLock, mpsc};
 
     // ============================================================
     // TOUCH ACTIVITY MONITORING TESTS
@@ -15,7 +15,7 @@ mod hardware_access_tests {
     #[test]
     fn test_touch_state_initial() {
         let state = TouchActivityState::new(30);
-        
+
         assert!(!state.is_human_active(), "Should not be active initially");
         assert!(!state.has_activity_expired(), "Nothing to expire initially");
         assert_eq!(state.get_remaining_seconds(), None, "No timeout initially");
@@ -24,12 +24,12 @@ mod hardware_access_tests {
     #[test]
     fn test_touch_activity_detection() {
         let mut state = TouchActivityState::new(30);
-        
+
         // Mark touch activity
         state.mark_touch_activity();
-        
+
         assert!(state.is_human_active(), "Should detect touch activity");
-        
+
         let remaining = state.get_remaining_seconds();
         assert!(remaining.is_some(), "Should have remaining time");
         assert!(remaining.unwrap() <= 30, "Remaining should be <= 30s");
@@ -38,27 +38,34 @@ mod hardware_access_tests {
     #[test]
     fn test_touch_activity_clear() {
         let mut state = TouchActivityState::new(30);
-        
+
         state.mark_touch_activity();
         assert!(state.is_human_active(), "Should be active after touch");
-        
+
         state.clear_touch_activity();
         assert!(!state.is_human_active(), "Should not be active after clear");
-        assert_eq!(state.get_remaining_seconds(), None, "No timeout after clear");
+        assert_eq!(
+            state.get_remaining_seconds(),
+            None,
+            "No timeout after clear"
+        );
     }
 
     #[tokio::test]
     async fn test_touch_timeout_expiry() {
         let mut state = TouchActivityState::new_with_duration(Duration::from_millis(100));
-        
+
         state.mark_touch_activity();
         assert!(state.is_human_active(), "Should be active");
         assert!(!state.has_activity_expired(), "Should not be expired yet");
-        
+
         // Wait for timeout
         tokio::time::sleep(Duration::from_millis(150)).await;
-        
-        assert!(!state.is_human_active(), "Should not be active after timeout");
+
+        assert!(
+            !state.is_human_active(),
+            "Should not be active after timeout"
+        );
         assert!(state.has_activity_expired(), "Should be expired");
         assert_eq!(state.get_remaining_seconds(), None, "No time remaining");
     }
@@ -66,18 +73,18 @@ mod hardware_access_tests {
     #[tokio::test]
     async fn test_touch_activity_refresh() {
         let mut state = TouchActivityState::new_with_duration(Duration::from_millis(100));
-        
+
         state.mark_touch_activity();
-        
+
         // Wait half the timeout
         tokio::time::sleep(Duration::from_millis(50)).await;
-        
+
         // Refresh activity
         state.update_activity();
-        
+
         // Wait another 75ms (total 125ms from first touch, but only 75ms from refresh)
         tokio::time::sleep(Duration::from_millis(75)).await;
-        
+
         // Should still be active because we refreshed
         assert!(state.is_human_active(), "Should be active after refresh");
     }
@@ -85,7 +92,7 @@ mod hardware_access_tests {
     #[tokio::test]
     async fn test_concurrent_touch_monitoring() {
         let monitor = Arc::new(RwLock::new(TouchActivityState::new(30)));
-        
+
         let monitor_clone = monitor.clone();
         let reader_task = tokio::spawn(async move {
             for _ in 0..5 {
@@ -93,7 +100,7 @@ mod hardware_access_tests {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         });
-        
+
         let monitor_clone2 = monitor.clone();
         let writer_task = tokio::spawn(async move {
             for _ in 0..5 {
@@ -101,16 +108,14 @@ mod hardware_access_tests {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         });
-        
+
         // Should not deadlock
-        let result = tokio::time::timeout(
-            Duration::from_secs(1),
-            async {
-                reader_task.await.unwrap();
-                writer_task.await.unwrap();
-            }
-        ).await;
-        
+        let result = tokio::time::timeout(Duration::from_secs(1), async {
+            reader_task.await.unwrap();
+            writer_task.await.unwrap();
+        })
+        .await;
+
         assert!(result.is_ok(), "Should not deadlock with concurrent access");
     }
 
@@ -121,15 +126,15 @@ mod hardware_access_tests {
     #[tokio::test]
     async fn test_tap_queue_basic() {
         let (tx, mut rx) = mpsc::channel(10);
-        
+
         // Send some tap commands
         tx.send(UsbCommand::Tap { x: 100, y: 200 }).await.unwrap();
         tx.send(UsbCommand::Tap { x: 300, y: 400 }).await.unwrap();
-        
+
         // Receive them
         let tap1 = rx.recv().await.unwrap();
         let tap2 = rx.recv().await.unwrap();
-        
+
         match tap1 {
             UsbCommand::Tap { x, y } => {
                 assert_eq!(x, 100);
@@ -137,7 +142,7 @@ mod hardware_access_tests {
             }
             _ => panic!("Expected Tap command"),
         }
-        
+
         match tap2 {
             UsbCommand::Tap { x, y } => {
                 assert_eq!(x, 300);
@@ -150,12 +155,17 @@ mod hardware_access_tests {
     #[tokio::test]
     async fn test_tap_queue_ordering() {
         let (tx, mut rx) = mpsc::channel(10);
-        
+
         // Send commands in order
         for i in 0..5 {
-            tx.send(UsbCommand::Tap { x: i * 10, y: i * 20 }).await.unwrap();
+            tx.send(UsbCommand::Tap {
+                x: i * 10,
+                y: i * 20,
+            })
+            .await
+            .unwrap();
         }
-        
+
         // Verify ordering
         for i in 0..5 {
             let cmd = rx.recv().await.unwrap();
@@ -172,14 +182,14 @@ mod hardware_access_tests {
     #[tokio::test]
     async fn test_tap_queue_backpressure() {
         let (tx, mut rx) = mpsc::channel(2); // Small buffer
-        
+
         // Fill the buffer
         tx.send(UsbCommand::Tap { x: 1, y: 1 }).await.unwrap();
         tx.send(UsbCommand::Tap { x: 2, y: 2 }).await.unwrap();
-        
+
         // Try to send one more (should apply backpressure)
         let send_future = tx.send(UsbCommand::Tap { x: 3, y: 3 });
-        
+
         // Start receiver task
         let receiver = tokio::spawn(async move {
             let mut count = 0;
@@ -192,15 +202,15 @@ mod hardware_access_tests {
             }
             count
         });
-        
+
         // Send should complete once receiver starts consuming
-        let timeout_result = tokio::time::timeout(
-            Duration::from_secs(1),
-            send_future
-        ).await;
-        
-        assert!(timeout_result.is_ok(), "Send should complete with backpressure");
-        
+        let timeout_result = tokio::time::timeout(Duration::from_secs(1), send_future).await;
+
+        assert!(
+            timeout_result.is_ok(),
+            "Send should complete with backpressure"
+        );
+
         let count = receiver.await.unwrap();
         assert_eq!(count, 3, "Should receive all 3 commands");
     }
@@ -208,16 +218,20 @@ mod hardware_access_tests {
     #[tokio::test]
     async fn test_tap_and_swipe_mixed_queue() {
         let (tx, mut rx) = mpsc::channel(10);
-        
+
         // Send mixed commands
         tx.send(UsbCommand::Tap { x: 100, y: 100 }).await.unwrap();
-        tx.send(UsbCommand::Swipe { 
-            x1: 100, y1: 100, 
-            x2: 200, y2: 200, 
-            duration: Some(300) 
-        }).await.unwrap();
+        tx.send(UsbCommand::Swipe {
+            x1: 100,
+            y1: 100,
+            x2: 200,
+            y2: 200,
+            duration: Some(300),
+        })
+        .await
+        .unwrap();
         tx.send(UsbCommand::Tap { x: 300, y: 300 }).await.unwrap();
-        
+
         // Verify order and types
         match rx.recv().await.unwrap() {
             UsbCommand::Tap { x, y } => {
@@ -226,9 +240,15 @@ mod hardware_access_tests {
             }
             _ => panic!("Expected Tap"),
         }
-        
+
         match rx.recv().await.unwrap() {
-            UsbCommand::Swipe { x1, y1, x2, y2, duration } => {
+            UsbCommand::Swipe {
+                x1,
+                y1,
+                x2,
+                y2,
+                duration,
+            } => {
                 assert_eq!(x1, 100);
                 assert_eq!(y1, 100);
                 assert_eq!(x2, 200);
@@ -237,7 +257,7 @@ mod hardware_access_tests {
             }
             _ => panic!("Expected Swipe"),
         }
-        
+
         match rx.recv().await.unwrap() {
             UsbCommand::Tap { x, y } => {
                 assert_eq!(x, 300);
@@ -250,31 +270,31 @@ mod hardware_access_tests {
     #[tokio::test]
     async fn test_tap_queue_processor_shutdown() {
         let (tx, mut rx) = mpsc::channel(10);
-        
+
         let processor = tokio::spawn(async move {
             let mut processed = 0;
             while let Some(cmd) = rx.recv().await {
                 match cmd {
                     UsbCommand::Tap { .. } => processed += 1,
                     UsbCommand::Swipe { .. } => processed += 1,
-                    UsbCommand::Screenshot { .. } => {},
-                    UsbCommand::CheckTouchEvent { .. } => {},
+                    UsbCommand::Screenshot { .. } => {}
+                    UsbCommand::CheckTouchEvent { .. } => {}
                 }
             }
             processed
         });
-        
+
         // Send some commands
         tx.send(UsbCommand::Tap { x: 1, y: 1 }).await.unwrap();
         tx.send(UsbCommand::Tap { x: 2, y: 2 }).await.unwrap();
-        
+
         // Close the sender
         drop(tx);
-        
+
         // Processor should exit cleanly
         let result = tokio::time::timeout(Duration::from_secs(1), processor).await;
         assert!(result.is_ok(), "Processor should exit when channel closed");
-        
+
         let processed = result.unwrap().unwrap();
         assert_eq!(processed, 2, "Should have processed 2 commands");
     }
@@ -287,12 +307,12 @@ mod hardware_access_tests {
     fn test_tap_bounds_validation() {
         let screen_x = 1080;
         let screen_y = 2400;
-        
+
         // Valid taps
         assert!(validate_tap_bounds(0, 0, screen_x, screen_y));
         assert!(validate_tap_bounds(500, 1000, screen_x, screen_y));
         assert!(validate_tap_bounds(screen_x, screen_y, screen_x, screen_y));
-        
+
         // Invalid taps
         assert!(!validate_tap_bounds(screen_x + 1, 0, screen_x, screen_y));
         assert!(!validate_tap_bounds(0, screen_y + 1, screen_x, screen_y));
@@ -350,13 +370,19 @@ mod hardware_access_tests {
     #[test]
     fn test_touch_event_detection() {
         // Valid touch event lines
-        assert!(is_touch_event_line("0003 0035 00000123    ABS_MT_POSITION_X"));
-        assert!(is_touch_event_line("0003 0036 00000456    ABS_MT_POSITION_Y"));
-        assert!(is_touch_event_line("[  12345.678] /dev/input/event2: 0001 014a 00000001    BTN_TOUCH         DOWN"));
+        assert!(is_touch_event_line(
+            "0003 0035 00000123    ABS_MT_POSITION_X"
+        ));
+        assert!(is_touch_event_line(
+            "0003 0036 00000456    ABS_MT_POSITION_Y"
+        ));
+        assert!(is_touch_event_line(
+            "[  12345.678] /dev/input/event2: 0001 014a 00000001    BTN_TOUCH         DOWN"
+        ));
         assert!(is_touch_event_line("BTN_TOOL_FINGER DOWN"));
         assert!(is_touch_event_line("ABS_X 100"));
         assert!(is_touch_event_line("ABS_Y 200"));
-        
+
         // Invalid lines (not touch events)
         assert!(!is_touch_event_line("0001 0072 00000001    KEY_VOLUMEDOWN"));
         assert!(!is_touch_event_line("Random log line"));
@@ -380,12 +406,13 @@ mod hardware_access_tests {
     async fn test_connection_retry_success_first_attempt() {
         let mut attempts = 0;
         let max_attempts = 5;
-        
+
         let result: Result<(), &str> = retry_connection(max_attempts, || {
             attempts += 1;
             Ok(())
-        }).await;
-        
+        })
+        .await;
+
         assert!(result.is_ok());
         assert_eq!(attempts, 1, "Should succeed on first attempt");
     }
@@ -394,7 +421,7 @@ mod hardware_access_tests {
     async fn test_connection_retry_success_after_failures() {
         let mut attempts = 0;
         let max_attempts = 5;
-        
+
         let result: Result<(), &str> = retry_connection(max_attempts, || {
             attempts += 1;
             if attempts < 3 {
@@ -402,8 +429,9 @@ mod hardware_access_tests {
             } else {
                 Ok(())
             }
-        }).await;
-        
+        })
+        .await;
+
         assert!(result.is_ok());
         assert_eq!(attempts, 3, "Should succeed on third attempt");
     }
@@ -412,12 +440,13 @@ mod hardware_access_tests {
     async fn test_connection_retry_max_attempts_exceeded() {
         let mut attempts = 0;
         let max_attempts = 3;
-        
+
         let result: Result<(), &str> = retry_connection(max_attempts, || {
             attempts += 1;
             Err("Always fails")
-        }).await;
-        
+        })
+        .await;
+
         assert!(result.is_err());
         assert_eq!(attempts, 3, "Should try exactly max_attempts times");
     }
@@ -448,24 +477,33 @@ mod hardware_access_tests {
     async fn test_touch_blocks_tap_execution() {
         let touch_monitor = Arc::new(RwLock::new(TouchActivityState::new(30)));
         let (tap_tx, mut tap_rx) = mpsc::channel(10);
-        
+
         // Simulate automation wanting to tap
-        tap_tx.send(UsbCommand::Tap { x: 100, y: 100 }).await.unwrap();
-        
+        tap_tx
+            .send(UsbCommand::Tap { x: 100, y: 100 })
+            .await
+            .unwrap();
+
         // Mark human touch activity
         touch_monitor.write().await.mark_touch_activity();
-        
+
         // Processor should check touch status before executing
         let should_process = !touch_monitor.read().await.is_human_active();
-        
-        assert!(!should_process, "Should NOT process taps when human is touching");
-        
+
+        assert!(
+            !should_process,
+            "Should NOT process taps when human is touching"
+        );
+
         // Clear touch activity
         touch_monitor.write().await.clear_touch_activity();
         let should_process = !touch_monitor.read().await.is_human_active();
-        
-        assert!(should_process, "Should process taps when human not touching");
-        
+
+        assert!(
+            should_process,
+            "Should process taps when human not touching"
+        );
+
         // Verify tap is still in queue
         let cmd = tap_rx.recv().await.unwrap();
         match cmd {
@@ -481,7 +519,7 @@ mod hardware_access_tests {
     async fn test_tap_queue_concurrent_with_screenshot() {
         // Simulate the pattern where screenshot and tap share a mutex
         let device_lock = Arc::new(tokio::sync::Mutex::new(0u32));
-        
+
         let lock_clone = device_lock.clone();
         let screenshot_task = tokio::spawn(async move {
             for _ in 0..10 {
@@ -490,7 +528,7 @@ mod hardware_access_tests {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         });
-        
+
         let lock_clone2 = device_lock.clone();
         let tap_task = tokio::spawn(async move {
             for _ in 0..10 {
@@ -499,17 +537,18 @@ mod hardware_access_tests {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         });
-        
+
         // Should complete without deadlock
-        let result = tokio::time::timeout(
-            Duration::from_secs(2),
-            async {
-                screenshot_task.await.unwrap();
-                tap_task.await.unwrap();
-            }
-        ).await;
-        
-        assert!(result.is_ok(), "Should not deadlock between screenshot and tap operations");
+        let result = tokio::time::timeout(Duration::from_secs(2), async {
+            screenshot_task.await.unwrap();
+            tap_task.await.unwrap();
+        })
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "Should not deadlock between screenshot and tap operations"
+        );
     }
 
     // ============================================================
@@ -521,15 +560,18 @@ mod hardware_access_tests {
         // Test RGBA (4 bytes per pixel)
         let rgba_data = vec![0u8; 1080 * 2400 * 4];
         assert_eq!(detect_bytes_per_pixel(1080, 2400, rgba_data.len()), Some(4));
-        
+
         // Test RGB (3 bytes per pixel)
         let rgb_data = vec![0u8; 1080 * 2400 * 3];
         assert_eq!(detect_bytes_per_pixel(1080, 2400, rgb_data.len()), Some(3));
-        
+
         // Test RGB565 (2 bytes per pixel)
         let rgb565_data = vec![0u8; 1080 * 2400 * 2];
-        assert_eq!(detect_bytes_per_pixel(1080, 2400, rgb565_data.len()), Some(2));
-        
+        assert_eq!(
+            detect_bytes_per_pixel(1080, 2400, rgb565_data.len()),
+            Some(2)
+        );
+
         // Test invalid size
         let invalid_data = vec![0u8; 1000];
         assert_eq!(detect_bytes_per_pixel(1080, 2400, invalid_data.len()), None);
@@ -537,18 +579,18 @@ mod hardware_access_tests {
 
     fn detect_bytes_per_pixel(width: u32, height: u32, data_len: usize) -> Option<u32> {
         let pixel_count = (width * height) as usize;
-        
+
         if data_len < pixel_count {
             return None;
         }
-        
+
         for bpp in &[4, 3, 2] {
             let expected_size = pixel_count * (*bpp as usize);
             if data_len >= expected_size && data_len < expected_size + 1024 {
                 return Some(*bpp);
             }
         }
-        
+
         None
     }
 }

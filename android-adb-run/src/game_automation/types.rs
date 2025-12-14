@@ -4,11 +4,29 @@ use std::time::{Duration, Instant};
 pub const MIN_TAP_INTERVAL_SECONDS: u64 = 5;
 pub const MAX_TAP_INTERVAL_SECONDS: u64 = 6 * 60 * 60; // 6 hours upper bound for GUI adjustments
 
+// Type alias to reduce complexity warnings
+pub type DeviceInfo = (String, Option<u32>, u32, u32);
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameState {
     Idle,
     Running, // Simplified from multiple states
     Paused,
+}
+
+// Config struct to reduce function argument count
+pub struct AutomationSignals {
+    pub screenshot_data: dioxus::prelude::Signal<Option<String>>,
+    pub screenshot_bytes: dioxus::prelude::Signal<Option<Vec<u8>>>,
+    pub screenshot_status: dioxus::prelude::Signal<String>,
+    pub automation_state: dioxus::prelude::Signal<GameState>,
+    pub is_paused_by_touch: dioxus::prelude::Signal<bool>,
+    pub touch_timeout_remaining: dioxus::prelude::Signal<Option<u64>>,
+    pub timed_tap_countdown: dioxus::prelude::Signal<Option<(String, u64)>>,
+    pub timed_events_list: dioxus::prelude::Signal<Vec<TimedEvent>>,
+    pub device_info: dioxus::prelude::Signal<Option<DeviceInfo>>,
+    pub status: dioxus::prelude::Signal<String>,
+    pub screenshot_counter: dioxus::prelude::Signal<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -151,8 +169,10 @@ impl TimedEvent {
                 let elapsed = last.elapsed();
                 let ready = elapsed >= self.interval;
                 if ready && self.id != "countdown_update" && self.id != "screenshot" {
-                    println!("🔔 Event '{}' is ready: elapsed={:?}, interval={:?}", 
-                        self.id, elapsed, self.interval);
+                    println!(
+                        "🔔 Event '{}' is ready: elapsed={:?}, interval={:?}",
+                        self.id, elapsed, self.interval
+                    );
                 }
                 ready
             }
