@@ -1,4 +1,5 @@
 pub mod adb;
+pub mod args;
 pub mod game_automation;
 pub mod gui; // replaced old dioxus root module
 

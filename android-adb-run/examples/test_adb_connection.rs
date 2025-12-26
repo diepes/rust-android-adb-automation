@@ -64,7 +64,9 @@ fn main() {
                     && (err_msg.contains("Resource busy")
                         || err_msg.contains("AUTH")
                         || err_msg.contains("CLSE")
-                        || err_msg.contains("CNXN"));
+                        || err_msg.contains("CNXN")
+                        || err_msg.contains("timed out")
+                    );
 
                 if should_retry {
                     if attempt == 1 {
@@ -75,7 +77,7 @@ fn main() {
                     }
                     std::thread::sleep(std::time::Duration::from_secs(2));
                 } else {
-                    println!("❌ Failed to connect after {} attempts: {}", attempt, e);
+                    println!("❌ Failed to connect after {} attempts: '{}'", attempt, e);
                     println!("\n💡 Troubleshooting:");
                     println!("  1. Make sure USB debugging is enabled on your phone");
                     println!(
