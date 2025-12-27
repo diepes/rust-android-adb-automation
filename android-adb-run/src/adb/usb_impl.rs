@@ -403,20 +403,31 @@ impl AdbClient for UsbAdb {
                 let mut dev = usb_clone.lock().await;
 
                 match cmd {
-                    UsbCommand::Tap { x, y } => {
+                    UsbCommand::Tap { x, y, response_tx } => {
                         if x > screen_x || y > screen_y {
                             println!("❌ Tap out of bounds: ({},{})", x, y);
+                            let _ = response_tx.send(Err(AdbError::TapOutOfBounds { x, y }));
                             continue;
                         }
 
                         let mut out = Vec::new();
-                        match dev.shell_command(
+                        let result = match dev.shell_command(
                             &["input", "tap", &x.to_string(), &y.to_string()],
                             &mut out,
                         ) {
-                            Ok(_) => println!("✅ Tap executed: ({},{})", x, y),
-                            Err(e) => println!("❌ Tap failed: {} ({},{})", e, x, y),
-                        }
+                            Ok(_) => {
+                                println!("✅ Tap executed: ({},{})", x, y);
+                                Ok(())
+                            }
+                            Err(e) => {
+                                println!("❌ Tap failed: {} ({},{})", e, x, y);
+                                Err(AdbError::ShellCommandFailed {
+                                    command: "input tap".into(),
+                                    source: e,
+                                })
+                            }
+                        };
+                        let _ = response_tx.send(result);
                     }
 
                     UsbCommand::Swipe {
@@ -425,11 +436,12 @@ impl AdbClient for UsbAdb {
                         x2,
                         y2,
                         duration,
+                        response_tx,
                     } => {
                         let duration_ms = duration.unwrap_or(300);
                         let mut out = Vec::new();
 
-                        match dev.shell_command(
+                        let result = match dev.shell_command(
                             &[
                                 "input",
                                 "swipe",
@@ -441,9 +453,19 @@ impl AdbClient for UsbAdb {
                             ],
                             &mut out,
                         ) {
-                            Ok(_) => println!("✅ Swipe executed"),
-                            Err(e) => println!("❌ Swipe failed: {}", e),
-                        }
+                            Ok(_) => {
+                                println!("✅ Swipe executed");
+                                Ok(())
+                            }
+                            Err(e) => {
+                                println!("❌ Swipe failed: {}", e);
+                                Err(AdbError::ShellCommandFailed {
+                                    command: "input swipe".into(),
+                                    source: e,
+                                })
+                            }
+                        };
+                        let _ = response_tx.send(result);
                     }
 
                     UsbCommand::Screenshot { response_tx } => {
@@ -511,12 +533,20 @@ impl AdbClient for UsbAdb {
             return Err(AdbError::TapOutOfBounds { x, y });
         }
 
+        let (tx, rx) = tokio::sync::oneshot::channel();
         self.usb_queue_tx
-            .send(UsbCommand::Tap { x, y })
+            .send(UsbCommand::Tap { x, y, response_tx: tx })
             .await
             .map_err(|_| AdbError::ChannelClosed)?;
 
-        Ok(())
+        match tokio::time::timeout(Duration::from_secs(30), rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(AdbError::ChannelClosed),
+            Err(_) => Err(AdbError::Timeout {
+                duration: Duration::from_secs(30),
+                description: "Tap execution".into(),
+            }),
+        }
     }
 
     async fn swipe(
@@ -527,30 +557,25 @@ impl AdbClient for UsbAdb {
         y2: u32,
         duration: Option<u32>,
     ) -> AdbResult<()> {
-        let usb_device = Arc::clone(&self.usb_device);
-        let duration_ms = duration.unwrap_or(300);
-        let swipe_future = tokio::task::spawn_blocking(move || -> AdbResult<()> {
-            let mut out = Vec::new();
-            let mut dev = usb_device.blocking_lock();
-            let x1s = x1.to_string();
-            let y1s = y1.to_string();
-            let x2s = x2.to_string();
-            let y2s = y2.to_string();
-            let durs = duration_ms.to_string();
-            dev.shell_command(&["input", "swipe", &x1s, &y1s, &x2s, &y2s, &durs], &mut out)
-                .map_err(|e| AdbError::ShellCommandFailed {
-                    command: "input swipe".into(),
-                    source: e,
-                })?;
-            Ok(())
-        });
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.usb_queue_tx
+            .send(UsbCommand::Swipe {
+                x1,
+                y1,
+                x2,
+                y2,
+                duration,
+                response_tx: tx,
+            })
+            .await
+            .map_err(|_| AdbError::ChannelClosed)?;
 
-        match tokio::time::timeout(Duration::from_secs(10), swipe_future).await {
+        match tokio::time::timeout(Duration::from_secs(30), rx).await {
             Ok(Ok(result)) => result,
-            Ok(Err(e)) => Err(AdbError::from(e)),
+            Ok(Err(_)) => Err(AdbError::ChannelClosed),
             Err(_) => Err(AdbError::Timeout {
-                duration: Duration::from_secs(10),
-                description: "Swipe command".into(),
+                duration: Duration::from_secs(30),
+                description: "Swipe execution".into(),
             }),
         }
     }

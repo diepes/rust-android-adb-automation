@@ -97,14 +97,23 @@ jobs:
 
     - name: Run cargo check
       working-directory: android-adb-run
+      env:
+        CFLAGS_x86_64_pc_windows_msvc: "/std:c11 /experimental:c11atomics"
+        CXXFLAGS_x86_64_pc_windows_msvc: "/std:c++17"
       run: cargo check --verbose
 
     - name: Run cargo test
       working-directory: android-adb-run
+      env:
+        CFLAGS_x86_64_pc_windows_msvc: "/std:c11 /experimental:c11atomics"
+        CXXFLAGS_x86_64_pc_windows_msvc: "/std:c++17"
       run: cargo test --verbose
 
     - name: Run cargo clippy
       working-directory: android-adb-run
+      env:
+        CFLAGS_x86_64_pc_windows_msvc: "/std:c11 /experimental:c11atomics"
+        CXXFLAGS_x86_64_pc_windows_msvc: "/std:c++17"
       run: cargo clippy -- -D warnings
       continue-on-error: true
 

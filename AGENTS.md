@@ -16,7 +16,11 @@
 
 - Check that tests pass after changes
 
-## Testing
+## Architecture / Design of the Rust App
+
+- The dioxus Gui is grouped under src/gui and used Dioxus Signals to receive events/changes from the backend
+- The usb connection to the mobile phone is under src/adb using rust crate implementation of adb
+- src/game_automation has the backend receiving messages from the frontend through mpsc::Receiver channel
 
 ### Timeout Flag
 

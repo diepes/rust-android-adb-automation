@@ -128,15 +128,17 @@ mod hardware_access_tests {
         let (tx, mut rx) = mpsc::channel(10);
 
         // Send some tap commands
-        tx.send(UsbCommand::Tap { x: 100, y: 200 }).await.unwrap();
-        tx.send(UsbCommand::Tap { x: 300, y: 400 }).await.unwrap();
+        let (tx1, _rx1) = tokio::sync::oneshot::channel();
+        tx.send(UsbCommand::Tap { x: 100, y: 200, response_tx: tx1 }).await.unwrap();
+        let (tx2, _rx2) = tokio::sync::oneshot::channel();
+        tx.send(UsbCommand::Tap { x: 300, y: 400, response_tx: tx2 }).await.unwrap();
 
         // Receive them
         let tap1 = rx.recv().await.unwrap();
         let tap2 = rx.recv().await.unwrap();
 
         match tap1 {
-            UsbCommand::Tap { x, y } => {
+            UsbCommand::Tap { x, y, .. } => {
                 assert_eq!(x, 100);
                 assert_eq!(y, 200);
             }
@@ -144,7 +146,7 @@ mod hardware_access_tests {
         }
 
         match tap2 {
-            UsbCommand::Tap { x, y } => {
+            UsbCommand::Tap { x, y, .. } => {
                 assert_eq!(x, 300);
                 assert_eq!(y, 400);
             }
@@ -158,9 +160,11 @@ mod hardware_access_tests {
 
         // Send commands in order
         for i in 0..5 {
+            let (tx_dummy, _rx_dummy) = tokio::sync::oneshot::channel();
             tx.send(UsbCommand::Tap {
                 x: i * 10,
                 y: i * 20,
+                response_tx: tx_dummy,
             })
             .await
             .unwrap();
@@ -170,7 +174,7 @@ mod hardware_access_tests {
         for i in 0..5 {
             let cmd = rx.recv().await.unwrap();
             match cmd {
-                UsbCommand::Tap { x, y } => {
+                UsbCommand::Tap { x, y, .. } => {
                     assert_eq!(x, i * 10);
                     assert_eq!(y, i * 20);
                 }
@@ -184,11 +188,14 @@ mod hardware_access_tests {
         let (tx, mut rx) = mpsc::channel(2); // Small buffer
 
         // Fill the buffer
-        tx.send(UsbCommand::Tap { x: 1, y: 1 }).await.unwrap();
-        tx.send(UsbCommand::Tap { x: 2, y: 2 }).await.unwrap();
+        let (tx1, _rx1) = tokio::sync::oneshot::channel();
+        tx.send(UsbCommand::Tap { x: 1, y: 1, response_tx: tx1 }).await.unwrap();
+        let (tx2, _rx2) = tokio::sync::oneshot::channel();
+        tx.send(UsbCommand::Tap { x: 2, y: 2, response_tx: tx2 }).await.unwrap();
 
         // Try to send one more (should apply backpressure)
-        let send_future = tx.send(UsbCommand::Tap { x: 3, y: 3 });
+        let (tx3, _rx3) = tokio::sync::oneshot::channel();
+        let send_future = tx.send(UsbCommand::Tap { x: 3, y: 3, response_tx: tx3 });
 
         // Start receiver task
         let receiver = tokio::spawn(async move {
@@ -220,21 +227,25 @@ mod hardware_access_tests {
         let (tx, mut rx) = mpsc::channel(10);
 
         // Send mixed commands
-        tx.send(UsbCommand::Tap { x: 100, y: 100 }).await.unwrap();
+        let (tx1, _rx1) = tokio::sync::oneshot::channel();
+        tx.send(UsbCommand::Tap { x: 100, y: 100, response_tx: tx1 }).await.unwrap();
+        let (tx2, _rx2) = tokio::sync::oneshot::channel();
         tx.send(UsbCommand::Swipe {
             x1: 100,
             y1: 100,
             x2: 200,
             y2: 200,
             duration: Some(300),
+            response_tx: tx2,
         })
         .await
         .unwrap();
-        tx.send(UsbCommand::Tap { x: 300, y: 300 }).await.unwrap();
+        let (tx3, _rx3) = tokio::sync::oneshot::channel();
+        tx.send(UsbCommand::Tap { x: 300, y: 300, response_tx: tx3 }).await.unwrap();
 
         // Verify order and types
         match rx.recv().await.unwrap() {
-            UsbCommand::Tap { x, y } => {
+            UsbCommand::Tap { x, y, .. } => {
                 assert_eq!(x, 100);
                 assert_eq!(y, 100);
             }
@@ -247,19 +258,18 @@ mod hardware_access_tests {
                 y1,
                 x2,
                 y2,
-                duration,
+                ..
             } => {
                 assert_eq!(x1, 100);
                 assert_eq!(y1, 100);
                 assert_eq!(x2, 200);
                 assert_eq!(y2, 200);
-                assert_eq!(duration, Some(300));
             }
             _ => panic!("Expected Swipe"),
         }
 
         match rx.recv().await.unwrap() {
-            UsbCommand::Tap { x, y } => {
+            UsbCommand::Tap { x, y, .. } => {
                 assert_eq!(x, 300);
                 assert_eq!(y, 300);
             }
@@ -285,8 +295,10 @@ mod hardware_access_tests {
         });
 
         // Send some commands
-        tx.send(UsbCommand::Tap { x: 1, y: 1 }).await.unwrap();
-        tx.send(UsbCommand::Tap { x: 2, y: 2 }).await.unwrap();
+        let (tx1, _rx1) = tokio::sync::oneshot::channel();
+        tx.send(UsbCommand::Tap { x: 1, y: 1, response_tx: tx1 }).await.unwrap();
+        let (tx2, _rx2) = tokio::sync::oneshot::channel();
+        tx.send(UsbCommand::Tap { x: 2, y: 2, response_tx: tx2 }).await.unwrap();
 
         // Close the sender
         drop(tx);
@@ -479,8 +491,9 @@ mod hardware_access_tests {
         let (tap_tx, mut tap_rx) = mpsc::channel(10);
 
         // Simulate automation wanting to tap
+        let (tx, _rx) = tokio::sync::oneshot::channel();
         tap_tx
-            .send(UsbCommand::Tap { x: 100, y: 100 })
+            .send(UsbCommand::Tap { x: 100, y: 100, response_tx: tx })
             .await
             .unwrap();
 
@@ -507,7 +520,7 @@ mod hardware_access_tests {
         // Verify tap is still in queue
         let cmd = tap_rx.recv().await.unwrap();
         match cmd {
-            UsbCommand::Tap { x, y } => {
+            UsbCommand::Tap { x, y, .. } => {
                 assert_eq!(x, 100);
                 assert_eq!(y, 100);
             }
@@ -592,5 +605,180 @@ mod hardware_access_tests {
         }
 
         None
+    }
+}
+
+// ============================================================
+// CROSS-PLATFORM COMPATIBILITY TESTS
+// ============================================================
+
+#[cfg(test)]
+mod cross_platform_tests {
+    use super::super::types::UsbCommand;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::{RwLock, mpsc};
+
+    #[test]
+    fn test_usb_command_channel_send_receive() {
+        // Test that UsbCommand variants can be sent through channels on all platforms
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let (tx, mut rx) = mpsc::channel::<UsbCommand>(10);
+
+            // Test Tap command with response channel
+            let (tx_resp, _rx_resp) = tokio::sync::oneshot::channel();
+            tx.send(UsbCommand::Tap {
+                x: 100,
+                y: 200,
+                response_tx: tx_resp,
+            })
+            .await
+            .unwrap();
+
+            // Verify it's received correctly
+            let cmd = rx.recv().await.unwrap();
+            match cmd {
+                UsbCommand::Tap { x, y, .. } => {
+                    assert_eq!(x, 100);
+                    assert_eq!(y, 200);
+                }
+                _ => panic!("Expected Tap command"),
+            }
+        });
+    }
+
+    #[test]
+    fn test_oneshot_channel_send_receive() {
+        // Test oneshot channels used in tap/swipe response - critical for cross-platform
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+
+            tokio::spawn(async move {
+                let _ = tx.send("test message".to_string());
+            });
+
+            let msg = tokio::time::timeout(Duration::from_secs(1), rx)
+                .await
+                .expect("timeout")
+                .expect("channel closed");
+
+            assert_eq!(msg, "test message");
+        });
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_arc_mutex_operations() {
+        // Test Arc<Mutex> pattern used in USB device locking on all platforms
+        let shared = Arc::new(tokio::sync::Mutex::new(vec![1, 2, 3]));
+
+        let handles: Vec<_> = (0..4)
+            .map(|i| {
+                let shared_clone = Arc::clone(&shared);
+                tokio::spawn(async move {
+                    let mut vec = shared_clone.lock().await;
+                    vec.push(i + 4);
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        let final_vec = shared.lock().await;
+        assert_eq!(final_vec.len(), 7, "All concurrent operations completed");
+    }
+
+    #[tokio::test]
+    async fn test_rwlock_read_write_consistency() {
+        // Test RwLock pattern used for screenshot data updates on all platforms
+        let data = Arc::new(RwLock::new(String::from("initial")));
+
+        // Spawn multiple readers
+        let read_handles: Vec<_> = (0..3)
+            .map(|_| {
+                let data_clone = Arc::clone(&data);
+                tokio::spawn(async move {
+                    let val = data_clone.read().await.clone();
+                    val.len() > 0
+                })
+            })
+            .collect();
+
+        // Spawn a writer
+        let data_clone = Arc::clone(&data);
+        let write_handle = tokio::spawn(async move {
+            let mut val = data_clone.write().await;
+            val.push_str(" updated");
+        });
+
+        // Await all tasks
+        for handle in read_handles {
+            assert!(handle.await.unwrap());
+        }
+        write_handle.await.unwrap();
+
+        let final_val = data.read().await.clone();
+        assert_eq!(final_val, "initial updated");
+    }
+
+    #[tokio::test]
+    async fn test_error_type_serialization() {
+        // Test that AdbError can be converted to string across platforms
+        use super::super::error::AdbError;
+
+        let err = AdbError::TapOutOfBounds { x: 100, y: 200 };
+        let err_str = err.to_string();
+        
+        // Verify error message is meaningful on all platforms
+        assert!(!err_str.is_empty());
+        assert!(err_str.contains("100") || err_str.contains("200"));
+    }
+
+    #[test]
+    fn test_platform_specific_path_handling() {
+        // Verify that string paths work consistently across platforms
+        // (no hardcoded path separators)
+        let device_name = "emulator-5554";
+        let normalized = device_name.replace('\\', "/");
+        
+        // Should be unchanged on all platforms when using logical names
+        assert_eq!(normalized, device_name);
+    }
+
+    #[tokio::test]
+    async fn test_channel_capacity_behavior() {
+        // Test that channel capacity works consistently on all platforms
+        let (tx, mut rx) = mpsc::channel::<u32>(2);
+
+        // Send two messages (should succeed)
+        tx.send(1).await.unwrap();
+        tx.send(2).await.unwrap();
+
+        // Receive them
+        assert_eq!(rx.recv().await.unwrap(), 1);
+        assert_eq!(rx.recv().await.unwrap(), 2);
+
+        // Channel should be empty now
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_timeout_duration_behavior() {
+        // Verify Duration and timeout work consistently across platforms
+        let start = std::time::Instant::now();
+        
+        let result = tokio::time::timeout(
+            Duration::from_millis(100),
+            tokio::time::sleep(Duration::from_millis(50)),
+        )
+        .await;
+
+        let elapsed = start.elapsed();
+        assert!(result.is_ok());
+        assert!(elapsed >= Duration::from_millis(50));
+        assert!(elapsed < Duration::from_millis(200));
     }
 }

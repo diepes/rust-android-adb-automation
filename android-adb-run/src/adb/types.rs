@@ -12,6 +12,7 @@ pub enum UsbCommand {
     Tap {
         x: u32,
         y: u32,
+        response_tx: tokio::sync::oneshot::Sender<AdbResult<()>>,
     },
     Swipe {
         x1: u32,
@@ -19,6 +20,7 @@ pub enum UsbCommand {
         x2: u32,
         y2: u32,
         duration: Option<u32>,
+        response_tx: tokio::sync::oneshot::Sender<AdbResult<()>>,
     },
     Screenshot {
         response_tx: tokio::sync::oneshot::Sender<AdbResult<Vec<u8>>>,

@@ -482,8 +482,9 @@ impl GameAutomation {
                 }
             }
             AutomationCommand::TakeScreenshot => {
-                if self.is_running && self.state != GameState::Paused {
-                    let _ = self.take_screenshot().await;
+                // Allow manual screenshot at any time to detect disconnects
+                if let Err(e) = self.take_screenshot().await {
+                    debug_print!(self.debug_enabled, "❌ Manual screenshot failed: {}", e);
                 }
             }
             AutomationCommand::TestImageRecognition => {
@@ -987,7 +988,29 @@ impl GameAutomation {
                             println!("✅ {} queued", event_id);
                         }
                         Err(e) => {
-                            println!("❌ {} queue failed: {}", event_id, e);
+                            let error_str = e.to_string();
+                            println!("❌ {} queue failed: {}", event_id, error_str);
+                            
+                            // Propagate disconnect errors to GUI
+                            if is_disconnect_error(&error_str) {
+                                debug_print!(
+                                    self.debug_enabled,
+                                    "🔌 Device disconnect detected during tap '{}': {}",
+                                    event_id,
+                                    error_str
+                                );
+                                self.device_disconnected = true;
+                                self.last_reconnect_attempt = None;
+                                *self.device_info.write_unchecked() = None;
+                                *self.screenshot_data.write_unchecked() = None;
+                                *self.screenshot_bytes.write_unchecked() = None;
+                                *self.screenshot_status.write_unchecked() = format!(
+                                    "🔌 USB DISCONNECTED: {} (during tap) - Please reconnect",
+                                    error_str
+                                );
+                                *self.status.write_unchecked() =
+                                    "🔌 Device Disconnected - Paused".to_string();
+                            }
                         }
                     }
                 } else {

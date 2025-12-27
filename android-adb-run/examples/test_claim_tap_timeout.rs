@@ -26,8 +26,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("🔌 Test 2: Tap with USB disconnected");
     println!("   ⚠️  UNPLUG USB CABLE NOW!");
-    println!("   Waiting 5 seconds for you to unplug...\n");
-    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+    println!("   Waiting 10 seconds for you to unplug...\n");
+    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
 
     println!("🎯 Attempting tap at ({}, {}) with USB unplugged...", x, y);
     println!("   Expected: Timeout after 5 seconds");
