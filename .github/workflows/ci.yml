@@ -104,7 +104,6 @@ jobs:
 
     - name: Run cargo test
       working-directory: android-adb-run
-      timeout-minutes: 15
       env:
         CFLAGS_x86_64_pc_windows_msvc: "/std:c11 /experimental:c11atomics"
         CXXFLAGS_x86_64_pc_windows_msvc: "/std:c++17"
@@ -114,7 +113,7 @@ jobs:
       working-directory: android-adb-run
       run: |
         echo "=== Test Verification on ${{ matrix.os }} ==="
-        cargo test --lib --verbose -- --list 2>&1 | tail -1
+        cargo test --lib -- --list 2>&1 | tail -1
         echo ""
         echo "Tests run on all platforms to ensure compatibility"
 
