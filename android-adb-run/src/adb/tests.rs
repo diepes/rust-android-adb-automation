@@ -129,9 +129,21 @@ mod hardware_access_tests {
 
         // Send some tap commands
         let (tx1, _rx1) = tokio::sync::oneshot::channel();
-        tx.send(UsbCommand::Tap { x: 100, y: 200, response_tx: tx1 }).await.unwrap();
+        tx.send(UsbCommand::Tap {
+            x: 100,
+            y: 200,
+            response_tx: tx1,
+        })
+        .await
+        .unwrap();
         let (tx2, _rx2) = tokio::sync::oneshot::channel();
-        tx.send(UsbCommand::Tap { x: 300, y: 400, response_tx: tx2 }).await.unwrap();
+        tx.send(UsbCommand::Tap {
+            x: 300,
+            y: 400,
+            response_tx: tx2,
+        })
+        .await
+        .unwrap();
 
         // Receive them
         let tap1 = rx.recv().await.unwrap();
@@ -189,13 +201,29 @@ mod hardware_access_tests {
 
         // Fill the buffer
         let (tx1, _rx1) = tokio::sync::oneshot::channel();
-        tx.send(UsbCommand::Tap { x: 1, y: 1, response_tx: tx1 }).await.unwrap();
+        tx.send(UsbCommand::Tap {
+            x: 1,
+            y: 1,
+            response_tx: tx1,
+        })
+        .await
+        .unwrap();
         let (tx2, _rx2) = tokio::sync::oneshot::channel();
-        tx.send(UsbCommand::Tap { x: 2, y: 2, response_tx: tx2 }).await.unwrap();
+        tx.send(UsbCommand::Tap {
+            x: 2,
+            y: 2,
+            response_tx: tx2,
+        })
+        .await
+        .unwrap();
 
         // Try to send one more (should apply backpressure)
         let (tx3, _rx3) = tokio::sync::oneshot::channel();
-        let send_future = tx.send(UsbCommand::Tap { x: 3, y: 3, response_tx: tx3 });
+        let send_future = tx.send(UsbCommand::Tap {
+            x: 3,
+            y: 3,
+            response_tx: tx3,
+        });
 
         // Start receiver task
         let receiver = tokio::spawn(async move {
@@ -228,7 +256,13 @@ mod hardware_access_tests {
 
         // Send mixed commands
         let (tx1, _rx1) = tokio::sync::oneshot::channel();
-        tx.send(UsbCommand::Tap { x: 100, y: 100, response_tx: tx1 }).await.unwrap();
+        tx.send(UsbCommand::Tap {
+            x: 100,
+            y: 100,
+            response_tx: tx1,
+        })
+        .await
+        .unwrap();
         let (tx2, _rx2) = tokio::sync::oneshot::channel();
         tx.send(UsbCommand::Swipe {
             x1: 100,
@@ -241,7 +275,13 @@ mod hardware_access_tests {
         .await
         .unwrap();
         let (tx3, _rx3) = tokio::sync::oneshot::channel();
-        tx.send(UsbCommand::Tap { x: 300, y: 300, response_tx: tx3 }).await.unwrap();
+        tx.send(UsbCommand::Tap {
+            x: 300,
+            y: 300,
+            response_tx: tx3,
+        })
+        .await
+        .unwrap();
 
         // Verify order and types
         match rx.recv().await.unwrap() {
@@ -253,13 +293,7 @@ mod hardware_access_tests {
         }
 
         match rx.recv().await.unwrap() {
-            UsbCommand::Swipe {
-                x1,
-                y1,
-                x2,
-                y2,
-                ..
-            } => {
+            UsbCommand::Swipe { x1, y1, x2, y2, .. } => {
                 assert_eq!(x1, 100);
                 assert_eq!(y1, 100);
                 assert_eq!(x2, 200);
@@ -296,9 +330,21 @@ mod hardware_access_tests {
 
         // Send some commands
         let (tx1, _rx1) = tokio::sync::oneshot::channel();
-        tx.send(UsbCommand::Tap { x: 1, y: 1, response_tx: tx1 }).await.unwrap();
+        tx.send(UsbCommand::Tap {
+            x: 1,
+            y: 1,
+            response_tx: tx1,
+        })
+        .await
+        .unwrap();
         let (tx2, _rx2) = tokio::sync::oneshot::channel();
-        tx.send(UsbCommand::Tap { x: 2, y: 2, response_tx: tx2 }).await.unwrap();
+        tx.send(UsbCommand::Tap {
+            x: 2,
+            y: 2,
+            response_tx: tx2,
+        })
+        .await
+        .unwrap();
 
         // Close the sender
         drop(tx);
@@ -493,7 +539,11 @@ mod hardware_access_tests {
         // Simulate automation wanting to tap
         let (tx, _rx) = tokio::sync::oneshot::channel();
         tap_tx
-            .send(UsbCommand::Tap { x: 100, y: 100, response_tx: tx })
+            .send(UsbCommand::Tap {
+                x: 100,
+                y: 100,
+                response_tx: tx,
+            })
             .await
             .unwrap();
 
@@ -731,7 +781,7 @@ mod cross_platform_tests {
 
         let err = AdbError::TapOutOfBounds { x: 100, y: 200 };
         let err_str = err.to_string();
-        
+
         // Verify error message is meaningful on all platforms
         assert!(!err_str.is_empty());
         assert!(err_str.contains("100") || err_str.contains("200"));
@@ -743,7 +793,7 @@ mod cross_platform_tests {
         // (no hardcoded path separators)
         let device_name = "emulator-5554";
         let normalized = device_name.replace('\\', "/");
-        
+
         // Should be unchanged on all platforms when using logical names
         assert_eq!(normalized, device_name);
     }
@@ -769,7 +819,7 @@ mod cross_platform_tests {
     async fn test_timeout_duration_behavior() {
         // Verify Duration and timeout work consistently across platforms
         let start = std::time::Instant::now();
-        
+
         let result = tokio::time::timeout(
             Duration::from_millis(100),
             tokio::time::sleep(Duration::from_millis(50)),

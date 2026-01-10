@@ -16,7 +16,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=CARGO_PKG_VERSION");
 
     let package_version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".to_string());
-    
+
     // Skip git operations for release builds (for faster compilation)
     let profile = env::var("PROFILE").unwrap_or_default();
     let display_version = if profile == "release" {
@@ -25,7 +25,7 @@ fn main() {
         // For debug builds, check git tag
         println!("cargo:rerun-if-changed=.git/HEAD");
         println!("cargo:rerun-if-changed=.git/refs/tags");
-        
+
         let expected_tag = format!("v{package_version}");
         let git_tag = Command::new("git")
             .args(["describe", "--tags", "--exact-match"])

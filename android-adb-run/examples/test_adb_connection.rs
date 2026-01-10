@@ -65,8 +65,7 @@ fn main() {
                         || err_msg.contains("AUTH")
                         || err_msg.contains("CLSE")
                         || err_msg.contains("CNXN")
-                        || err_msg.contains("timed out")
-                    );
+                        || err_msg.contains("timed out"));
 
                 if should_retry {
                     if attempt == 1 {

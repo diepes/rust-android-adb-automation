@@ -535,7 +535,11 @@ impl AdbClient for UsbAdb {
 
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.usb_queue_tx
-            .send(UsbCommand::Tap { x, y, response_tx: tx })
+            .send(UsbCommand::Tap {
+                x,
+                y,
+                response_tx: tx,
+            })
             .await
             .map_err(|_| AdbError::ChannelClosed)?;
 

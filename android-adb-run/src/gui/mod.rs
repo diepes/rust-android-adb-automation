@@ -1,6 +1,7 @@
 // gui/mod.rs
 // GUI module root for android-adb-run
 
+pub mod hooks;
 pub mod util;
 pub mod components {
     pub mod actions;

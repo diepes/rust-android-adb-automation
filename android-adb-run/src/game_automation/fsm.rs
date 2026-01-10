@@ -824,7 +824,7 @@ impl GameAutomation {
         // Collect ready events
         for (id, event) in &self.timed_events {
             if event.is_ready() {
-                println!("✓ Event '{}' is READY", id);
+                debug_print!(self.debug_enabled, "✓ Event '{}' is READY", id);
                 events_to_execute.push((id.clone(), event.event_type.clone()));
             }
         }
@@ -990,7 +990,7 @@ impl GameAutomation {
                         Err(e) => {
                             let error_str = e.to_string();
                             println!("❌ {} queue failed: {}", event_id, error_str);
-                            
+
                             // Propagate disconnect errors to GUI
                             if is_disconnect_error(&error_str) {
                                 debug_print!(
@@ -1032,7 +1032,12 @@ impl GameAutomation {
                         } else {
                             Duration::from_secs(0)
                         };
-                        println!("⏰ {}: {}s remaining", id, remaining.as_secs());
+                        debug_print!(
+                            self.debug_enabled,
+                            "⏰ {}: {}s remaining",
+                            id,
+                            remaining.as_secs()
+                        );
                     }
                 }
             }
