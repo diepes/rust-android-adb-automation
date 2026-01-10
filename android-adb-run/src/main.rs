@@ -55,7 +55,7 @@ fn main() {
                 "🚀 Launching Android ADB Control GUI{}...",
                 if args.debug_mode { " [DEBUG MODE]" } else { "" }
             );
-
+            //# timeout set spawn a thread to exit after timeout
             if let Some(secs) = args.debug_mode_timeout_secs {
                 println!("⏱️  Auto-exit after {} seconds", secs);
                 std::thread::spawn(move || {
@@ -64,7 +64,7 @@ fn main() {
                     std::process::exit(0);
                 });
             }
-
+            // Run GUI, it will create async runtime and start backend
             run_gui(args.debug_mode);
         }
     }

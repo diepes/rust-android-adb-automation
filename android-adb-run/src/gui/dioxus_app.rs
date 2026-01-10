@@ -6,7 +6,7 @@ use crate::gui::components::{
     device_info::DeviceInfo,
     screenshot_panel::{TapMarker, screenshot_panel},
 };
-use crate::gui::util::base64_encode;
+use crate::gui::util::{base64_encode, calculate_device_coords};
 use dioxus::html::geometry::ElementPoint;
 use dioxus::prelude::*;
 use std::sync::{Arc, OnceLock};
@@ -156,39 +156,6 @@ fn App() -> Element {
             }
         });
     });
-
-    fn calculate_device_coords(
-        element_rect: dioxus::html::geometry::ElementPoint,
-        screen_x: u32,
-        screen_y: u32,
-    ) -> (u32, u32) {
-        let max_content_width = 400.0;
-        let max_content_height = 600.0;
-        let border_px = 8.0;
-
-        let image_aspect = screen_x as f32 / screen_y as f32;
-        let container_aspect = max_content_width / max_content_height;
-        let (content_w, content_h) = if image_aspect > container_aspect {
-            (max_content_width, max_content_width / image_aspect)
-        } else {
-            (max_content_height * image_aspect, max_content_height)
-        };
-        let displayed_w = content_w.max(1.0);
-        let displayed_h = content_h.max(1.0);
-
-        let raw_x = element_rect.x as f32 - border_px;
-        let raw_y = element_rect.y as f32 - border_px;
-
-        let clamped_x_in_display = raw_x.max(0.0).min(displayed_w - 1.0);
-        let clamped_y_in_display = raw_y.max(0.0).min(displayed_h - 1.0);
-
-        let scale_x = screen_x as f32 / displayed_w;
-        let scale_y = screen_y as f32 / displayed_h;
-        let device_x = (clamped_x_in_display * scale_x) as u32;
-        let device_y = (clamped_y_in_display * scale_y) as u32;
-
-        (device_x.min(screen_x - 1), device_y.min(screen_y - 1))
-    }
 
     use_context_provider(|| AppContext {
         screenshot_status,

@@ -53,11 +53,13 @@ That's it! Your phone's screen will appear in the app. Click anywhere to interac
 - Pause/resume automation anytime
 
 ### 📸 Screenshot Tools
+
 - Capture your phone screen instantly
 - Save screenshots as PNG files
 - Auto-refresh to see changes in real-time
 
 ### 🖱️ Remote Control
+
 - Click anywhere on the screenshot to tap your phone
 - Drag to perform swipe gestures
 - Draw selection boxes to measure areas
@@ -116,8 +118,6 @@ This project is dual-licensed under:
 - 👤 Single Developer: **$49/year**
 - 👥 Small Team (up to 5): **$299/year**
 - 🏢 Enterprise: **Contact for custom pricing**
-
-**Need a commercial license?** Contact us at: **[your-email@example.com]**
 
 See [LICENSE](LICENSE) for full legal terms.
 
