@@ -17,6 +17,7 @@ pub struct UsbAdb {
     usb_queue_tx: mpsc::Sender<UsbCommand>,
 
     usb_processor_handle: Option<tokio::task::JoinHandle<()>>,
+    pub debug_enabled: bool,
 }
 impl UsbAdb {
     async fn get_screen_size_with(&self) -> AdbResult<(u32, u32)> {
@@ -378,6 +379,7 @@ impl AdbClient for UsbAdb {
                 name: device_name.to_string(),
                 transport_id: None,
             },
+            debug_enabled: false,
             usb_device: Arc::new(Mutex::new(usb_device)),
             screen_x: 0,
             screen_y: 0,
@@ -395,6 +397,7 @@ impl AdbClient for UsbAdb {
 
         let screen_x = sx;
         let screen_y = sy;
+        let debug_enabled = tmp.debug_enabled;
 
         // Unified USB command processor - serializes ALL USB operations
         let processor = tokio::spawn(async move {
@@ -416,11 +419,11 @@ impl AdbClient for UsbAdb {
                             &mut out,
                         ) {
                             Ok(_) => {
-                                println!("✅ Tap executed: ({},{})", x, y);
+                                debug_print!(debug_enabled, "✅ Tap executed: ({},{})", x, y);
                                 Ok(())
                             }
                             Err(e) => {
-                                println!("❌ Tap failed: {} ({},{})", e, x, y);
+                                eprintln!("❌ Tap failed: {} ({},{})", e, x, y);
                                 Err(AdbError::ShellCommandFailed {
                                     command: "input tap".into(),
                                     source: e,
@@ -506,6 +509,7 @@ impl AdbClient for UsbAdb {
             usb_processor_handle: tmp.usb_processor_handle,
             screen_x: sx,
             screen_y: sy,
+            debug_enabled: tmp.debug_enabled,
             ..tmp
         })
     }

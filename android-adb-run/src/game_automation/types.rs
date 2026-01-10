@@ -155,7 +155,7 @@ impl TimedEvent {
         }
     }
 
-    pub fn is_ready(&self) -> bool {
+    pub fn is_ready(&self, debug_enabled: bool) -> bool {
         if !self.enabled {
             return false;
         }
@@ -169,9 +169,12 @@ impl TimedEvent {
                 let elapsed = last.elapsed();
                 let ready = elapsed >= self.interval;
                 if ready && self.id != "countdown_update" && self.id != "screenshot" {
-                    println!(
+                    debug_print!(
+                        debug_enabled,
                         "🔔 Event '{}' is ready: elapsed={:?}, interval={:?}",
-                        self.id, elapsed, self.interval
+                        self.id,
+                        elapsed,
+                        self.interval
                     );
                 }
                 ready

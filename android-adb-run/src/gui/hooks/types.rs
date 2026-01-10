@@ -1,6 +1,6 @@
 use crate::adb::AdbBackend;
-use crate::game_automation::types::TimedEvent;
 use crate::game_automation::AutomationCommand;
+use crate::game_automation::types::TimedEvent;
 use dioxus::prelude::Signal;
 use std::sync::Arc;
 use tokio::sync::Mutex;

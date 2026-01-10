@@ -11,15 +11,6 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
 use tokio::time::{Duration, timeout};
 
-// Macro for debug output
-macro_rules! debug_print {
-    ($debug_enabled:expr, $($arg:tt)*) => {
-        if $debug_enabled {
-            println!($($arg)*);
-        }
-    };
-}
-
 // Helper function to detect if an error indicates device disconnection
 pub fn is_disconnect_error(error: &str) -> bool {
     let error_lower = error.to_lowercase();
@@ -715,9 +706,11 @@ impl GameAutomation {
         loop {
             loop_count += 1;
             if loop_count.is_multiple_of(10) {
-                println!(
+                debug_print!(
+                    self.debug_enabled,
                     "💓 Loop alive: {}, is_running={}",
-                    loop_count, self.is_running
+                    loop_count,
+                    self.is_running
                 );
             }
 
@@ -823,7 +816,7 @@ impl GameAutomation {
 
         // Collect ready events
         for (id, event) in &self.timed_events {
-            if event.is_ready() {
+            if event.is_ready(self.debug_enabled) {
                 debug_print!(self.debug_enabled, "✓ Event '{}' is READY", id);
                 events_to_execute.push((id.clone(), event.event_type.clone()));
             }
@@ -977,7 +970,13 @@ impl GameAutomation {
             }
             TimedEventType::Tap { x, y } => {
                 if let Some(client) = &self.adb_client {
-                    println!("🎯 Queuing tap: {} at ({},{})", event_id, x, y);
+                    debug_print!(
+                        self.debug_enabled,
+                        "🎯 Queuing tap: {} at ({},{})",
+                        event_id,
+                        x,
+                        y
+                    );
                     let result = {
                         let client_guard = client.lock().await;
                         client_guard.tap(*x, *y).await
@@ -985,7 +984,7 @@ impl GameAutomation {
 
                     match result {
                         Ok(()) => {
-                            println!("✅ {} queued", event_id);
+                            debug_print!(self.debug_enabled, "✅ {} queued", event_id);
                         }
                         Err(e) => {
                             let error_str = e.to_string();
@@ -1404,7 +1403,7 @@ mod tests {
         let mut event = TimedEvent::new_tap_seconds("test_tap".to_string(), 100, 100, 2);
 
         // Initially should be ready (time=0)
-        assert!(event.is_ready());
+        assert!(event.is_ready(false));
         // When ready, returns Some(Duration::ZERO)
         let time_until = event.time_until_next().unwrap();
         assert_eq!(time_until.as_secs(), 0, "Should be ready immediately");
@@ -1413,7 +1412,7 @@ mod tests {
         event.mark_executed();
 
         // Should not be ready immediately after
-        assert!(!event.is_ready());
+        assert!(!event.is_ready(false));
 
         // Time until ready should be close to 2 seconds (allow small variance)
         let remaining = event.time_until_next().unwrap();
@@ -1445,15 +1444,15 @@ mod tests {
         );
 
         // Both should start ready
-        assert!(events.get("event1").unwrap().is_ready());
-        assert!(events.get("event2").unwrap().is_ready());
+        assert!(events.get("event1").unwrap().is_ready(false));
+        assert!(events.get("event2").unwrap().is_ready(false));
 
         // Execute first event
         events.get_mut("event1").unwrap().mark_executed();
 
         // First should not be ready, second still ready
-        assert!(!events.get("event1").unwrap().is_ready());
-        assert!(events.get("event2").unwrap().is_ready());
+        assert!(!events.get("event1").unwrap().is_ready(false));
+        assert!(events.get("event2").unwrap().is_ready(false));
 
         // Check intervals are different
         let remaining1 = events.get("event1").unwrap().time_until_next().unwrap();

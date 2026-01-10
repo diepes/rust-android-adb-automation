@@ -1,3 +1,13 @@
+// Macro for debug output
+#[macro_export]
+macro_rules! debug_print {
+    ($debug_enabled:expr, $($arg:tt)*) => {
+        if $debug_enabled {
+            println!($($arg)*);
+        }
+    };
+}
+
 pub mod adb;
 pub mod args;
 pub mod game_automation;
