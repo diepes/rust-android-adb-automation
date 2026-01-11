@@ -14,6 +14,8 @@ use tokio::time::{Duration, timeout};
 // Helper function to detect if an error indicates device disconnection
 pub fn is_disconnect_error(error: &str) -> bool {
     let error_lower = error.to_lowercase();
+    
+    // Clear device disconnection indicators
     error_lower.contains("device offline")
         || error_lower.contains("device not found")
         || error_lower.contains("not found")           // Catches "device 'xxx' not found"
@@ -22,13 +24,12 @@ pub fn is_disconnect_error(error: &str) -> bool {
         || error_lower.contains("connection refused")
         || error_lower.contains("broken pipe")
         || error_lower.contains("connection reset")
-        || error_lower.contains("transport")
         || error_lower.contains("closed")
         || error_lower.contains("not connected")
-        || error_lower.contains("io error")
+        || error_lower.contains("no write endpoint setup") // USB endpoint error = device disconnected
+        || error_lower.contains("usb") && error_lower.contains("error") // Generic USB error
         || error_lower.contains("timed out")           // Timeout often indicates disconnect
         || error_lower.contains("timeout")             // Alternative timeout message format
-        || error_lower.contains("adb request failed") // ADB client library error
 }
 
 pub struct GameAutomation {
@@ -85,8 +86,8 @@ impl GameAutomation {
         // Define timed taps with flexible intervals
         // Format: (id, x, y, interval_type, interval_value)
         let tap_definitions = vec![
-            ("claim_5d_tap", 120, 1250, "minutes", 2), // Every 2 minutes
-            ("restart_tap", 110, 1600, "minutes", 9),  // Every 9 minutes
+            ("claim_5d_tap", 120, 1250, "minutes", 1), // Every 2 minutes
+            ("restart_tap", 110, 1600, "minutes", 2),  // Every 9 minutes
             ("claim_1d_tap", 350, 628, "seconds", 14), // Every 14sec, rotation 15sec
                                                        // Add more taps here as needed with seconds or minutes
         ];
@@ -307,11 +308,7 @@ impl GameAutomation {
 
                     // Check if this is a disconnect error
                     if is_disconnect_error(&error) {
-                        debug_print!(
-                            self.debug_enabled,
-                            "🔌 Device disconnect detected: {}",
-                            error
-                        );
+                        println!("🔌 Device disconnect detected: {}", error);
                         self.device_disconnected = true;
                         self.last_reconnect_attempt = None; // Reset for immediate reconnection attempt
                         *self.device_info.write_unchecked() = None;
@@ -1292,7 +1289,7 @@ impl GameAutomation {
 
         if should_attempt {
             // Attempt reconnection
-            debug_print!(self.debug_enabled, "🔄 Attempting device reconnection...");
+            println!("🔄 Attempting device reconnection...");
             self.last_reconnect_attempt = Some(now);
 
             if let Ok(()) = self.attempt_reconnection().await {
@@ -1313,20 +1310,40 @@ impl GameAutomation {
 
     /// Attempt to reconnect to the device
     async fn attempt_reconnection(&mut self) -> Result<(), String> {
-        debug_print!(
-            self.debug_enabled,
-            "🔄 Attempting to reconnect to device..."
-        );
+        println!("🔄 Attempting to reconnect to device...");
+
+        // CRITICAL: Clean up the old connection before creating a new one
+        // This ensures the old USB processor task is stopped and device is released
+        if let Some(old_client_arc) = self.adb_client.take() {
+            println!("🔧 Shutting down old USB connection...");
+            // Try to gracefully shutdown the old client
+            match Arc::try_unwrap(old_client_arc) {
+                Ok(mutex) => {
+                    // Get the UsbAdb from the Mutex
+                    let mut old_client = mutex.into_inner();
+                    match old_client.shutdown().await {
+                        Ok(_) => {
+                            println!("✅ Old connection shut down cleanly");
+                        }
+                        Err(e) => {
+                            println!("⚠️ Old connection shutdown warning: {}", e);
+                        }
+                    }
+                }
+                Err(arc) => {
+                    // Arc still has other references, just drop and let them clean up
+                    println!("⚠️ Old connection has other references, forcing drop...");
+                    drop(arc);
+                }
+            }
+            // Give cleanup time
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
 
         match AdbBackend::connect_first().await {
             Ok(client) => {
                 let (screen_width, screen_height) = client.screen_dimensions();
-                debug_print!(
-                    self.debug_enabled,
-                    "✅ Device reconnected! ({}x{})",
-                    screen_width,
-                    screen_height
-                );
+                println!("✅ Device reconnected! ({}x{})", screen_width, screen_height);
 
                 // Update detector with screen dimensions
                 let mut config = create_default_config();
@@ -1340,13 +1357,9 @@ impl GameAutomation {
                 if let Some(client_arc) = &self.adb_client {
                     let client_guard = client_arc.lock().await;
                     if let Err(e) = client_guard.start_touch_monitoring().await {
-                        debug_print!(
-                            self.debug_enabled,
-                            "⚠️ Failed to start touch monitoring after reconnect: {}",
-                            e
-                        );
+                        println!("⚠️ Failed to start touch monitoring after reconnect: {}", e);
                     } else {
-                        debug_print!(self.debug_enabled, "👆 Touch monitoring restarted");
+                        println!("👆 Touch monitoring restarted");
                     }
                 }
 
@@ -1357,10 +1370,7 @@ impl GameAutomation {
                 // Auto-resume automation if it was running (same as initial startup)
                 if self.is_running && self.state == GameState::Paused {
                     self.change_state(GameState::Running).await;
-                    debug_print!(
-                        self.debug_enabled,
-                        "▶️ Auto-resuming automation after reconnection"
-                    );
+                    println!("▶️ Auto-resuming automation after reconnection");
                 }
 
                 // Update reconnection signals
@@ -1378,15 +1388,12 @@ impl GameAutomation {
                     "✅ Reconnected! Automation ready.".to_string();
                 *self.status.write_unchecked() = "✅ Device Reconnected - Resuming".to_string();
 
-                debug_print!(
-                    self.debug_enabled,
-                    "✅ Device reconnected successfully - automation auto-resumed"
-                );
+                println!("✅ Device reconnected successfully - automation auto-resumed");
 
                 Ok(())
             }
             Err(e) => {
-                debug_print!(self.debug_enabled, "❌ Reconnection failed: {}", e);
+                println!("❌ Reconnection failed: {}", e);
                 Err(e.to_string())
             }
         }

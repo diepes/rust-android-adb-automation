@@ -74,7 +74,7 @@ dependencies = [
 
 [[package]]
 name = "android-adb-run"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "adb_client",
  "dioxus",

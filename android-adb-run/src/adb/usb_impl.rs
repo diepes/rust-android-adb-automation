@@ -505,12 +505,15 @@ impl AdbClient for UsbAdb {
         tmp.usb_processor_handle = Some(processor);
 
         Ok(UsbAdb {
-            usb_queue_tx: tmp.usb_queue_tx,
-            usb_processor_handle: tmp.usb_processor_handle,
+            device: tmp.device,
+            usb_device: tmp.usb_device,
             screen_x: sx,
             screen_y: sy,
+            touch_monitor: tmp.touch_monitor,
+            monitoring_task: tmp.monitoring_task,
+            usb_queue_tx: tmp.usb_queue_tx,
+            usb_processor_handle: tmp.usb_processor_handle,
             debug_enabled: tmp.debug_enabled,
-            ..tmp
         })
     }
 
@@ -658,3 +661,27 @@ impl AdbClient for UsbAdb {
         None
     }
 }
+
+// Additional methods for UsbAdb (not part of AdbClient trait)
+impl UsbAdb {
+    /// Gracefully shutdown the USB processor task and release resources
+    pub async fn shutdown(&mut self) -> AdbResult<()> {
+        // Stop touch monitoring
+        self.stop_touch_monitoring().await?;
+
+        // Close the channel by creating a new empty sender (dropping the original)
+        // This signals the processor task to exit
+        let (new_tx, _) = tokio::sync::mpsc::channel(1);
+        self.usb_queue_tx = new_tx;
+
+        // Abort the processor task if it exists
+        if let Some(handle) = self.usb_processor_handle.take() {
+            handle.abort();
+            // Give it a moment to clean up
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        Ok(())
+    }
+}
+
