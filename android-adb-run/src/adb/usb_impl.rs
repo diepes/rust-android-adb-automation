@@ -423,11 +423,16 @@ impl AdbClient for UsbAdb {
                                 Ok(())
                             }
                             Err(e) => {
-                                eprintln!("❌ Tap failed: {} ({},{})", e, x, y);
-                                Err(AdbError::ShellCommandFailed {
-                                    command: "input tap".into(),
-                                    source: e,
-                                })
+                                let err = AdbError::from_adb_error_with_desync_check(
+                                    "input tap".into(),
+                                    e,
+                                );
+                                if err.is_protocol_desync() {
+                                    eprintln!("❌ Tap failed (PROTOCOL DESYNC - reconnection needed): {} ({},{})", err, x, y);
+                                } else {
+                                    eprintln!("❌ Tap failed: {} ({},{})", err, x, y);
+                                }
+                                Err(err)
                             }
                         };
                         let _ = response_tx.send(result);
@@ -461,11 +466,16 @@ impl AdbClient for UsbAdb {
                                 Ok(())
                             }
                             Err(e) => {
-                                println!("❌ Swipe failed: {}", e);
-                                Err(AdbError::ShellCommandFailed {
-                                    command: "input swipe".into(),
-                                    source: e,
-                                })
+                                let err = AdbError::from_adb_error_with_desync_check(
+                                    "input swipe".into(),
+                                    e,
+                                );
+                                if err.is_protocol_desync() {
+                                    eprintln!("❌ Swipe failed (PROTOCOL DESYNC - reconnection needed): {}", err);
+                                } else {
+                                    eprintln!("❌ Swipe failed: {}", err);
+                                }
+                                Err(err)
                             }
                         };
                         let _ = response_tx.send(result);
@@ -474,14 +484,30 @@ impl AdbClient for UsbAdb {
                     UsbCommand::Screenshot { response_tx } => {
                         let result = match dev.framebuffer_bytes() {
                             Ok(data) => Ok(data),
-                            Err(_) => {
+                            Err(fb_err) => {
+                                // Framebuffer failed, try screencap fallback
                                 let mut out = Vec::new();
-                                dev.shell_command(&["screencap", "-p"], &mut out)
-                                    .map(|_| out)
-                                    .map_err(|e| AdbError::ShellCommandFailed {
-                                        command: "screencap -p".into(),
-                                        source: e,
-                                    })
+                                match dev.shell_command(&["screencap", "-p"], &mut out) {
+                                    Ok(_) => Ok(out),
+                                    Err(e) => {
+                                        let err = AdbError::from_adb_error_with_desync_check(
+                                            "screencap -p".into(),
+                                            e,
+                                        );
+                                        if err.is_protocol_desync() {
+                                            eprintln!("❌ Screenshot failed (PROTOCOL DESYNC - reconnection needed): {}", err);
+                                        }
+                                        // Also check if framebuffer error was a desync
+                                        let fb_err_str = fb_err.to_string();
+                                        if fb_err_str.contains("CLSE") || fb_err_str.contains("no write endpoint") {
+                                            Err(AdbError::ProtocolDesync {
+                                                description: format!("Framebuffer and screencap both failed with protocol errors"),
+                                            })
+                                        } else {
+                                            Err(err)
+                                        }
+                                    }
+                                }
                             }
                         };
                         let _ = response_tx.send(result);

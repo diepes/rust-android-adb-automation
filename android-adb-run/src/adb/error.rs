@@ -74,4 +74,36 @@ pub enum AdbError {
 
     #[error("Connection validation timeout - device may not be authorized")]
     ConnectionValidationTimeout,
+
+    #[error("ADB protocol desync (CLSE error) - connection needs to be re-established: {description}")]
+    ProtocolDesync { description: String },
+}
+
+impl AdbError {
+    /// Check if this error indicates a protocol desync that requires reconnection
+    pub fn is_protocol_desync(&self) -> bool {
+        match self {
+            AdbError::ShellCommandFailed { source, .. } => {
+                let err_str = source.to_string();
+                err_str.contains("CLSE") || err_str.contains("no write endpoint")
+            }
+            AdbError::ProtocolDesync { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Check if the underlying adb_client error indicates protocol desync
+    pub fn from_adb_error_with_desync_check(
+        command: String,
+        source: adb_client::RustADBError,
+    ) -> Self {
+        let err_str = source.to_string();
+        if err_str.contains("CLSE") || err_str.contains("no write endpoint") {
+            AdbError::ProtocolDesync {
+                description: format!("Command '{}' failed with protocol error: {}", command, err_str),
+            }
+        } else {
+            AdbError::ShellCommandFailed { command, source }
+        }
+    }
 }

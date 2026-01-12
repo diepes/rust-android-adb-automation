@@ -831,4 +831,28 @@ mod cross_platform_tests {
         assert!(elapsed >= Duration::from_millis(50));
         assert!(elapsed < Duration::from_millis(200));
     }
+
+    #[test]
+    fn test_protocol_desync_error_detection() {
+        use super::super::error::AdbError;
+
+        // Test CLSE error detection
+        let clse_err = AdbError::ProtocolDesync {
+            description: "Test CLSE error".into(),
+        };
+        assert!(clse_err.is_protocol_desync(), "ProtocolDesync should be detected");
+
+        // Test that other errors are not detected as desync
+        let bounds_err = AdbError::TapOutOfBounds { x: 100, y: 200 };
+        assert!(!bounds_err.is_protocol_desync(), "TapOutOfBounds should not be desync");
+
+        let channel_err = AdbError::ChannelClosed;
+        assert!(!channel_err.is_protocol_desync(), "ChannelClosed should not be desync");
+
+        let timeout_err = AdbError::Timeout {
+            duration: Duration::from_secs(5),
+            description: "Test timeout".into(),
+        };
+        assert!(!timeout_err.is_protocol_desync(), "Timeout should not be desync");
+    }
 }
