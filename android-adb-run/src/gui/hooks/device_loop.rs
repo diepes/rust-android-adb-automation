@@ -6,25 +6,21 @@ use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 
 /// Initializes device connection loop that discovers and connects to Android devices
+/// Uses grouped signal structs for cleaner function signature
 pub fn use_device_loop(
-    mut status: Signal<String>,
-    mut device_info: DeviceInfoSignal,
-    mut is_loading_screenshot: Signal<bool>,
-    mut screenshot_status: Signal<String>,
-    mut screenshot_data: ScreenshotDataSignal,
-    mut screenshot_bytes: ScreenshotBytesSignal,
-    mut screenshot_counter: Signal<u64>,
+    mut screenshot: ScreenshotSignals,
+    mut device: DeviceSignals,
     mut shared_adb_client: SharedAdbClient,
     mut force_update: Signal<u32>,
 ) {
     use_future(move || async move {
         loop {
-            status.set("🔍 Looking for devices...".to_string());
+            device.status.set("🔍 Looking for devices...".to_string());
             let devices = match AdbBackend::list_devices().await {
                 Ok(devices) if !devices.is_empty() => devices,
                 Ok(_) => {
                     for seconds in (1..=5).rev() {
-                        status.set(format!(
+                        device.status.set(format!(
                             "🔌 No Device Connected - Retrying in {}s...",
                             seconds
                         ));
@@ -34,7 +30,7 @@ pub fn use_device_loop(
                 }
                 Err(e) => {
                     for seconds in (1..=5).rev() {
-                        status.set(format!("❌ Error: {} - Retrying in {}s...", e, seconds));
+                        device.status.set(format!("❌ Error: {} - Retrying in {}s...", e, seconds));
                         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                     }
                     continue;
@@ -42,22 +38,22 @@ pub fn use_device_loop(
             };
 
             let first_device = &devices[0];
-            status.set(format!("📱 Found device: {}", first_device.name));
+            device.status.set(format!("📱 Found device: {}", first_device.name));
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-            status.set(format!("🔌 Connecting to {}...", first_device.name));
+            device.status.set(format!("🔌 Connecting to {}...", first_device.name));
             let device_name = first_device.name.clone();
 
             match AdbBackend::new_with_device(&device_name).await {
                 Ok(client) => {
                     let (sx, sy) = client.screen_dimensions();
-                    device_info.set(Some((
+                    device.info.set(Some((
                         client.device_name().to_string(),
                         client.transport_id(),
                         sx,
                         sy,
                     )));
-                    status.set("✅ Connected".to_string());
+                    device.status.set("✅ Connected".to_string());
                     force_update.with_mut(|v| *v = v.wrapping_add(1));
 
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -65,9 +61,10 @@ pub fn use_device_loop(
                     let shared_client = Arc::new(TokioMutex::new(client));
                     shared_adb_client.set(Some(shared_client.clone()));
 
+                    // Take initial screenshot
                     spawn(async move {
-                        is_loading_screenshot.set(true);
-                        screenshot_status.set("📸 Taking initial screenshot...".to_string());
+                        screenshot.is_loading.set(true);
+                        screenshot.status.set("📸 Taking initial screenshot...".to_string());
                         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
                         let start = std::time::Instant::now();
@@ -82,28 +79,28 @@ pub fn use_device_loop(
                                 match base64_result {
                                     Ok(base64_string) => {
                                         let duration_ms = start.elapsed().as_millis();
-                                        let counter_val = screenshot_counter.with_mut(|c| {
+                                        let counter_val = screenshot.counter.with_mut(|c| {
                                             *c += 1;
                                             *c
                                         });
-                                        screenshot_data.set(Some(base64_string));
-                                        screenshot_bytes.set(Some(bytes));
-                                        screenshot_status.set(format!(
+                                        screenshot.data.set(Some(base64_string));
+                                        screenshot.bytes.set(Some(bytes));
+                                        screenshot.status.set(format!(
                                             "✅ Initial screenshot #{} ({}ms)",
                                             counter_val, duration_ms
                                         ));
                                     }
                                     Err(_) => {
-                                        screenshot_status
+                                        screenshot.status
                                             .set("❌ Failed to encode screenshot".to_string());
                                     }
                                 }
-                                is_loading_screenshot.set(false);
+                                screenshot.is_loading.set(false);
                             }
                             Err(e) => {
-                                screenshot_status
+                                screenshot.status
                                     .set(format!("❌ Initial screenshot failed: {}", e));
-                                is_loading_screenshot.set(false);
+                                screenshot.is_loading.set(false);
                             }
                         }
                     });
@@ -111,11 +108,11 @@ pub fn use_device_loop(
                 }
                 Err(e) => {
                     for seconds in (1..=5).rev() {
-                        status.set(format!(
+                        device.status.set(format!(
                             "❌ Connection failed: {} - Retrying in {}s...",
                             e, seconds
                         ));
-                        screenshot_status.set("⏳ Waiting for USB authorization...".to_string());
+                        screenshot.status.set("⏳ Waiting for USB authorization...".to_string());
                         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                     }
                 }

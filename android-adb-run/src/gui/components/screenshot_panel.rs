@@ -16,25 +16,30 @@ pub struct TapMarker {
 pub fn screenshot_panel() -> Element {
     let ctx = use_context::<AppContext>();
 
-    let mut screenshot_status = ctx.screenshot_status;
-    let mut screenshot_data = ctx.screenshot_data;
-    let mut screenshot_bytes = ctx.screenshot_bytes;
-    let device_info = ctx.device_info;
-    let mut device_coords = ctx.device_coords;
-    let mut mouse_coords = ctx.mouse_coords;
-    let mut is_swiping = ctx.is_swiping;
-    let mut swipe_start = ctx.swipe_start;
-    let mut swipe_end = ctx.swipe_end;
-    let auto_update_on_touch = ctx.auto_update_on_touch;
-    let mut is_loading_screenshot = ctx.is_loading_screenshot;
+    // Access grouped signals via the new structure
+    let mut screenshot_status = ctx.screenshot.status;
+    let mut screenshot_data = ctx.screenshot.data;
+    let mut screenshot_bytes = ctx.screenshot.bytes;
+    let mut screenshot_counter = ctx.screenshot.counter;
+    let mut is_loading_screenshot = ctx.screenshot.is_loading;
+    
+    let device_info = ctx.device.info;
+    let mut device_coords = ctx.device.coords;
+    
+    let mut mouse_coords = ctx.interaction.mouse_coords;
+    let mut is_swiping = ctx.interaction.is_swiping;
+    let mut swipe_start = ctx.interaction.swipe_start;
+    let mut swipe_end = ctx.interaction.swipe_end;
+    let auto_update_on_touch = ctx.interaction.auto_update_on_touch;
+    let select_box = ctx.interaction.select_box;
+    let mut selection_start = ctx.interaction.selection_start;
+    let mut selection_end = ctx.interaction.selection_end;
+    let hover_tap_preview = ctx.interaction.hover_tap_preview;
+    
+    let automation_command_tx = ctx.automation.command_tx;
+    
     let calculate_device_coords = ctx.calculate_device_coords;
-    let select_box = ctx.select_box;
-    let mut selection_start = ctx.selection_start;
-    let mut selection_end = ctx.selection_end;
     let mut tap_markers = ctx.tap_markers;
-    let mut screenshot_counter = ctx.screenshot_counter;
-    let automation_command_tx = ctx.automation_command_tx;
-    let hover_tap_preview = ctx.hover_tap_preview;
     let shared_adb_client = ctx.shared_adb_client;
     let loading = *is_loading_screenshot.read();
 

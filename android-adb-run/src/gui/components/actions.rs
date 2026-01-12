@@ -11,16 +11,19 @@ use tokio::sync::mpsc;
 pub fn Actions() -> Element {
     let ctx = use_context::<AppContext>();
 
-    let mut screenshot_status = ctx.screenshot_status;
-    let screenshot_bytes = ctx.screenshot_bytes;
-    let mut auto_update_on_touch = ctx.auto_update_on_touch;
-    let mut select_box = ctx.select_box;
-    let automation_state = ctx.automation_state;
-    let automation_command_tx = ctx.automation_command_tx;
-    let timed_events_list = ctx.timed_events_list;
-    let is_paused_by_touch = ctx.is_paused_by_touch;
-    let touch_timeout_remaining = ctx.touch_timeout_remaining;
-    let hover_tap_preview = ctx.hover_tap_preview;
+    // Access grouped signals via the new structure
+    let mut screenshot_status = ctx.screenshot.status;
+    let screenshot_bytes = ctx.screenshot.bytes;
+    
+    let mut auto_update_on_touch = ctx.interaction.auto_update_on_touch;
+    let mut select_box = ctx.interaction.select_box;
+    let hover_tap_preview = ctx.interaction.hover_tap_preview;
+    
+    let automation_state = ctx.automation.state;
+    let automation_command_tx = ctx.automation.command_tx;
+    let timed_events_list = ctx.automation.timed_events_list;
+    let is_paused_by_touch = ctx.automation.is_paused_by_touch;
+    let touch_timeout_remaining = ctx.automation.touch_timeout_remaining;
 
     rsx! {
         div { style: "background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 15px; border-radius: 15px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.2);",

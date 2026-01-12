@@ -1,17 +1,20 @@
 use crate::adb::AdbBackend;
-use crate::game_automation::types::{DeviceInfo, TimedEvent};
-use crate::game_automation::{AutomationCommand, GameState};
+use crate::game_automation::types::TimedEvent;
+use crate::game_automation::GameState;
 use crate::gui::components::{
     actions::Actions,
     device_info::DeviceInfo,
     screenshot_panel::{TapMarker, screenshot_panel},
 };
-use crate::gui::hooks::{use_automation_loop, use_device_loop, use_runtime_timer};
+use crate::gui::hooks::{
+    use_automation_loop, use_device_loop, use_runtime_timer,
+    AutomationStateSignals, DeviceSignals, InteractionSignals, ScreenshotSignals, SharedAdbClient,
+};
 use crate::gui::util::calculate_device_coords;
 use dioxus::html::geometry::ElementPoint;
 use dioxus::prelude::*;
 use std::sync::{Arc, OnceLock};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::Mutex;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const BUILD_YEAR: &str = env!("CARGO_PKG_VERSION"); // Placeholder, consider a build script for this
@@ -23,32 +26,15 @@ pub fn is_debug_mode() -> bool {
     *DEBUG_MODE.get().unwrap_or(&false)
 }
 
-#[derive(Clone)]
+/// Grouped application context - reduces signal sprawl
+#[derive(Clone, Copy)]
 pub struct AppContext {
-    pub screenshot_status: Signal<String>,
-    pub screenshot_data: Signal<Option<String>>,
-    pub screenshot_bytes: Signal<Option<Vec<u8>>>,
-    pub device_info: Signal<Option<DeviceInfo>>,
-    pub device_coords: Signal<Option<(u32, u32)>>,
-    pub mouse_coords: Signal<Option<(i32, i32)>>,
-    pub is_loading_screenshot: Signal<bool>,
-    pub auto_update_on_touch: Signal<bool>,
-    pub select_box: Signal<bool>,
-    pub is_swiping: Signal<bool>,
-    pub swipe_start: Signal<Option<(u32, u32)>>,
-    pub swipe_end: Signal<Option<(u32, u32)>>,
-    pub selection_start: Signal<Option<ElementPoint>>,
-    pub selection_end: Signal<Option<ElementPoint>>,
+    pub screenshot: ScreenshotSignals,
+    pub device: DeviceSignals,
+    pub automation: AutomationStateSignals,
+    pub interaction: InteractionSignals,
     pub tap_markers: Signal<Vec<TapMarker>>,
-    pub screenshot_counter: Signal<u64>,
-    pub automation_state: Signal<GameState>,
-    pub automation_command_tx: Signal<Option<mpsc::Sender<AutomationCommand>>>,
-    pub timed_tap_countdown: Signal<Option<(String, u64)>>,
-    pub timed_events_list: Signal<Vec<TimedEvent>>,
-    pub is_paused_by_touch: Signal<bool>,
-    pub touch_timeout_remaining: Signal<Option<u64>>,
-    pub hover_tap_preview: Signal<Option<(u32, u32)>>,
-    pub shared_adb_client: Signal<Option<Arc<Mutex<AdbBackend>>>>,
+    pub shared_adb_client: SharedAdbClient,
     pub calculate_device_coords: fn(ElementPoint, u32, u32) -> (u32, u32),
 }
 
@@ -106,95 +92,69 @@ pub fn run_gui(debug_mode: bool) {
 
 #[component]
 fn App() -> Element {
-    let status = use_signal(|| "Initializing...".to_string());
-    let device_info = use_signal(|| None::<(String, Option<u32>, u32, u32)>);
-    let screenshot_data = use_signal(|| None::<String>);
-    let screenshot_bytes = use_signal(|| None::<Vec<u8>>);
-    let screenshot_status = use_signal(|| "".to_string());
-    let screenshot_counter = use_signal(|| 0u64);
-    let mouse_coords = use_signal(|| None::<(i32, i32)>);
-    let device_coords = use_signal(|| None::<(u32, u32)>);
-    let auto_update_on_touch = use_signal(|| true);
-    let select_box = use_signal(|| false);
-    let is_loading_screenshot = use_signal(|| false);
+    // Create grouped signals for cleaner organization
+    let screenshot = ScreenshotSignals {
+        data: use_signal(|| None::<String>),
+        bytes: use_signal(|| None::<Vec<u8>>),
+        status: use_signal(|| "".to_string()),
+        counter: use_signal(|| 0u64),
+        is_loading: use_signal(|| false),
+    };
+
+    let device = DeviceSignals {
+        info: use_signal(|| None::<(String, Option<u32>, u32, u32)>),
+        status: use_signal(|| "Initializing...".to_string()),
+        coords: use_signal(|| None::<(u32, u32)>),
+    };
+
+    let automation = AutomationStateSignals {
+        state: use_signal(|| GameState::Idle),
+        command_tx: use_signal(|| None),
+        is_paused_by_touch: use_signal(|| false),
+        touch_timeout_remaining: use_signal(|| None::<u64>),
+        timed_tap_countdown: use_signal(|| None::<(String, u64)>),
+        timed_events_list: use_signal(Vec::<TimedEvent>::new),
+    };
+
+    let interaction = InteractionSignals {
+        mouse_coords: use_signal(|| None::<(i32, i32)>),
+        auto_update_on_touch: use_signal(|| true),
+        select_box: use_signal(|| false),
+        is_swiping: use_signal(|| false),
+        swipe_start: use_signal(|| None::<(u32, u32)>),
+        swipe_end: use_signal(|| None::<(u32, u32)>),
+        selection_start: use_signal(|| None::<ElementPoint>),
+        selection_end: use_signal(|| None::<ElementPoint>),
+        hover_tap_preview: use_signal(|| None::<(u32, u32)>),
+    };
+
     let shared_adb_client = use_signal(|| None::<Arc<Mutex<AdbBackend>>>);
-    let force_update = use_signal(|| 0u32);
-
-    let automation_state = use_signal(|| GameState::Idle);
-    let automation_command_tx = use_signal(|| None::<mpsc::Sender<AutomationCommand>>);
-    let timed_tap_countdown = use_signal(|| None::<(String, u64)>);
-    let timed_events_list = use_signal(Vec::<TimedEvent>::new);
-    let is_paused_by_touch = use_signal(|| false);
-    let touch_timeout_remaining = use_signal(|| None::<u64>);
-
-    let selection_start = use_signal(|| None::<dioxus::html::geometry::ElementPoint>);
-    let selection_end = use_signal(|| None::<dioxus::html::geometry::ElementPoint>);
-    let is_swiping = use_signal(|| false);
-    let swipe_start = use_signal(|| None::<(u32, u32)>);
-    let swipe_end = use_signal(|| None::<(u32, u32)>);
     let tap_markers = use_signal(Vec::<TapMarker>::new);
     let runtime_days = use_signal(|| 0.0f64);
-    let hover_tap_preview = use_signal(|| None::<(u32, u32)>);
+    let force_update = use_signal(|| 0u32);
 
-    // Initialize hooks for background tasks
+    // Initialize hooks for background tasks with grouped signals
     use_runtime_timer(runtime_days);
-    use_device_loop(
-        status,
-        device_info,
-        is_loading_screenshot,
-        screenshot_status,
-        screenshot_data,
-        screenshot_bytes,
-        screenshot_counter,
-        shared_adb_client,
-        force_update,
-    );
+    use_device_loop(screenshot, device, shared_adb_client, force_update);
     use_automation_loop(
         is_debug_mode(),
-        automation_command_tx,
-        automation_state,
-        screenshot_counter,
-        screenshot_data,
-        screenshot_bytes,
-        screenshot_status,
-        timed_tap_countdown,
-        timed_events_list,
-        is_paused_by_touch,
-        touch_timeout_remaining,
-        device_info,
-        status,
+        screenshot,
+        device,
+        automation,
         shared_adb_client,
     );
 
     use_context_provider(|| AppContext {
-        screenshot_status,
-        screenshot_data,
-        screenshot_bytes,
-        device_info,
-        device_coords,
-        mouse_coords,
-        is_loading_screenshot,
-        auto_update_on_touch,
-        select_box,
-        is_swiping,
-        swipe_start,
-        swipe_end,
-        selection_start,
-        selection_end,
+        screenshot,
+        device,
+        automation,
+        interaction,
         tap_markers,
-        screenshot_counter,
-        automation_state,
-        automation_command_tx,
-        timed_tap_countdown,
-        timed_events_list,
-        is_paused_by_touch,
-        touch_timeout_remaining,
-        hover_tap_preview,
         shared_adb_client,
         calculate_device_coords,
     });
 
-    let current_status = status.read().clone();
+    let current_status = device.status.read().clone();
     let _update_trigger = force_update.read();
     let (status_label, status_style) = if current_status.contains("Connected") {
         (
@@ -213,6 +173,7 @@ fn App() -> Element {
         )
     };
     let runtime_days_value = *runtime_days.read();
+    let screenshot_status = screenshot.status;
 
     rsx! {
         div {
@@ -221,7 +182,7 @@ fn App() -> Element {
                 style: "flex:1; overflow:auto; padding:8px;",
                 div { style: "display:flex; gap:14px; align-items:flex-start;",
                     div { style: "flex:1; min-width:0; display:flex; flex-direction:column; gap:10px;",
-                        if let Some((name, transport_id_opt, screen_x, screen_y)) = device_info.read().clone() {
+                        if let Some((name, transport_id_opt, screen_x, screen_y)) = device.info.read().clone() {
                             DeviceInfo { name: name, transport_id: transport_id_opt, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string(), runtime_days: runtime_days_value }
                             Actions {}
                         } else {
