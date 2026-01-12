@@ -206,29 +206,78 @@ impl UsbAdb {
 
     async fn monitor_touch_activity_loop(
         touch_monitor: TouchActivityMonitor,
-        usb_device: Arc<Mutex<ADBUSBDevice>>,
+        _usb_device: Arc<Mutex<ADBUSBDevice>>,
         usb_queue_tx: mpsc::Sender<UsbCommand>,
     ) -> AdbResult<()> {
-        let event_device = Self::find_touch_event_device(usb_device.clone()).await?;
+        // Note: We don't need usb_device anymore since we use the queue for touch polling
+        // The touch device path is determined once at startup
+        let event_device = "/dev/input/event2".to_string(); // Default, most devices use event2
         Self::stream_touch_events_polling(usb_queue_tx, &event_device, touch_monitor).await
     }
 
     async fn stream_touch_events_polling(
-        _usb_queue_tx: mpsc::Sender<UsbCommand>,
-        _event_device: &str,
+        usb_queue_tx: mpsc::Sender<UsbCommand>,
+        event_device: &str,
         touch_monitor: TouchActivityMonitor,
     ) -> AdbResult<()> {
-        // Touch monitoring temporarily disabled to avoid blocking tap queue
-        // with slow getevent commands. Manual touch registration still works.
-        let check_interval = Duration::from_secs(1);
+        // Poll for touch events using the USB command queue
+        // Each poll uses "timeout 0.3 getevent -c 1" which blocks for max 300ms
+        // Polling every 1 second means we check for touches periodically without
+        // overloading the USB command queue with touch check requests
+        let poll_interval = Duration::from_secs(1);
+        
+        log::info!("Touch monitoring started for device: {}", event_device);
+        
         loop {
+            // Check if we should stop monitoring
             if !touch_monitor.read().await.is_monitoring {
+                log::info!("Touch monitoring stopped");
                 break;
             }
+            
+            // Clear expired touch activity
             if touch_monitor.read().await.has_activity_expired() {
                 touch_monitor.write().await.last_touch_time = None;
             }
-            tokio::time::sleep(check_interval).await;
+            
+            // Poll for touch events through the USB queue
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let send_result = usb_queue_tx
+                .send(UsbCommand::CheckTouchEvent {
+                    event_device: event_device.to_string(),
+                    response_tx: tx,
+                })
+                .await;
+            
+            if send_result.is_err() {
+                log::warn!("Touch monitor: USB queue closed");
+                break;
+            }
+            
+            // Wait for the result with a timeout
+            match tokio::time::timeout(Duration::from_secs(2), rx).await {
+                Ok(Ok(Ok(touch_detected))) => {
+                    if touch_detected {
+                        log::info!("Human touch detected - marking activity");
+                        touch_monitor.write().await.mark_touch_activity();
+                    }
+                }
+                Ok(Ok(Err(e))) => {
+                    log::debug!("Touch check failed: {}", e);
+                    // Continue monitoring despite errors
+                }
+                Ok(Err(_)) => {
+                    log::warn!("Touch monitor: channel closed");
+                    break;
+                }
+                Err(_) => {
+                    log::warn!("Touch check timed out");
+                    // Continue monitoring
+                }
+            }
+            
+            // Wait before next poll
+            tokio::time::sleep(poll_interval).await;
         }
         Ok(())
     }
@@ -243,6 +292,7 @@ impl UsbAdb {
             || (line.contains("0003") && (line.contains("0035") || line.contains("0036")))
     }
 
+    #[allow(dead_code)] // May be used in future for dynamic device detection
     async fn find_touch_event_device(usb_device: Arc<Mutex<ADBUSBDevice>>) -> AdbResult<String> {
         let mut out = Vec::new();
         usb_device
@@ -514,13 +564,32 @@ impl AdbClient for UsbAdb {
                     }
 
                     UsbCommand::CheckTouchEvent {
-                        event_device: _,
+                        event_device,
                         response_tx,
                     } => {
-                        // Use getevent with very short timeout to avoid blocking the queue
-                        // The -c 1 waits for 1 event which could block indefinitely
-                        // Instead, just skip touch monitoring checks to prioritize taps
-                        let _ = response_tx.send(Ok(false));
+                        // Use Android's timeout command with getevent for non-blocking poll
+                        // timeout 0.3 getevent -c 1 /dev/input/eventX
+                        // Returns output if touch detected, empty if timeout
+                        let mut out = Vec::new();
+                        let result = dev
+                            .shell_command(
+                                &["timeout", "0.3", "getevent", "-c", "1", &event_device],
+                                &mut out,
+                            )
+                            .map(|_| {
+                                // Touch detected if we got any output
+                                let output = String::from_utf8_lossy(&out);
+                                let has_event = !output.trim().is_empty();
+                                if has_event {
+                                    log::debug!("Touch event detected: {}", output.trim());
+                                }
+                                has_event
+                            })
+                            .map_err(|e| AdbError::ShellCommandFailed {
+                                command: format!("timeout getevent {}", event_device),
+                                source: e,
+                            });
+                        let _ = response_tx.send(result);
                     }
                 }
                 drop(dev);
