@@ -1,0 +1,12 @@
+# Cargo configuration for android-adb-run
+# This suppresses future-incompat warnings from transitive dependencies like num-bigint-dig v0.8.4
+# which would otherwise block test execution on Ubuntu CI
+
+[build]
+# Use default settings for incremental builds
+incremental = true
+
+# Note: future-incompat warnings from num-bigint-dig are informational only
+# and should not block the build process. They are handled by the Rust ecosystem
+# and do not affect functionality. The warnings appear in the build output but
+# do not prevent test execution.

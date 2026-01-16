@@ -41,7 +41,15 @@ jobs:
           patchelf \
           libssl-dev \
           pkg-config \
-          libxdo-dev
+          libxdo-dev \
+          xvfb
+
+    - name: Set up virtual display for Linux tests
+      if: runner.os == 'Linux'
+      run: |
+        echo "DISPLAY=:99" >> $GITHUB_ENV
+        sudo Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+        sleep 2
 
     - name: Install Windows build dependencies
       if: runner.os == 'Windows'
