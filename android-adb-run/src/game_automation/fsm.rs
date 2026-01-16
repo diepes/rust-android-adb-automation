@@ -12,10 +12,24 @@ use tokio::sync::{Mutex, mpsc};
 use tokio::time::{Duration, timeout};
 
 // Helper function to detect if an error indicates device disconnection
+// NOTE: This is careful to avoid false positives from normal cleanup operations
 pub fn is_disconnect_error(error: &str) -> bool {
     let error_lower = error.to_lowercase();
     
-    // Clear device disconnection indicators
+    // IMPORTANT: "no write endpoint setup" during CLSE cleanup is NOT a disconnect
+    // Only treat it as disconnect if it happens during actual operations
+    // We filter out CLSE messages which are harmless cleanup operations
+    let is_clse_cleanup_error = error_lower.contains("clse") || 
+                                (error_lower.contains("no write endpoint") && 
+                                 error_lower.contains("error while sending"));
+    
+    if is_clse_cleanup_error {
+        // These are harmless cleanup errors from the USB transport layer
+        // They don't indicate actual device disconnection
+        return false;
+    }
+    
+    // Clear device disconnection indicators (actual problems)
     error_lower.contains("device offline")
         || error_lower.contains("device not found")
         || error_lower.contains("not found")           // Catches "device 'xxx' not found"
@@ -26,10 +40,9 @@ pub fn is_disconnect_error(error: &str) -> bool {
         || error_lower.contains("connection reset")
         || error_lower.contains("closed")
         || error_lower.contains("not connected")
-        || error_lower.contains("no write endpoint setup") // USB endpoint error = device disconnected
-        || error_lower.contains("usb") && error_lower.contains("error") // Generic USB error
-        || error_lower.contains("timed out")           // Timeout often indicates disconnect
-        || error_lower.contains("timeout")             // Alternative timeout message format
+        || (error_lower.contains("timed out") && error_lower.contains("usb")) // USB timeout = disconnect
+        || error_lower.contains("operation timed out") // Only if consistent failures
+        || (error_lower.contains("usb") && error_lower.contains("error") && !error_lower.contains("resource busy")) // Generic USB error but not resource busy
 }
 
 pub struct GameAutomation {
@@ -1274,22 +1287,38 @@ impl GameAutomation {
 
     /// Check if it's time to attempt reconnection and send countdown updates
     async fn check_reconnection(&mut self) {
-        const RECONNECTION_INTERVAL_SECS: u64 = 10;
+        // Use exponential backoff: 2s, 4s, 8s, 16s, 30s (max)
+        let backoff_secs = match self.last_reconnect_attempt {
+            None => 0, // First attempt immediately
+            Some(last_attempt) => {
+                let elapsed = std::time::Instant::now()
+                    .duration_since(last_attempt)
+                    .as_secs();
+                
+                // Count how many attempts we've made
+                let attempt_count = (elapsed / 10).min(4); // Cap at 4 attempts tracked
+                let backoff = 2u64.pow(attempt_count as u32);
+                backoff.min(30) // Cap at 30 seconds between attempts
+            }
+        };
 
         let now = std::time::Instant::now();
-
-        // Determine if we should attempt reconnection
         let should_attempt = match self.last_reconnect_attempt {
             None => true, // First attempt
             Some(last_attempt) => {
                 let elapsed = now.duration_since(last_attempt).as_secs();
-                elapsed >= RECONNECTION_INTERVAL_SECS
+                elapsed >= backoff_secs
             }
         };
 
         if should_attempt {
             // Attempt reconnection
-            println!("🔄 Attempting device reconnection...");
+            println!(
+                "🔄 Attempting device reconnection (elapsed: {:?})...",
+                self.last_reconnect_attempt
+                    .map(|t| now.duration_since(t))
+                    .unwrap_or_default()
+            );
             self.last_reconnect_attempt = Some(now);
 
             if let Ok(()) = self.attempt_reconnection().await {
@@ -1301,10 +1330,26 @@ impl GameAutomation {
         // Send countdown update to GUI
         if let Some(last_attempt) = self.last_reconnect_attempt {
             let elapsed = now.duration_since(last_attempt).as_secs();
-            let remaining = RECONNECTION_INTERVAL_SECS.saturating_sub(elapsed);
+            let backoff_secs = match self.last_reconnect_attempt {
+                None => 0,
+                Some(last_attempt) => {
+                    let elapsed = std::time::Instant::now()
+                        .duration_since(last_attempt)
+                        .as_secs();
+                    let attempt_count = (elapsed / 10).min(4);
+                    let backoff = 2u64.pow(attempt_count as u32);
+                    backoff.min(30)
+                }
+            };
+            let remaining = backoff_secs.saturating_sub(elapsed);
 
-            *self.screenshot_status.write_unchecked() =
-                format!("🔌 Device disconnected - Retrying in {}s...", remaining);
+            if remaining > 0 {
+                *self.screenshot_status.write_unchecked() =
+                    format!("🔌 Device disconnected - Next retry in {}s...", remaining);
+            } else {
+                *self.screenshot_status.write_unchecked() =
+                    "🔌 Device disconnected - Attempting reconnection...".to_string();
+            }
         }
     }
 

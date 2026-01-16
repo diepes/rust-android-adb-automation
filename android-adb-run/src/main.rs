@@ -5,8 +5,10 @@ use android_adb_run::gui::dioxus_app::run_gui;
 use args::{Args, Mode};
 
 fn main() {
-    // Initialize the logger
-    env_logger::init();
+    // Initialize the logger with filter for harmless cleanup errors
+    env_logger::Builder::from_default_env()
+        .filter(Some("adb_client::transports::usb_transport"), log::LevelFilter::Off)
+        .init();
 
     let args = match Args::parse() {
         Some(args) => args,

@@ -7,6 +7,7 @@ use tokio::sync::Mutex as TokioMutex;
 
 /// Initializes device connection loop that discovers and connects to Android devices
 /// Uses grouped signal structs for cleaner function signature
+/// Also monitors connection and handles reconnection when device disconnects
 pub fn use_device_loop(
     mut screenshot: ScreenshotSignals,
     mut device: DeviceSignals,
@@ -15,6 +16,7 @@ pub fn use_device_loop(
 ) {
     use_future(move || async move {
         loop {
+            // === DISCOVERY PHASE ===
             device.status.set("🔍 Looking for devices...".to_string());
             let devices = match AdbBackend::list_devices().await {
                 Ok(devices) if !devices.is_empty() => devices,
@@ -104,15 +106,79 @@ pub fn use_device_loop(
                             }
                         }
                     });
-                    break;
+
+                    // === MONITORING PHASE ===
+                    // Wait here while device is connected
+                    let monitor_shared_client = shared_adb_client.clone();
+                    let mut device_status = device.status.clone();
+                    
+                    // This future will complete when device disconnects
+                    let disconnection_detected = async move {
+                        let mut check_interval = tokio::time::interval(tokio::time::Duration::from_secs(3));
+
+                        loop {
+                            check_interval.tick().await;
+
+                            // If shared_adb_client has been cleared (by FSM reconnection), device is disconnected
+                            if monitor_shared_client.read().is_none() {
+                                log::debug!("Device monitoring: Client cleared, device disconnected");
+                                device_status.set("🔌 Device Disconnected - Searching for device...".to_string());
+                                break;
+                            }
+
+                            // Just check that client still exists (lightweight check)
+                            if let Some(client_arc) = monitor_shared_client.read().clone() {
+                                let client_lock = client_arc.lock().await;
+                                // Cached operation, doesn't require USB communication
+                                let _ = client_lock.screen_dimensions();
+                                drop(client_lock);
+                            } else {
+                                // Client was cleared, exit
+                                break;
+                            }
+                        }
+
+                        log::debug!("Device monitoring task ending, returning to discovery phase");
+                    };
+                    
+                    // Wait for disconnection before going back to discovery phase
+                    disconnection_detected.await;
+                    
+                    // Loop back to discovery phase after device disconnects
                 }
                 Err(e) => {
-                    for seconds in (1..=5).rev() {
-                        device.status.set(format!(
-                            "❌ Connection failed: {} - Retrying in {}s...",
-                            e, seconds
-                        ));
-                        screenshot.status.set("⏳ Waiting for USB authorization...".to_string());
+                    // Use error helper methods for cleaner code
+                    let (get_status, tip_msg, retry_secs): (Box<dyn Fn(&String) -> String>, &str, u32) = 
+                        if e.is_resource_busy() {
+                            (
+                                Box::new(|_e| "⚠️ USB Already in Use - Close other ADB apps - Retrying in {}s...".to_string()),
+                                "💡 Close other instances (VS Code, Android Studio, etc.)",
+                                10u32,
+                            )
+                        } else if e.is_permission_denied() {
+                            (
+                                Box::new(|_e| "⚠️ Permission Denied - Check USB permissions - Retrying in {}s...".to_string()),
+                                "💡 Run: sudo chmod 666 /dev/bus/usb/*/0*",
+                                5u32,
+                            )
+                        } else if e.is_device_not_found() {
+                            (
+                                Box::new(|_e| "⚠️ No Device Found - Reconnect USB cable - Retrying in {}s...".to_string()),
+                                "💡 Unplug and replug the USB cable",
+                                5u32,
+                            )
+                        } else {
+                            (
+                                Box::new(|e: &String| format!("❌ Connection failed: {} - Retrying in {{}}s...", e)),
+                                "⏳ Waiting for USB authorization...",
+                                5u32,
+                            )
+                        };
+
+                    for seconds in (1..=retry_secs).rev() {
+                        let msg = get_status(&e.to_string());
+                        device.status.set(msg.replace("{}", &seconds.to_string()));
+                        screenshot.status.set(tip_msg.to_string());
                         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                     }
                 }

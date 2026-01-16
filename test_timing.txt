@@ -1,9 +1,0 @@
-Testing theory:
-1. Events fire once at startup (last_executed = None, so is_ready() returns true)
-2. mark_executed() sets last_executed = Some(now)
-3. On next check, elapsed < interval, so is_ready() returns false
-4. After interval passes, elapsed >= interval, so is_ready() should return true again
-
-The logic seems correct. The issue must be that the loop isn't calling process_timed_events() or is_running is getting set to false.
-
-Let me check if the Start command is being received and processed.
