@@ -283,8 +283,10 @@ impl GameStateDetector {
         );
 
         // Find matches above threshold
+        // Note: CrossCorrelationNormalized returns f32 values in range [-1, 1]
+        // where 1.0 is a perfect match
         for (x, y, pixel) in result.enumerate_pixels() {
-            let confidence = pixel[0] / 255.0;
+            let confidence = pixel[0]; // Already f32 in range [-1, 1]
 
             if confidence >= self.config.confidence_threshold {
                 // Convert coordinates back to screen space

@@ -8,6 +8,9 @@ pub mod detector;
 pub mod region;
 pub mod template;
 
+#[cfg(test)]
+mod tests;
+
 // Re-export main types and functions
 pub use config::{MatchConfig, create_default_config, create_game_object_config, create_ui_config};
 pub use detector::{DetectionResult, GameStateDetector};

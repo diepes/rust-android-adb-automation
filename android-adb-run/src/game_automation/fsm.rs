@@ -88,7 +88,7 @@ impl GameAutomation {
         let tap_definitions = vec![
             ("claim_5d_tap", 120, 1250, "minutes", 1), // Every 2 minutes
             ("restart_tap", 110, 1600, "minutes", 2),  // Every 9 minutes
-            ("claim_1d_tap", 350, 628, "seconds", 14), // Every 14sec, rotation 15sec
+            ("claim_1d_tap", 350, 628, "seconds", 15), // Every 15sec
                                                        // Add more taps here as needed with seconds or minutes
         ];
 
