@@ -23,18 +23,6 @@ fn generate_patch_filename(label: Option<&str>, x: u32, y: u32, width: u32, heig
     }
 }
 
-/// Generate output path from source path and coordinates
-/// 
-/// # Arguments
-/// * `source_path` - Path to the source screenshot
-/// * `label` - Optional label to include in filename
-/// * `x` - X coordinate of top-left corner
-/// * `y` - Y coordinate of top-left corner
-/// * `width` - Width of the region
-/// * `height` - Height of the region
-/// 
-/// # Returns
-/// Output path in the same directory as source with encoded coordinates and optional label
 fn generate_output_path(source_path: &str, label: Option<&str>, x: u32, y: u32, width: u32, height: u32) -> String {
     let source = Path::new(source_path);
     let parent = source.parent().unwrap_or_else(|| Path::new("."));
@@ -100,11 +88,20 @@ fn extract_region_and_label_from_filename(source_path: &str) -> Option<(Option<S
 
 fn main() {
     use std::fs;
+    use std::time::Instant;
     
+    let start = Instant::now();
     let test_images_dir = "assets/test_images";
+    
+    let mut stats = ProcessingStats {
+        cleanup_count: 0,
+        processed_count: 0,
+        skipped_count: 0,
+    };
     
     // First, remove all existing patch files (both patch-* and patch_* formats)
     println!("Cleaning up old patch files...");
+    let cleanup_start = Instant::now();
     if let Ok(entries) = fs::read_dir(test_images_dir) {
         for entry in entries.flatten() {
             if let Ok(metadata) = entry.metadata() {
@@ -117,6 +114,7 @@ fn main() {
                                 eprintln!("⚠️ Failed to remove {}: {}", filename_str, e);
                             } else {
                                 println!("  Removed: {}", filename_str);
+                                stats.cleanup_count += 1;
                             }
                         }
                     }
@@ -124,9 +122,12 @@ fn main() {
             }
         }
     }
+    let cleanup_duration = cleanup_start.elapsed();
+    println!("  ✓ Cleanup took: {:.2}ms\n", cleanup_duration.as_secs_f64() * 1000.0);
     
     // Process all img-[x,y,width,height].png or img-label-[x,y,width,height].png files
-    println!("\nProcessing img-*.png files...");
+    println!("Processing img-*.png files...");
+    let process_start = Instant::now();
     if let Ok(entries) = fs::read_dir(test_images_dir) {
         for entry in entries.flatten() {
             if let Ok(metadata) = entry.metadata() {
@@ -136,6 +137,7 @@ fn main() {
                         let filename_str = filename.to_string_lossy();
                         if filename_str.starts_with("img-") && filename_str.ends_with(".png") {
                             let source_path = path.to_string_lossy().to_string();
+                            let file_start = Instant::now();
                             
                             // Extract region and label from filename
                             if let Some((label, x, y, width, height)) = extract_region_and_label_from_filename(&source_path) {
@@ -149,36 +151,53 @@ fn main() {
                                 let output_path = generate_output_path(&source_path, label.as_deref(), x, y, width, height);
                                 
                                 // Load and crop image
+                                let load_start = Instant::now();
                                 match image::open(&source_path) {
                                     Ok(img) => {
-                                        println!("  Source dimensions: {}x{}", img.width(), img.height());
+                                        let load_duration = load_start.elapsed();
+                                        println!("  Source dimensions: {}x{} (loaded in {:.2}ms)", 
+                                            img.width(), img.height(), load_duration.as_secs_f64() * 1000.0);
                                         
                                         // Validate region is within image bounds
                                         if x + width > img.width() || y + height > img.height() {
-                                            eprintln!("  ✗ Error: Region [{}..{}] × [{}..{}] exceeds image bounds",
-                                                x, x + width, y, y + height);
+                                            eprintln!("  ✗ Error: Region [{}..{}] × [{}..{}] exceeds image bounds [{}x{}]",
+                                                x, x + width, y, y + height, img.width(), img.height());
+                                            stats.skipped_count += 1;
                                         } else {
                                             // Crop the region
+                                            let crop_start = Instant::now();
                                             let cropped = img.crop_imm(x, y, width, height);
+                                            let crop_duration = crop_start.elapsed();
                                             
                                             // Save the patch
+                                            let save_start = Instant::now();
                                             match cropped.save(&output_path) {
                                                 Ok(_) => {
-                                                    println!("  ✓ Saved patch to: {}", Path::new(&output_path).file_name().unwrap_or_default().to_string_lossy());
+                                                    let save_duration = save_start.elapsed();
+                                                    let total_file_duration = file_start.elapsed();
+                                                    println!("  ✓ Saved patch to: {} (crop: {:.2}ms, save: {:.2}ms, total: {:.2}ms)", 
+                                                        Path::new(&output_path).file_name().unwrap_or_default().to_string_lossy(),
+                                                        crop_duration.as_secs_f64() * 1000.0,
+                                                        save_duration.as_secs_f64() * 1000.0,
+                                                        total_file_duration.as_secs_f64() * 1000.0);
+                                                    stats.processed_count += 1;
                                                 }
                                                 Err(e) => {
                                                     eprintln!("  ✗ Failed to save patch: {}", e);
+                                                    stats.skipped_count += 1;
                                                 }
                                             }
                                         }
                                     }
                                     Err(e) => {
                                         eprintln!("  ✗ Failed to open source image: {}", e);
+                                        stats.skipped_count += 1;
                                     }
                                 }
                             } else {
                                 eprintln!("⚠️ Could not extract region from: {}", filename_str);
                                 eprintln!("   Expected format: img[-label]-[x,y,width,height].png");
+                                stats.skipped_count += 1;
                             }
                         }
                     }
@@ -188,8 +207,30 @@ fn main() {
     } else {
         eprintln!("✗ Failed to read directory: {}", test_images_dir);
     }
+    let process_duration = process_start.elapsed();
     
-    println!("\n✓ Patch generation complete!");
+    let total_duration = start.elapsed();
+    
+    // Print summary
+    println!("\n{}", "=".repeat(60));
+    println!("📊 PROCESSING SUMMARY");
+    println!("{}", "=".repeat(60));
+    println!("✓ Patches generated: {}", stats.processed_count);
+    println!("⚠️ Patches skipped:  {}", stats.skipped_count);
+    println!("🗑️  Old patches removed: {}", stats.cleanup_count);
+    println!("{}", "-".repeat(60));
+    println!("⏱️  Cleanup time:     {:.2}ms", cleanup_duration.as_secs_f64() * 1000.0);
+    println!("⏱️  Processing time:  {:.2}ms", process_duration.as_secs_f64() * 1000.0);
+    println!("⏱️  Total time:       {:.2}ms ({:.3}s)", 
+        total_duration.as_secs_f64() * 1000.0,
+        total_duration.as_secs_f64());
+    println!("{}", "=".repeat(60));
+}
+
+struct ProcessingStats {
+    cleanup_count: u32,
+    processed_count: u32,
+    skipped_count: u32,
 }
 
 #[cfg(test)]
