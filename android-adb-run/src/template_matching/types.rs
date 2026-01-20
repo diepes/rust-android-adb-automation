@@ -30,7 +30,14 @@ pub struct Match {
 
 impl PatchInfo {
     /// Create a new patch from filename and pixel data
-    pub fn new(label: Option<String>, x: u32, y: u32, width: u32, height: u32, pixels: Vec<u8>) -> Self {
+    pub fn new(
+        label: Option<String>,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        pixels: Vec<u8>,
+    ) -> Self {
         Self {
             label,
             orig_x: x,
@@ -44,8 +51,14 @@ impl PatchInfo {
     /// Get the patch name for display
     pub fn display_name(&self) -> String {
         match &self.label {
-            Some(label) => format!("patch-{}-[{},{},{},{}]", label, self.orig_x, self.orig_y, self.width, self.height),
-            None => format!("patch-[{},{},{},{}]", self.orig_x, self.orig_y, self.width, self.height),
+            Some(label) => format!(
+                "patch-{}-[{},{},{},{}]",
+                label, self.orig_x, self.orig_y, self.width, self.height
+            ),
+            None => format!(
+                "patch-[{},{},{},{}]",
+                self.orig_x, self.orig_y, self.width, self.height
+            ),
         }
     }
 }
@@ -53,8 +66,15 @@ impl PatchInfo {
 impl Match {
     /// Format match as string with correlation percentage
     pub fn to_string(&self, patch: &PatchInfo) -> String {
-        let patch_name = &patch.label.as_ref().map(|s| s.as_str()).unwrap_or("unnamed");
+        let patch_name = &patch
+            .label
+            .as_ref()
+            .map(|s| s.as_str())
+            .unwrap_or("unnamed");
         let correlation_pct = (self.correlation * 100.0) as u32;
-        format!("{} at ({},{}) - {}%", patch_name, self.x, self.y, correlation_pct)
+        format!(
+            "{} at ({},{}) - {}%",
+            patch_name, self.x, self.y, correlation_pct
+        )
     }
 }

@@ -63,9 +63,11 @@ impl PatchMatcher {
         let (x_min, x_max, y_min, y_max) = if let (Some(ex), Some(ey)) = (expected_x, expected_y) {
             // Localized search around expected position
             let x_min = ex.saturating_sub(self.search_margin);
-            let x_max = (ex + template_width + self.search_margin).min(image_width.saturating_sub(template_width));
+            let x_max = (ex + template_width + self.search_margin)
+                .min(image_width.saturating_sub(template_width));
             let y_min = ey.saturating_sub(self.search_margin);
-            let y_max = (ey + template_height + self.search_margin).min(image_height.saturating_sub(template_height));
+            let y_max = (ey + template_height + self.search_margin)
+                .min(image_height.saturating_sub(template_height));
 
             if self.debug {
                 println!(
@@ -97,7 +99,8 @@ impl PatchMatcher {
                 let progress_idx = idx * ((x_max - x_min + 1) as usize) + x_idx;
 
                 if self.debug && progress_idx % report_interval == 0 {
-                    let progress_pct = (progress_idx as f32 / total_positions as f32 * 100.0) as u32;
+                    let progress_pct =
+                        (progress_idx as f32 / total_positions as f32 * 100.0) as u32;
                     print!("\r⏳ Search progress: {}%", progress_pct);
                     use std::io::{self, Write};
                     let _ = io::stdout().flush();
@@ -117,10 +120,7 @@ impl PatchMatcher {
         }
 
         // Sort by correlation descending and keep only top matches
-        matches.sort_by(|a, b| {
-            b.2.partial_cmp(&a.2)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        matches.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
         matches.truncate(self.max_matches);
 
         if self.debug {
@@ -179,7 +179,8 @@ impl PatchMatcher {
                     if max_possible_sum > 0.0 {
                         let current_correlation = 1.0 - (sum_sq_diff / max_possible_sum).min(1.0);
                         let pixels_remaining = pixels_to_check - check_idx;
-                        let worst_case_correlation = current_correlation * (1.0 - 0.1 * (pixels_remaining as f64 / pixels_to_check as f64));
+                        let worst_case_correlation = current_correlation
+                            * (1.0 - 0.1 * (pixels_remaining as f64 / pixels_to_check as f64));
                         let threshold_f64 = self.threshold as f64;
 
                         if worst_case_correlation < threshold_f64 {

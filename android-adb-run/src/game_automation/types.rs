@@ -19,6 +19,7 @@ pub struct AutomationSignals {
     pub screenshot_data: dioxus::prelude::Signal<Option<String>>,
     pub screenshot_bytes: dioxus::prelude::Signal<Option<Vec<u8>>>,
     pub screenshot_status: dioxus::prelude::Signal<String>,
+    pub screenshot_status_history: dioxus::prelude::Signal<Vec<(String, bool)>>,
     pub automation_state: dioxus::prelude::Signal<GameState>,
     pub is_paused_by_touch: dioxus::prelude::Signal<bool>,
     pub touch_timeout_remaining: dioxus::prelude::Signal<Option<u64>>,

@@ -5,6 +5,7 @@ use super::types::{
     TimedEvent, TimedEventType,
 };
 use crate::adb::{AdbBackend, AdbClient};
+use crate::gui::hooks::device_loop::start_template_matching_phase;
 use dioxus::prelude::{Signal, WritableExt};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,20 +16,20 @@ use tokio::time::{Duration, timeout};
 // NOTE: This is careful to avoid false positives from normal cleanup operations
 pub fn is_disconnect_error(error: &str) -> bool {
     let error_lower = error.to_lowercase();
-    
+
     // IMPORTANT: "no write endpoint setup" during CLSE cleanup is NOT a disconnect
     // Only treat it as disconnect if it happens during actual operations
     // We filter out CLSE messages which are harmless cleanup operations
-    let is_clse_cleanup_error = error_lower.contains("clse") || 
-                                (error_lower.contains("no write endpoint") && 
-                                 error_lower.contains("error while sending"));
-    
+    let is_clse_cleanup_error = error_lower.contains("clse")
+        || (error_lower.contains("no write endpoint")
+            && error_lower.contains("error while sending"));
+
     if is_clse_cleanup_error {
         // These are harmless cleanup errors from the USB transport layer
         // They don't indicate actual device disconnection
         return false;
     }
-    
+
     // Clear device disconnection indicators (actual problems)
     error_lower.contains("device offline")
         || error_lower.contains("device not found")
@@ -64,6 +65,7 @@ pub struct GameAutomation {
     screenshot_data: Signal<Option<String>>,
     screenshot_bytes: Signal<Option<Vec<u8>>>,
     screenshot_status: Signal<String>,
+    screenshot_status_history: Signal<Vec<(String, bool)>>,
     automation_state: Signal<GameState>,
     is_paused_by_touch: Signal<bool>,
     touch_timeout_remaining: Signal<Option<u64>>,
@@ -165,6 +167,7 @@ impl GameAutomation {
             screenshot_data: signals.screenshot_data,
             screenshot_bytes: signals.screenshot_bytes,
             screenshot_status: signals.screenshot_status,
+            screenshot_status_history: signals.screenshot_status_history,
             automation_state: signals.automation_state,
             is_paused_by_touch: signals.is_paused_by_touch,
             touch_timeout_remaining: signals.touch_timeout_remaining,
@@ -294,6 +297,9 @@ impl GameAutomation {
                     let screenshot_data_clone = self.screenshot_data;
                     let screenshot_bytes_clone = self.screenshot_bytes;
                     let screenshot_status_clone = self.screenshot_status;
+                    let status_history_for_matching = self.screenshot_status_history;
+                    let status_signal_for_matching = self.screenshot_status;
+                    let matching_bytes = bytes.clone();
 
                     // Spawn base64 encoding in background to avoid blocking
                     dioxus::prelude::spawn(async move {
@@ -313,6 +319,14 @@ impl GameAutomation {
                             counter_val, duration_ms
                         );
                     });
+
+                    // Start template matching so Progress History updates for automation captures as well
+                    start_template_matching_phase(
+                        matching_bytes,
+                        None,
+                        status_signal_for_matching,
+                        status_history_for_matching,
+                    );
 
                     Ok(bytes)
                 }
@@ -1294,7 +1308,7 @@ impl GameAutomation {
                 let elapsed = std::time::Instant::now()
                     .duration_since(last_attempt)
                     .as_secs();
-                
+
                 // Count how many attempts we've made
                 let attempt_count = (elapsed / 10).min(4); // Cap at 4 attempts tracked
                 let backoff = 2u64.pow(attempt_count as u32);
@@ -1388,7 +1402,10 @@ impl GameAutomation {
         match AdbBackend::connect_first().await {
             Ok(client) => {
                 let (screen_width, screen_height) = client.screen_dimensions();
-                println!("✅ Device reconnected! ({}x{})", screen_width, screen_height);
+                println!(
+                    "✅ Device reconnected! ({}x{})",
+                    screen_width, screen_height
+                );
 
                 // Update detector with screen dimensions
                 let mut config = create_default_config();

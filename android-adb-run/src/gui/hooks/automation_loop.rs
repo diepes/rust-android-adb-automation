@@ -22,6 +22,7 @@ pub fn use_automation_loop(
             screenshot_data: screenshot.data,
             screenshot_bytes: screenshot.bytes,
             screenshot_status: screenshot.status,
+            screenshot_status_history: screenshot.status_history,
             automation_state: automation.state,
             is_paused_by_touch: automation.is_paused_by_touch,
             touch_timeout_remaining: automation.touch_timeout_remaining,

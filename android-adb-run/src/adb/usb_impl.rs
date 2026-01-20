@@ -225,21 +225,21 @@ impl UsbAdb {
         // Polling every 1 second means we check for touches periodically without
         // overloading the USB command queue with touch check requests
         let poll_interval = Duration::from_secs(1);
-        
+
         log::info!("Touch monitoring started for device: {}", event_device);
-        
+
         loop {
             // Check if we should stop monitoring
             if !touch_monitor.read().await.is_monitoring {
                 log::info!("Touch monitoring stopped");
                 break;
             }
-            
+
             // Clear expired touch activity
             if touch_monitor.read().await.has_activity_expired() {
                 touch_monitor.write().await.last_touch_time = None;
             }
-            
+
             // Poll for touch events through the USB queue
             let (tx, rx) = tokio::sync::oneshot::channel();
             let send_result = usb_queue_tx
@@ -248,12 +248,12 @@ impl UsbAdb {
                     response_tx: tx,
                 })
                 .await;
-            
+
             if send_result.is_err() {
                 log::warn!("Touch monitor: USB queue closed");
                 break;
             }
-            
+
             // Wait for the result with a timeout
             match tokio::time::timeout(Duration::from_secs(2), rx).await {
                 Ok(Ok(Ok(touch_detected))) => {
@@ -275,7 +275,7 @@ impl UsbAdb {
                     // Continue monitoring
                 }
             }
-            
+
             // Wait before next poll
             tokio::time::sleep(poll_interval).await;
         }
@@ -478,7 +478,10 @@ impl AdbClient for UsbAdb {
                                     e,
                                 );
                                 if err.is_protocol_desync() {
-                                    eprintln!("❌ Tap failed (PROTOCOL DESYNC - reconnection needed): {} ({},{})", err, x, y);
+                                    eprintln!(
+                                        "❌ Tap failed (PROTOCOL DESYNC - reconnection needed): {} ({},{})",
+                                        err, x, y
+                                    );
                                 } else {
                                     eprintln!("❌ Tap failed: {} ({},{})", err, x, y);
                                 }
@@ -521,7 +524,10 @@ impl AdbClient for UsbAdb {
                                     e,
                                 );
                                 if err.is_protocol_desync() {
-                                    eprintln!("❌ Swipe failed (PROTOCOL DESYNC - reconnection needed): {}", err);
+                                    eprintln!(
+                                        "❌ Swipe failed (PROTOCOL DESYNC - reconnection needed): {}",
+                                        err
+                                    );
                                 } else {
                                     eprintln!("❌ Swipe failed: {}", err);
                                 }
@@ -545,13 +551,20 @@ impl AdbClient for UsbAdb {
                                             e,
                                         );
                                         if err.is_protocol_desync() {
-                                            eprintln!("❌ Screenshot failed (PROTOCOL DESYNC - reconnection needed): {}", err);
+                                            eprintln!(
+                                                "❌ Screenshot failed (PROTOCOL DESYNC - reconnection needed): {}",
+                                                err
+                                            );
                                         }
                                         // Also check if framebuffer error was a desync
                                         let fb_err_str = fb_err.to_string();
-                                        if fb_err_str.contains("CLSE") || fb_err_str.contains("no write endpoint") {
+                                        if fb_err_str.contains("CLSE")
+                                            || fb_err_str.contains("no write endpoint")
+                                        {
                                             Err(AdbError::ProtocolDesync {
-                                                description: format!("Framebuffer and screencap both failed with protocol errors"),
+                                                description: format!(
+                                                    "Framebuffer and screencap both failed with protocol errors"
+                                                ),
                                             })
                                         } else {
                                             Err(err)
@@ -779,4 +792,3 @@ impl UsbAdb {
         Ok(())
     }
 }
-

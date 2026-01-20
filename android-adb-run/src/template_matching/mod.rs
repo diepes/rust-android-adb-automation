@@ -5,7 +5,6 @@
 /// - Localized search around expected positions
 /// - Progress reporting for long operations
 /// - Correlation-based matching with configurable thresholds
-
 pub mod matcher;
 pub mod types;
 

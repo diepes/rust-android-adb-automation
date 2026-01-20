@@ -1,14 +1,14 @@
 use crate::adb::AdbBackend;
-use crate::game_automation::types::TimedEvent;
 use crate::game_automation::GameState;
+use crate::game_automation::types::TimedEvent;
 use crate::gui::components::{
     actions::Actions,
     device_info::DeviceInfo,
     screenshot_panel::{TapMarker, screenshot_panel},
 };
 use crate::gui::hooks::{
-    use_automation_loop, use_device_loop, use_runtime_timer,
     AutomationStateSignals, DeviceSignals, InteractionSignals, ScreenshotSignals, SharedAdbClient,
+    use_automation_loop, use_device_loop, use_runtime_timer,
 };
 use crate::gui::util::calculate_device_coords;
 use dioxus::html::geometry::ElementPoint;

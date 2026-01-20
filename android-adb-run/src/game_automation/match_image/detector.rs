@@ -367,7 +367,8 @@ impl GameStateDetector {
             let screen_x = region.x + local_x;
             let screen_y = region.y + local_y;
 
-            let template_match = TemplateMatch::new(template.clone(), screen_x, screen_y, correlation, 1.0);
+            let template_match =
+                TemplateMatch::new(template.clone(), screen_x, screen_y, correlation, 1.0);
 
             if template_match.is_within_bounds(self.screen_width, self.screen_height) {
                 matches.push(template_match);
@@ -375,7 +376,11 @@ impl GameStateDetector {
         }
 
         if self.config.debug_enabled && !matches.is_empty() {
-            println!("✅ Optimized matching found {} matches for template '{}'", matches.len(), template.name);
+            println!(
+                "✅ Optimized matching found {} matches for template '{}'",
+                matches.len(),
+                template.name
+            );
         }
 
         Ok(matches)

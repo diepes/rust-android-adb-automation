@@ -1,9 +1,9 @@
 /// Test to verify ADB protocol desync detection and recovery
-/// 
+///
 /// This test demonstrates:
 /// 1. How protocol desync errors (CLSE) are detected
 /// 2. How to recover from them by reconnecting
-/// 
+///
 /// Run with: cargo run --example test_desync_recovery
 use adb_client::{ADBDeviceExt, ADBUSBDevice};
 use std::time::{Duration, Instant};
@@ -27,11 +27,15 @@ fn main() {
     // Test the detection and recovery flow
     let mut connection_attempts: u32 = 0;
     let max_reconnects: u32 = 3;
-    
+
     loop {
         connection_attempts += 1;
-        println!("🔌 Connection attempt {} of {}", connection_attempts, max_reconnects + 1);
-        
+        println!(
+            "🔌 Connection attempt {} of {}",
+            connection_attempts,
+            max_reconnects + 1
+        );
+
         let mut device = match connect_with_retry(&key_path, 3) {
             Some(d) => d,
             None => {
@@ -75,7 +79,10 @@ fn main() {
 
     println!("\n📋 Summary:");
     println!("   Total connection attempts: {}", connection_attempts);
-    println!("   Reconnects needed: {}", connection_attempts.saturating_sub(1));
+    println!(
+        "   Reconnects needed: {}",
+        connection_attempts.saturating_sub(1)
+    );
 }
 
 enum TestResult {
@@ -97,7 +104,10 @@ fn connect_with_retry(key_path: &std::path::Path, max_attempts: u32) -> Option<A
                 let err_msg = format!("{}", e);
                 // CLSE during connection is actually expected if there's stale state
                 if err_msg.contains("CLSE") {
-                    println!("  ⚠️ Attempt {}/{}: Stale CLSE (will retry)", attempt, max_attempts);
+                    println!(
+                        "  ⚠️ Attempt {}/{}: Stale CLSE (will retry)",
+                        attempt, max_attempts
+                    );
                 } else {
                     println!("  ⚠️ Attempt {}/{}: {}", attempt, max_attempts, err_msg);
                 }
@@ -110,7 +120,7 @@ fn connect_with_retry(key_path: &std::path::Path, max_attempts: u32) -> Option<A
 
 fn run_command_series(device: &mut ADBUSBDevice) -> TestResult {
     println!("📋 Running command series...");
-    
+
     // First, test basic connectivity
     println!("  1. Testing basic echo command...");
     match run_shell_cmd(device, &["echo", "hello"]) {
@@ -147,16 +157,26 @@ fn run_command_series(device: &mut ADBUSBDevice) -> TestResult {
     let fb_start = Instant::now();
     match device.framebuffer_bytes() {
         Ok(data) => {
-            println!("     ✅ Framebuffer: {} bytes ({:?})", data.len(), fb_start.elapsed());
+            println!(
+                "     ✅ Framebuffer: {} bytes ({:?})",
+                data.len(),
+                fb_start.elapsed()
+            );
         }
         Err(e) => {
             let err_str = format!("{}", e);
             if is_desync_error(&err_str) {
-                println!("     ❌ Framebuffer failed with protocol desync: {}", err_str);
+                println!(
+                    "     ❌ Framebuffer failed with protocol desync: {}",
+                    err_str
+                );
                 return TestResult::ProtocolDesync;
             }
             // Framebuffer failure might be OK, try screencap fallback
-            println!("     ⚠️ Framebuffer failed ({}), trying screencap...", err_str);
+            println!(
+                "     ⚠️ Framebuffer failed ({}), trying screencap...",
+                err_str
+            );
             match run_shell_cmd(device, &["screencap", "-p"]) {
                 Ok(data) => println!("     ✅ Screencap: {} bytes", data.len()),
                 Err(e) if is_desync_error(&e) => {

@@ -1,7 +1,6 @@
 /// Template matching implementation
 ///
 /// Optimized correlation-based matching with early exit optimization
-
 use super::types::{Match, PatchInfo};
 use image::RgbImage;
 
@@ -35,6 +34,9 @@ impl TemplateMatcher {
 
     /// Find best matches for a patch in an image
     ///
+    /// Uses localized search around the expected patch coordinates for speed.
+    /// Falls back to full image search if no expected location is provided.
+    ///
     /// # Arguments
     /// * `image_rgb` - The image to search in (RGB format)
     /// * `patch_idx` - Index of the patch to find
@@ -50,7 +52,7 @@ impl TemplateMatcher {
         patch_idx: usize,
         threshold: f32,
         max_matches: usize,
-        _search_margin: u32,
+        search_margin: u32,
     ) -> Vec<Match> {
         if patch_idx >= self.patches.len() {
             return Vec::new();
@@ -61,22 +63,18 @@ impl TemplateMatcher {
         let image_height = image_rgb.height() as u32;
 
         // Convert patch pixels to RgbImage
-        let patch_img = match RgbImage::from_raw(
-            patch.width,
-            patch.height,
-            patch.pixels.clone(),
-        ) {
+        let patch_img = match RgbImage::from_raw(patch.width, patch.height, patch.pixels.clone()) {
             Some(img) => img,
             None => return Vec::new(),
         };
 
-        // Determine search region
-        let (x_min, x_max, y_min, y_max) = (
-            0_u32,
-            image_width.saturating_sub(patch.width),
-            0_u32,
-            image_height.saturating_sub(patch.height),
-        );
+        // Use localized search around expected position (much faster)
+        let x_min = patch.orig_x.saturating_sub(search_margin);
+        let x_max = (patch.orig_x + patch.width + search_margin)
+            .min(image_width.saturating_sub(patch.width));
+        let y_min = patch.orig_y.saturating_sub(search_margin);
+        let y_max = (patch.orig_y + patch.height + search_margin)
+            .min(image_height.saturating_sub(patch.height));
 
         let mut matches: Vec<Match> = Vec::new();
 
@@ -87,11 +85,13 @@ impl TemplateMatcher {
         let report_interval = (total_positions / 10).max(1); // Report every 10%
         let mut position_count = 0;
 
-        // Search through possible positions
+        // Search through possible positions in localized region
         for y in y_min..=y_max {
             for x in x_min..=x_max {
                 // Extract region from image
-                if let Some(region) = self.extract_region(image_rgb, x, y, patch.width, patch.height) {
+                if let Some(region) =
+                    self.extract_region(image_rgb, x, y, patch.width, patch.height)
+                {
                     let corr = self.calculate_correlation(&patch_img, &region, threshold);
 
                     if corr >= threshold {
@@ -105,8 +105,9 @@ impl TemplateMatcher {
 
                 position_count += 1;
                 if position_count % report_interval == 0 {
-                    let progress_pct = (position_count as f32 / total_positions as f32 * 100.0) as u32;
-                    log::debug!("  ⏳ Correlation scanning: {}%", progress_pct);
+                    let progress_pct =
+                        (position_count as f32 / total_positions as f32 * 100.0) as u32;
+                    log::debug!("  ⏳ Localized search: {}%", progress_pct);
                 }
             }
         }
@@ -148,12 +149,7 @@ impl TemplateMatcher {
     /// Calculate normalized correlation between patch and region
     ///
     /// Uses sum of squared differences normalized to 0.0-1.0 range
-    fn calculate_correlation(
-        &self,
-        patch: &RgbImage,
-        region: &RgbImage,
-        min_match: f32,
-    ) -> f32 {
+    fn calculate_correlation(&self, patch: &RgbImage, region: &RgbImage, min_match: f32) -> f32 {
         if patch.width() != region.width() || patch.height() != region.height() {
             return 0.0;
         }
@@ -233,7 +229,10 @@ mod tests {
         let region = RgbImage::from_raw(10, 10, pixels).unwrap();
 
         let corr = matcher.calculate_correlation(&patch, &region, 0.9);
-        assert!(corr >= 0.99, "Perfect match should have correlation >= 0.99");
+        assert!(
+            corr >= 0.99,
+            "Perfect match should have correlation >= 0.99"
+        );
     }
 
     #[test]

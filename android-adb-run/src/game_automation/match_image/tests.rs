@@ -18,11 +18,7 @@ mod tests {
     #[test]
     fn test_region_parse_from_filename() {
         // Test parsing region coordinates from filename
-        let region = SearchRegion::parse_from_filename(
-            "img-[300,1682,50,50].png",
-            1080,
-            2280,
-        );
+        let region = SearchRegion::parse_from_filename("img-[300,1682,50,50].png", 1080, 2280);
 
         assert_eq!(region.x, 300);
         assert_eq!(region.y, 1682);
@@ -33,11 +29,7 @@ mod tests {
     #[test]
     fn test_region_parse_full_screen_fallback() {
         // When no region in filename, should return full screen
-        let region = SearchRegion::parse_from_filename(
-            "button_start.png",
-            1080,
-            2280,
-        );
+        let region = SearchRegion::parse_from_filename("button_start.png", 1080, 2280);
 
         assert_eq!(region.x, 0);
         assert_eq!(region.y, 0);
@@ -48,11 +40,7 @@ mod tests {
     #[test]
     fn test_region_clips_to_screen_bounds() {
         // Region that exceeds screen bounds should be clipped
-        let region = SearchRegion::parse_from_filename(
-            "img-[1000,2200,200,200].png",
-            1080,
-            2280,
-        );
+        let region = SearchRegion::parse_from_filename("img-[1000,2200,200,200].png", 1080, 2280);
 
         // Should be clipped: x=1000, width should be min(200, 1080-1000) = 80
         assert_eq!(region.x, 1000);
@@ -109,7 +97,9 @@ mod tests {
                 height: 50,
                 category: TemplateCategory::Unknown,
             };
-            result.matches.push(TemplateMatch::new(template, 10, 10, *conf, 1.0));
+            result
+                .matches
+                .push(TemplateMatch::new(template, 10, 10, *conf, 1.0));
         }
 
         let best = result.best_match().unwrap();
@@ -200,7 +190,7 @@ mod tests {
         let search_buffer = search_region.to_image();
 
         // Perform template matching
-        use imageproc::template_matching::{match_template, MatchTemplateMethod};
+        use imageproc::template_matching::{MatchTemplateMethod, match_template};
         let result = match_template(
             &search_buffer,
             &patch_gray,
@@ -221,19 +211,34 @@ mod tests {
             }
         }
 
-        println!("Best match: confidence={:.4} at ({}, {})", max_confidence, best_pos.0, best_pos.1);
+        println!(
+            "Best match: confidence={:.4} at ({}, {})",
+            max_confidence, best_pos.0, best_pos.1
+        );
 
         // The patch was extracted from (300, 1682) in the original
         // We're searching in a region starting at (250, 1632)
         // So the expected match should be around (50, 50) in the cropped region
         // (300 - 250 = 50, 1682 - 1632 = 50)
-        
+
         // Since this is the same image, confidence should be very high (>0.99)
-        assert!(max_confidence > 0.99, "Expected near-perfect match, got {:.4}", max_confidence);
-        
+        assert!(
+            max_confidence > 0.99,
+            "Expected near-perfect match, got {:.4}",
+            max_confidence
+        );
+
         // Position should be around (50, 50) in the search region
-        assert!(best_pos.0 >= 45 && best_pos.0 <= 55, "Expected x around 50, got {}", best_pos.0);
-        assert!(best_pos.1 >= 45 && best_pos.1 <= 55, "Expected y around 50, got {}", best_pos.1);
+        assert!(
+            best_pos.0 >= 45 && best_pos.0 <= 55,
+            "Expected x around 50, got {}",
+            best_pos.0
+        );
+        assert!(
+            best_pos.1 >= 45 && best_pos.1 <= 55,
+            "Expected y around 50, got {}",
+            best_pos.1
+        );
     }
 
     #[test]
@@ -260,16 +265,10 @@ mod tests {
         let patch_gray = patch_img.to_luma8();
 
         // Search in the same region where the patch was extracted from the original
-        let search_region = image::imageops::crop_imm(
-            &source_gray,
-            250,
-            1632,
-            150,
-            150,
-        );
+        let search_region = image::imageops::crop_imm(&source_gray, 250, 1632, 150, 150);
         let search_buffer = search_region.to_image();
 
-        use imageproc::template_matching::{match_template, MatchTemplateMethod};
+        use imageproc::template_matching::{MatchTemplateMethod, match_template};
         let result = match_template(
             &search_buffer,
             &patch_gray,
@@ -286,8 +285,11 @@ mod tests {
             }
         }
 
-        println!("Match confidence on different screenshot: {:.4}", max_confidence);
-        
+        println!(
+            "Match confidence on different screenshot: {:.4}",
+            max_confidence
+        );
+
         // This tests that we can measure match quality
         // The patch may or may not match the other screenshot depending on content
         // We just verify the matching runs without errors and returns a valid confidence

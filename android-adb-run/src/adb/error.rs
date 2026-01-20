@@ -75,7 +75,9 @@ pub enum AdbError {
     #[error("Connection validation timeout - device may not be authorized")]
     ConnectionValidationTimeout,
 
-    #[error("ADB protocol desync (CLSE error) - connection needs to be re-established: {description}")]
+    #[error(
+        "ADB protocol desync (CLSE error) - connection needs to be re-established: {description}"
+    )]
     ProtocolDesync { description: String },
 }
 
@@ -100,7 +102,10 @@ impl AdbError {
         let err_str = source.to_string();
         if err_str.contains("CLSE") || err_str.contains("no write endpoint") {
             AdbError::ProtocolDesync {
-                description: format!("Command '{}' failed with protocol error: {}", command, err_str),
+                description: format!(
+                    "Command '{}' failed with protocol error: {}",
+                    command, err_str
+                ),
             }
         } else {
             AdbError::ShellCommandFailed { command, source }
@@ -131,18 +136,16 @@ impl AdbError {
     pub fn connection_error_message(&self) -> Option<String> {
         if self.is_resource_busy() {
             return Some(
-                "USB Already in Use - Close other ADB apps (VS Code, Android Studio, etc.)".to_string(),
+                "USB Already in Use - Close other ADB apps (VS Code, Android Studio, etc.)"
+                    .to_string(),
             );
         }
         if self.is_permission_denied() {
-            return Some(
-                "Permission Denied - Run: sudo chmod 666 /dev/bus/usb/*/0*".to_string(),
-            );
+            return Some("Permission Denied - Run: sudo chmod 666 /dev/bus/usb/*/0*".to_string());
         }
         if self.is_device_not_found() {
-            return Some(
-                "No Device Found - Reconnect USB cable (unplug and replug)".to_string(),
-            );
+            return Some("No Device Found - Reconnect USB cable (unplug and replug)".to_string());
         }
         None
-    }}
+    }
+}

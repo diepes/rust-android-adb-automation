@@ -1,8 +1,8 @@
 /// Diagnostic test to investigate ADB protocol synchronization issues
-/// 
+///
 /// This test aims to reproduce and diagnose the "wrong command CLSE" errors
 /// that occur when the ADB protocol gets out of sync.
-/// 
+///
 /// Run with: cargo run --example test_protocol_sync
 use adb_client::{ADBDeviceExt, ADBUSBDevice};
 use std::time::{Duration, Instant};
@@ -91,43 +91,56 @@ fn test_rapid_sequential_commands(device: &mut ADBUSBDevice) {
 
     for (i, val) in test_values.iter().enumerate() {
         let start = Instant::now();
-        
+
         match run_shell_cmd(device, &["echo", val]) {
             Ok(output) => {
-                println!("  ✅ Command {}: 'echo {}' -> {} ({:?})", 
-                    i + 1, val, output.trim(), start.elapsed());
+                println!(
+                    "  ✅ Command {}: 'echo {}' -> {} ({:?})",
+                    i + 1,
+                    val,
+                    output.trim(),
+                    start.elapsed()
+                );
                 success_count += 1;
             }
             Err(err) => {
-                println!("  ❌ Command {}: 'echo {}' -> FAILED: {} ({:?})", 
-                    i + 1, val, err, start.elapsed());
+                println!(
+                    "  ❌ Command {}: 'echo {}' -> FAILED: {} ({:?})",
+                    i + 1,
+                    val,
+                    err,
+                    start.elapsed()
+                );
                 fail_count += 1;
                 last_error = err.clone();
-                
+
                 // Check if this is the CLSE error
                 if last_error.contains("CLSE") {
                     println!("     ⚠️ CLSE ERROR DETECTED - Protocol may be out of sync!");
-                    
+
                     // Try to recover by waiting
                     println!("     🔄 Attempting recovery (waiting)...");
                     std::thread::sleep(Duration::from_millis(500));
                 }
             }
         }
-        
+
         // Small delay between commands to let things settle
         std::thread::sleep(Duration::from_millis(50));
     }
 
-    println!("  Summary: {} succeeded, {} failed", success_count, fail_count);
+    println!(
+        "  Summary: {} succeeded, {} failed",
+        success_count, fail_count
+    );
 }
 
 fn test_mixed_commands(device: &mut ADBUSBDevice) {
     // Simulate what the main app does: tap followed by screenshot
-    
+
     for i in 1..=5 {
         println!("  Iteration {}:", i);
-        
+
         // Simulate tap (input tap)
         let tap_start = Instant::now();
         match run_shell_cmd(device, &["input", "tap", "100", "100"]) {
@@ -139,37 +152,45 @@ fn test_mixed_commands(device: &mut ADBUSBDevice) {
                 }
             }
         }
-        
+
         std::thread::sleep(Duration::from_millis(100));
-        
+
         // Try framebuffer capture
         let fb_start = Instant::now();
         match device.framebuffer_bytes() {
-            Ok(data) => println!("    ✅ Framebuffer: {} bytes ({:?})", data.len(), fb_start.elapsed()),
+            Ok(data) => println!(
+                "    ✅ Framebuffer: {} bytes ({:?})",
+                data.len(),
+                fb_start.elapsed()
+            ),
             Err(e) => {
                 let err = format!("{}", e);
-                println!("    ❌ Framebuffer failed: {} ({:?})", err, fb_start.elapsed());
+                println!(
+                    "    ❌ Framebuffer failed: {} ({:?})",
+                    err,
+                    fb_start.elapsed()
+                );
                 if err.contains("CLSE") {
                     println!("       ⚠️ CLSE ERROR - Protocol out of sync!");
                 }
             }
         }
-        
+
         std::thread::sleep(Duration::from_millis(100));
     }
 }
 
 fn test_rapid_taps(device: &mut ADBUSBDevice) {
     // Test many rapid tap commands - this is what happens in automation
-    
+
     let mut success_count = 0;
     let mut clse_errors = 0;
     let mut other_errors = 0;
-    
+
     for i in 1..=20 {
         let x = (100 + (i * 10)).to_string();
         let y = "200";
-        
+
         match run_shell_cmd(device, &["input", "tap", &x, y]) {
             Ok(_) => {
                 success_count += 1;
@@ -187,14 +208,16 @@ fn test_rapid_taps(device: &mut ADBUSBDevice) {
                 }
             }
         }
-        
+
         // Minimal delay between taps
         std::thread::sleep(Duration::from_millis(20));
     }
-    
-    println!("  Summary: {} succeeded, {} CLSE errors, {} other errors", 
-        success_count, clse_errors, other_errors);
-    
+
+    println!(
+        "  Summary: {} succeeded, {} CLSE errors, {} other errors",
+        success_count, clse_errors, other_errors
+    );
+
     if clse_errors > 0 {
         println!("\n  ⚠️ DIAGNOSIS: CLSE errors indicate the protocol is getting out of sync.");
         println!("     This typically happens when:");
@@ -206,25 +229,31 @@ fn test_rapid_taps(device: &mut ADBUSBDevice) {
 
 fn test_long_then_short(device: &mut ADBUSBDevice) {
     // A longer command (like screencap) followed by short commands
-    
+
     println!("  Running longer command (screencap partial)...");
     let start = Instant::now();
-    
+
     // Use timeout wrapper for screencap which can hang on some devices
     // The shell command takes separate arguments
     let screencap_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        run_shell_cmd(device, &["sh", "-c", "screencap -p 2>/dev/null | head -c 1000"])
+        run_shell_cmd(
+            device,
+            &["sh", "-c", "screencap -p 2>/dev/null | head -c 1000"],
+        )
     }));
-    
+
     match screencap_result {
-        Ok(Ok(output)) => println!("  ✅ Screencap partial completed ({:?}, {} bytes)", 
-            start.elapsed(), output.len()),
+        Ok(Ok(output)) => println!(
+            "  ✅ Screencap partial completed ({:?}, {} bytes)",
+            start.elapsed(),
+            output.len()
+        ),
         Ok(Err(e)) => println!("  ⚠️ Screencap failed (may be expected): {}", e),
         Err(_) => println!("  ⚠️ Screencap panicked"),
     }
-    
+
     std::thread::sleep(Duration::from_millis(200));
-    
+
     // Now try short commands
     println!("  Following up with short commands...");
     for i in 1..=3 {
