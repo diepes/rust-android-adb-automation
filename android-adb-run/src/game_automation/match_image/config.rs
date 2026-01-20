@@ -12,6 +12,10 @@ pub struct MatchConfig {
     pub scale_factors: Vec<f32>,
     /// Debug mode flag
     pub debug_enabled: bool,
+    /// Use optimized match-patch algorithm with early exit
+    pub use_match_patch_optimization: bool,
+    /// Search margin for localized match-patch search (±N pixels)
+    pub match_patch_search_margin: u32,
 }
 
 impl Default for MatchConfig {
@@ -22,6 +26,8 @@ impl Default for MatchConfig {
             enable_multiscale: false,
             scale_factors: vec![0.8, 0.9, 1.0, 1.1, 1.2],
             debug_enabled: false,
+            use_match_patch_optimization: false,
+            match_patch_search_margin: 10,
         }
     }
 }
@@ -34,6 +40,8 @@ pub fn create_default_config() -> MatchConfig {
         enable_multiscale: true,
         scale_factors: vec![0.9, 1.0, 1.1],
         debug_enabled: false,
+        use_match_patch_optimization: false,
+        match_patch_search_margin: 10,
     }
 }
 
@@ -45,6 +53,8 @@ pub fn create_ui_config() -> MatchConfig {
         enable_multiscale: false,
         scale_factors: vec![1.0],
         debug_enabled: false,
+        use_match_patch_optimization: true,
+        match_patch_search_margin: 20,
     }
 }
 
@@ -56,5 +66,7 @@ pub fn create_game_object_config() -> MatchConfig {
         enable_multiscale: true,
         scale_factors: vec![0.8, 0.9, 1.0, 1.1, 1.2],
         debug_enabled: false,
+        use_match_patch_optimization: false,
+        match_patch_search_margin: 50,
     }
 }

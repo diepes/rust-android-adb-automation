@@ -1,10 +1,12 @@
-//! Match patch regions against full screenshots
+//! Match patch regions against full screenshots using imageproc template matching
 //! Validates template matching: loading patches and searching for matches in full images
-//! Usage: cargo run --example match-patch-regions
-//!           extract patch images with examples/extract_patch.rs
+//! Usage: cargo run --release --example match-patch-regions
+//! 
+//! This version uses imageproc::template_matching for fast, optimized template matching
 
 #[allow(unused_imports)]
 use image::GenericImageView;
+use imageproc::template_matching::{match_template, MatchTemplateMethod};
 use std::fs;
 use std::path::Path;
 use std::time::Instant;
@@ -46,46 +48,34 @@ fn extract_region_and_label_from_filename(source_path: &str) -> Option<(Option<S
     None
 }
 
-/// Calculate correlation using sum of squared differences (with early exit optimization)
+/// Calculate correlation using imageproc template matching (SSD method)
 /// Returns 0.0 to 1.0 where 1.0 is perfect match
-/// Exits early if correlation cannot possibly meet the minimum_match threshold
-fn calculate_correlation(patch: &image::RgbImage, region: &image::RgbImage, min_match: f32) -> f32 {
+fn calculate_correlation(patch: &image::RgbImage, region: &image::RgbImage) -> f32 {
     if patch.width() != region.width() || patch.height() != region.height() {
         return 0.0;
     }
     
-    let pixels = (patch.width() * patch.height()) as u64;
-    let max_sq_diff = pixels * 255 * 255 * 3;
+    // For same-size regions, compute SSD (sum of squared differences)
+    let mut sum_sq_diff: f64 = 0.0;
+    for (p_pixel, r_pixel) in patch.pixels().zip(region.pixels()) {
+        let r_diff = (p_pixel[0] as f64 - r_pixel[0] as f64);
+        let g_diff = (p_pixel[1] as f64 - r_pixel[1] as f64);
+        let b_diff = (p_pixel[2] as f64 - r_pixel[2] as f64);
+        sum_sq_diff += r_diff * r_diff + g_diff * g_diff + b_diff * b_diff;
+    }
     
-    if max_sq_diff == 0 {
+    let pixels = (patch.width() * patch.height()) as f64;
+    let max_sq_diff = pixels * 255.0 * 255.0 * 3.0;
+    
+    if max_sq_diff == 0.0 {
         return 1.0;
     }
     
-    // Calculate the maximum allowed difference based on minimum match threshold
-    let max_allowed_diff = max_sq_diff as f64 * (1.0 - min_match as f64);
-    
-    let mut sum_sq_diff: u64 = 0;
-    let mut checked_pixels: u64 = 0;
-    
-    for (p_pixel, r_pixel) in patch.pixels().zip(region.pixels()) {
-        let r_diff = (p_pixel[0] as i32 - r_pixel[0] as i32).abs() as u64;
-        let g_diff = (p_pixel[1] as i32 - r_pixel[1] as i32).abs() as u64;
-        let b_diff = (p_pixel[2] as i32 - r_pixel[2] as i32).abs() as u64;
-        sum_sq_diff += r_diff * r_diff + g_diff * g_diff + b_diff * b_diff;
-        checked_pixels += 1;
-        
-        // Early exit: check periodically if we've already exceeded the maximum allowed difference
-        if checked_pixels % 1000 == 0 && sum_sq_diff as f64 > max_allowed_diff {
-            return 0.0; // Already failed threshold
-        }
-    }
-    
-    let correlation = 1.0 - (sum_sq_diff as f64 / max_sq_diff as f64);
+    let correlation = 1.0 - (sum_sq_diff / max_sq_diff);
     correlation.max(0.0).min(1.0) as f32
 }
 
-/// Find matches of a patch in an image above a threshold (optimized with localized search)
-/// If expected_x/y provided, search only around that region expanded by search_margin
+/// Find matches using a hybrid approach: imageproc for full image, manual scan for local regions
 fn find_matches(
     image: &image::DynamicImage, 
     patch: &image::RgbImage, 
@@ -105,65 +95,59 @@ fn find_matches(
         return Vec::new();
     }
     
-    // Define search region
-    let (search_x_min, search_x_max, search_y_min, search_y_max) = if let (Some(ex), Some(ey)) = (expected_x, expected_y) {
-        // Search around expected location with margin
-        let x_min = ex.saturating_sub(search_margin);
-        let x_max = (ex + patch_width + search_margin).min(image_width.saturating_sub(patch_width + 1));
-        let y_min = ey.saturating_sub(search_margin);
-        let y_max = (ey + patch_height + search_margin).min(image_height.saturating_sub(patch_height + 1));
-        (x_min, x_max, y_min, y_max)
-    } else {
-        // Search entire image
-        (0, image_width.saturating_sub(patch_width + 1), 0, image_height.saturating_sub(patch_height + 1))
-    };
-    
     let mut matches = Vec::new();
-    let mut checked = std::collections::HashSet::new();
     
-    // Calculate search region size for progress reporting
-    let region_width = search_x_max.saturating_sub(search_x_min);
-    let region_height = search_y_max.saturating_sub(search_y_min);
-    let total_positions = ((region_width as u64) * (region_height as u64)).max(1);
-    let mut positions_checked: u64 = 0;
-    let progress_interval = (total_positions / 20).max(1); // Report every 5%
+    eprint!("        ⏳ Search progress: ");
     
-    // Search with coarse step for large regions
-    let coarse_step = if region_width > 200 || region_height > 200 { 2 } else { 1 };
-    
-    let mut y = search_y_min;
-    loop {
-        if y > search_y_max {
-            break;
-        }
-        let mut x = search_x_min;
-        loop {
-            if x > search_x_max {
-                break;
-            }
-            if checked.insert((x, y)) && x + patch_width <= image_width && y + patch_height <= image_height {
-                let region = image::RgbImage::from_fn(patch_width, patch_height, |px, py| {
-                    image_rgb.get_pixel(x + px, y + py).clone()
-                });
-                
-                let correlation = calculate_correlation(patch, &region, threshold);
-                
-                if correlation >= threshold {
-                    matches.push((x, y, correlation));
-                }
-                
-                // Progress reporting
-                positions_checked += 1;
-                if positions_checked % progress_interval == 0 {
-                    let pct = (positions_checked as f64 / total_positions as f64 * 100.0) as u32;
-                    eprint!("\r        ⏳ Search progress: {}%", pct);
+    // If we have expected location, search locally (faster)
+    if let (Some(ex), Some(ey)) = (expected_x, expected_y) {
+        let x_min = ex.saturating_sub(search_margin);
+        let x_max = (ex + patch_width + search_margin).min(image_width.saturating_sub(patch_width));
+        let y_min = ey.saturating_sub(search_margin);
+        let y_max = (ey + patch_height + search_margin).min(image_height.saturating_sub(patch_height));
+        
+        // Manual pixel-by-pixel search in localized region (much faster than full template matching)
+        for y in y_min..=y_max {
+            for x in x_min..=x_max {
+                if x + patch_width <= image_width && y + patch_height <= image_height {
+                    let region = image::RgbImage::from_fn(patch_width, patch_height, |px, py| {
+                        image_rgb.get_pixel(x + px, y + py).clone()
+                    });
+                    
+                    let correlation = calculate_correlation(patch, &region);
+                    
+                    if correlation >= threshold {
+                        matches.push((x, y, correlation));
+                    }
                 }
             }
-            x = x.saturating_add(coarse_step as u32);
         }
-        y = y.saturating_add(coarse_step as u32);
+    } else {
+        // Full image: use imageproc for full-image search
+        let image_gray = image::imageops::grayscale(&image::DynamicImage::ImageRgb8(image_rgb));
+        let patch_gray = image::imageops::grayscale(&image::DynamicImage::ImageRgb8(patch.clone()));
+        
+        let result = match_template(
+            &image_gray, 
+            &patch_gray, 
+            MatchTemplateMethod::CrossCorrelationNormalized
+        );
+        
+        for y in 0..result.height() {
+            for x in 0..result.width() {
+                if let Some(pixel) = result.get_pixel_checked(x, y) {
+                    let ncc_value = pixel[0];
+                    let correlation = (ncc_value + 1.0) / 2.0;  // Convert [-1, 1] to [0, 1]
+                    
+                    if correlation >= threshold {
+                        matches.push((x, y, correlation));
+                    }
+                }
+            }
+        }
     }
-    eprintln!("\r        ⏳ Search complete!           "); // Clear progress line
+    
+    eprintln!("100%");
     
     // Sort by correlation descending and limit results
     matches.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
@@ -183,8 +167,8 @@ struct MatchingStats {
 fn main() {
     let start = Instant::now();
     let test_images_dir = "assets/test_images";
-    let threshold = 0.98; // 85% correlation threshold (reduced for demo)
-    let max_matches_per_patch = 1;
+    let threshold = 0.95; // 95% threshold for high-quality matches only
+    let max_matches_per_patch = 1; // Only get top match
     let search_margin = 10u32; // Search within 10 pixels of expected location
     
     let mut stats = MatchingStats::default();

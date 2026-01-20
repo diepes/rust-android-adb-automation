@@ -12,8 +12,10 @@ pub mod adb;
 pub mod args;
 pub mod game_automation;
 pub mod gui; // replaced old dioxus root module
+pub mod template_matching;
 
 pub use adb::AdbBackend;
+pub use template_matching::TemplateMatcher;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right

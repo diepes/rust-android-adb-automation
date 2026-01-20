@@ -358,6 +358,55 @@ pub fn Actions() -> Element {
                     }
                 }
 
+                // Screenshot status message display - always visible
+                {
+                    let status_text = screenshot_status.read();
+                    let display_text = if status_text.is_empty() {
+                        "📷 Ready - no screenshots yet".to_string()
+                    } else {
+                        status_text.clone()
+                    };
+                    
+                    rsx! {
+                        div { style: "background: rgba(0,0,0,0.3); border-radius: 8px; padding: 10px 12px; border: 1px solid rgba(255,215,0,0.3); margin-bottom: 10px;",
+                            p { 
+                                style: "font-size: 0.9em; margin: 0; text-align: center; color: #ffd857; font-weight: 500;", 
+                                "{display_text}"
+                            }
+                            // Show history if available
+                            {
+                                let history = screenshot_bytes.read();
+                                let status_hist = ctx.screenshot.status_history.read();
+                                if !status_hist.is_empty() && history.is_some() {
+                                    rsx! {
+                                        div {
+                                            style: "margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,215,0,0.2);",
+                                            details {
+                                                style: "cursor: pointer;",
+                                                summary { 
+                                                    style: "font-size: 0.75em; color: #ccc; user-select: none;",
+                                                    "📜 Progress History ({status_hist.len()} messages)"
+                                                }
+                                                div {
+                                                    style: "margin-top: 6px; max-height: 250px; overflow-y: auto; padding: 6px; background: rgba(0,0,0,0.2); border-radius: 4px; font-size: 0.75em; color: #ddd; display: flex; flex-direction: column;",
+                                                    for msg in status_hist.iter().rev() {
+                                                        div {
+                                                            style: "padding: 2px 0; border-bottom: 1px solid rgba(255,215,0,0.1);",
+                                                            "{msg}"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    rsx! {}
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Screenshot options row
                 div { style: "display: flex; gap: 15px; align-items: center; justify-content: center; flex-wrap: wrap;",
                     div { style: "display: flex; align-items: center; gap: 6px;",

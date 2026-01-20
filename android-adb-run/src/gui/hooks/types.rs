@@ -25,8 +25,10 @@ pub struct ScreenshotSignals {
     pub data: Signal<Option<String>>,       // Base64 encoded for display
     pub bytes: Signal<Option<Vec<u8>>>,     // Raw bytes for processing
     pub status: Signal<String>,             // Status message
+    pub status_history: Signal<Vec<String>>, // Status message history (recent messages)
     pub counter: Signal<u64>,               // Screenshot counter
     pub is_loading: Signal<bool>,           // Loading indicator
+    pub matched_patch: Signal<Option<String>>, // Latest matched patch name
 }
 
 /// Device connection signals grouped together

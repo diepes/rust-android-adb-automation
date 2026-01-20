@@ -2,6 +2,7 @@
 
 use super::{
     config::MatchConfig,
+    match_patch::PatchMatcher,
     template::{Template, TemplateManager, TemplateMatch},
 };
 use crate::game_automation::types::GameState;
@@ -91,7 +92,11 @@ impl GameStateDetector {
                 );
             }
 
-            match self.match_template_in_region(&screenshot_gray, template) {
+            match if self.config.use_match_patch_optimization {
+                self.match_template_optimized(&screenshot_gray, template)
+            } else {
+                self.match_template_in_region(&screenshot_gray, template)
+            } {
                 Ok(matches) => {
                     if self.config.debug_enabled && !matches.is_empty() {
                         println!(
@@ -300,6 +305,77 @@ impl GameStateDetector {
                     matches.push(template_match);
                 }
             }
+        }
+
+        Ok(matches)
+    }
+
+    /// Match template using optimized match-patch algorithm with early exit
+    /// This is faster for localized searches around expected positions
+    fn match_template_optimized(
+        &self,
+        screenshot_gray: &ImageBuffer<Luma<u8>, Vec<u8>>,
+        template: &Template,
+    ) -> Result<Vec<TemplateMatch>, String> {
+        if self.config.debug_enabled {
+            println!(
+                "🔍 Optimized matching: {} (search region at {},{} {}x{})",
+                template.name,
+                template.search_region.x,
+                template.search_region.y,
+                template.search_region.width,
+                template.search_region.height
+            );
+        }
+
+        // Load and crop template image to the region specified in filename
+        let template_gray = self.load_and_crop_template(template)?;
+
+        let mut matches = Vec::new();
+
+        // Crop screenshot to search region
+        let region = &template.search_region;
+        if region.x + region.width > self.screen_width
+            || region.y + region.height > self.screen_height
+        {
+            return Err("Search region exceeds screen bounds".to_string());
+        }
+
+        let cropped_view = image::imageops::crop_imm(
+            screenshot_gray,
+            region.x,
+            region.y,
+            region.width,
+            region.height,
+        );
+
+        // Convert SubImage to ImageBuffer
+        let cropped = cropped_view.to_image();
+
+        // Use optimized match-patch matcher
+        let matcher = PatchMatcher::new(
+            self.config.confidence_threshold,
+            self.config.max_matches_per_template,
+            self.config.match_patch_search_margin,
+            self.config.debug_enabled,
+        );
+
+        let patch_matches = matcher.find_matches(&cropped, &template_gray, None, None);
+
+        for (local_x, local_y, correlation) in patch_matches {
+            // Convert coordinates back to screen space
+            let screen_x = region.x + local_x;
+            let screen_y = region.y + local_y;
+
+            let template_match = TemplateMatch::new(template.clone(), screen_x, screen_y, correlation, 1.0);
+
+            if template_match.is_within_bounds(self.screen_width, self.screen_height) {
+                matches.push(template_match);
+            }
+        }
+
+        if self.config.debug_enabled && !matches.is_empty() {
+            println!("✅ Optimized matching found {} matches for template '{}'", matches.len(), template.name);
         }
 
         Ok(matches)

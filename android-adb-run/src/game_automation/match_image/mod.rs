@@ -5,6 +5,7 @@
 
 pub mod config;
 pub mod detector;
+pub mod match_patch;
 pub mod region;
 pub mod template;
 
@@ -14,5 +15,6 @@ mod tests;
 // Re-export main types and functions
 pub use config::{MatchConfig, create_default_config, create_game_object_config, create_ui_config};
 pub use detector::{DetectionResult, GameStateDetector};
+pub use match_patch::PatchMatcher;
 pub use region::{RegionManager, SearchRegion};
 pub use template::{Template, TemplateCategory, TemplateManager, TemplateMatch};

@@ -2,6 +2,7 @@
 use crate::adb::{AdbClient, AdbResult};
 use crate::gui::dioxus_app::AppContext;
 use crate::gui::util::base64_encode;
+use crate::gui::hooks::{start_template_matching_phase, device_loop::decode_screenshot_to_rgb};
 use dioxus::html::geometry::ElementPoint;
 use dioxus::prelude::*;
 use std::time::Instant;
@@ -233,9 +234,16 @@ pub fn screenshot_panel() -> Element {
                                                             let bytes_clone = bytes.clone();
                                                             let b64 = tokio::task::spawn_blocking(move || base64_encode(&bytes_clone)).await.unwrap_or_default();
                                                             screenshot_data.set(Some(b64));
-                                                            screenshot_bytes.set(Some(bytes));
+                                                            screenshot_bytes.set(Some(bytes.clone()));
                                                             screenshot_status.set(format!("✅ Action successful - Screenshot #{} ({}ms)", counter_val, duration_ms));
                                                             is_loading_screenshot.set(false);
+                                                            
+                                                            // Phase 3: Start template matching for this screenshot
+                                                            let bytes_for_matching = bytes.clone();
+                                                            let rgb_decoded = tokio::task::spawn_blocking(move || {
+                                                                decode_screenshot_to_rgb(&bytes_for_matching).ok()
+                                                            }).await.ok().flatten();
+                                                            start_template_matching_phase(bytes, rgb_decoded, screenshot_status, ctx.screenshot.status_history.clone(), ctx.screenshot.matched_patch.clone());
                                                         } else {
                                                             screenshot_status.set("✅ Action successful".to_string());
                                                         }

@@ -1,9 +1,13 @@
 use crate::adb::{AdbBackend, AdbClient};
 use crate::gui::hooks::types::*;
 use crate::gui::util::base64_encode;
+use crate::template_matching::{TemplateMatcher, PatchInfo};
 use dioxus::prelude::*;
+use image::{RgbImage, ImageReader};
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
+use std::io::Cursor;
+
 
 /// Initializes device connection loop that discovers and connects to Android devices
 /// Uses grouped signal structs for cleaner function signature
@@ -73,31 +77,36 @@ pub fn use_device_loop(
                         let client_lock = shared_client.lock().await;
                         match client_lock.screen_capture_bytes().await {
                             Ok(bytes) => {
+                                // Phase 1: Decode image and encode to base64 (blocking operations)
                                 let bytes_clone = bytes.clone();
-                                let base64_result = tokio::task::spawn_blocking(move || {
-                                    base64_encode(&bytes_clone)
+                                let (base64_string, rgb_image) = tokio::task::spawn_blocking(move || {
+                                    let b64 = base64_encode(&bytes_clone);
+                                    let rgb = decode_screenshot_to_rgb(&bytes_clone).ok();
+                                    (b64, rgb)
                                 })
-                                .await;
-                                match base64_result {
-                                    Ok(base64_string) => {
-                                        let duration_ms = start.elapsed().as_millis();
-                                        let counter_val = screenshot.counter.with_mut(|c| {
-                                            *c += 1;
-                                            *c
-                                        });
-                                        screenshot.data.set(Some(base64_string));
-                                        screenshot.bytes.set(Some(bytes));
-                                        screenshot.status.set(format!(
-                                            "✅ Initial screenshot #{} ({}ms)",
-                                            counter_val, duration_ms
-                                        ));
-                                    }
-                                    Err(_) => {
-                                        screenshot.status
-                                            .set("❌ Failed to encode screenshot".to_string());
-                                    }
-                                }
+                                .await
+                                .unwrap_or_else(|_| ("Error: encoding failed".to_string(), None));
+
+                                let duration_ms = start.elapsed().as_millis();
+                                let counter_val = screenshot.counter.with_mut(|c| {
+                                    *c += 1;
+                                    *c
+                                });
+                                
+                                // Phase 2: Display image immediately
+                                screenshot.data.set(Some(base64_string));
+                                screenshot.bytes.set(Some(bytes.clone()));
+                                screenshot.status.set(format!(
+                                    "✅ Screenshot #{} displayed ({}ms) - Matching...",
+                                    counter_val, duration_ms
+                                ));
                                 screenshot.is_loading.set(false);
+                                
+                                // Phase 3: Run template matching in dedicated thread (after image is displayed)
+                                let matched_patch_signal = screenshot.matched_patch.clone();
+                                let status_signal = screenshot.status.clone();
+                                let status_history_signal = screenshot.status_history.clone();
+                                start_template_matching_phase(bytes.clone(), rgb_image, status_signal, status_history_signal, matched_patch_signal);
                             }
                             Err(e) => {
                                 screenshot.status
@@ -186,3 +195,621 @@ pub fn use_device_loop(
         }
     });
 }
+
+/// Start template matching phase for a screenshot
+///
+/// Takes screenshot data and optional RGB image, spawns matching in a thread pool,
+/// and updates the status_signal with progress messages in real-time
+pub fn start_template_matching_phase(
+    bytes: Vec<u8>,
+    rgb_image: Option<RgbImage>,
+    mut status_signal: Signal<String>,
+    mut status_history_signal: Signal<Vec<String>>,
+    mut matched_patch_signal: Signal<Option<String>>,
+) {
+    spawn(async move {
+        log::info!("🚀 PHASE 3 STARTING - Template matching");
+        
+        // Clear history for new matching session
+        status_history_signal.with_mut(|history| {
+            history.clear();
+        });
+        
+        // Create a channel for progress updates from the blocking task
+        // Use larger buffer (500) to avoid blocking during high-frequency progress updates
+        let (tx, mut rx) = tokio::sync::mpsc::channel(500);
+        
+        // Show that we're starting patch management
+        let init_msg = "🔍 Loading patches...".to_string();
+        log::info!("📝 Setting initial status: {}", init_msg);
+        status_signal.set(init_msg.clone());
+        status_history_signal.with_mut(|history| {
+            history.push(init_msg);
+            // Keep only last 15 messages
+            if history.len() > 15 {
+                history.remove(0);
+            }
+        });
+        
+        // Run matching in a separate thread pool to avoid blocking UI
+        log::info!("🧵 Spawning blocking task for match_patches_blocking_with_progress");
+        let mut result_handle = tokio::task::spawn_blocking(move || {
+            log::info!("🔧 Inside spawn_blocking - calling match_patches_blocking_with_progress");
+            match_patches_blocking_with_progress(&bytes, rgb_image, tx)
+        });
+        
+        log::info!("⏳ Starting message receive loop");
+        // Process progress messages as they arrive, waiting for the result
+        let mut result = None;
+        loop {
+            tokio::select! {
+                msg = rx.recv() => {
+                    if let Some(progress_msg) = msg {
+                        log::info!("📨 Received progress message: {}", progress_msg);
+                        status_signal.set(progress_msg.clone());
+                        status_history_signal.with_mut(|history| {
+                            history.push(progress_msg);
+                            // Keep only last 15 messages
+                            if history.len() > 15 {
+                                history.remove(0);
+                            }
+                        });
+                    } else {
+                        log::info!("📭 Channel closed");
+                        // Channel closed, break to wait for result
+                        break;
+                    }
+                }
+                res = &mut result_handle => {
+                    log::info!("✅ Blocking task completed");
+                    result = Some(res);
+                    // Continue to drain remaining messages before exiting
+                    while let Ok(progress_msg) = rx.try_recv() {
+                        log::info!("🗑️ Draining queued message: {}", progress_msg);
+                        status_signal.set(progress_msg.clone());
+                        status_history_signal.with_mut(|history| {
+                            history.push(progress_msg);
+                            if history.len() > 15 {
+                                history.remove(0);
+                            }
+                        });
+                    }
+                    break;
+                }
+            }
+        }
+        
+        let result = result.unwrap_or(Ok(None));
+
+        match result {
+            Ok(Some(patch_name)) => {
+                matched_patch_signal.set(Some(patch_name.clone()));
+                let final_msg = format!("✅ Matched: {}", patch_name);
+                log::info!("🎯 FINAL RESULT - Adding to history: {}", final_msg);
+                status_signal.set(final_msg.clone());
+                status_history_signal.with_mut(|history| {
+                    history.push(final_msg);
+                    log::info!("📝 History now has {} messages", history.len());
+                    if history.len() > 15 {
+                        history.remove(0);
+                    }
+                });
+            }
+            Ok(None) => {
+                matched_patch_signal.set(None);
+                let final_msg = "✅ No match found".to_string();
+                status_signal.set(final_msg.clone());
+                status_history_signal.with_mut(|history| {
+                    history.push(final_msg);
+                    if history.len() > 15 {
+                        history.remove(0);
+                    }
+                });
+            }
+            Err(_) => {
+                matched_patch_signal.set(None);
+                let final_msg = "⚠️ Matching error".to_string();
+                status_signal.set(final_msg.clone());
+                status_history_signal.with_mut(|history| {
+                    history.push(final_msg);
+                    if history.len() > 15 {
+                        history.remove(0);
+                    }
+                });
+            }
+        }
+    });
+}
+
+/// Start template matching phase for a screenshot
+///
+/// Sends progress messages through the channel as matching proceeds
+/// Returns the best matching patch name, if any match is found above threshold
+fn match_patches_blocking_with_progress(
+    screenshot_bytes: &[u8],
+    image_rgb: Option<RgbImage>,
+    tx: tokio::sync::mpsc::Sender<String>,
+) -> Option<String> {
+    // Use pre-decoded image or decode if not provided
+    let image_rgb = match image_rgb {
+        Some(img) => img,
+        None => match decode_screenshot_to_rgb(screenshot_bytes) {
+            Ok(img) => img,
+            Err(_) => return None,
+        },
+    };
+
+    // Load patches from assets directory (blocking I/O)
+    let patch_dir = std::path::Path::new("assets/test_images");
+    
+    if !patch_dir.exists() {
+        log::debug!("Patch directory not found: {:?}", patch_dir);
+        let _ = tx.blocking_send("⚠️ Patch directory not found".to_string());
+        return None;
+    }
+
+    let mut matcher = TemplateMatcher::new();
+    let mut patch_count = 0;
+    
+    log::debug!("🔍 Starting patch matching");
+    let send_result = tx.blocking_send("🔍 Scanning patches...".to_string());
+    log::debug!("📤 Sent 'Scanning patches' message: {:?}", send_result);
+
+    match std::fs::read_dir(patch_dir) {
+        Ok(entries) => {
+            let entries_vec: Vec<_> = entries.flatten().collect();
+            log::debug!("📂 Found {} files in patch directory", entries_vec.len());
+            
+            for (idx, entry) in entries_vec.iter().enumerate() {
+                let path = entry.path();
+                let filename = match path.file_name() {
+                    Some(name) => match name.to_str() {
+                        Some(s) => s.to_string(),
+                        None => continue,
+                    },
+                    None => continue,
+                };
+
+                // Look for patch-*.png files
+                if !filename.starts_with("patch-") || !filename.ends_with(".png") {
+                    continue;
+                }
+
+                // Parse patch filename to extract label and coordinates
+                if let Some((label, x, y, width, height)) = parse_patch_filename(&filename) {
+                    match std::fs::read(&path) {
+                        Ok(pixel_data) => {
+                            // Decode the patch image to get RGB pixels
+                            match decode_screenshot_to_rgb(&pixel_data) {
+                                Ok(img) => {
+                                    let pixels = img.into_raw();
+                                    let patch = PatchInfo::new(label, x, y, width, height, pixels);
+                                    matcher.add_patch(patch);
+                                    patch_count += 1;
+                                    log::debug!("✓ Loaded patch {} ({}/{})", filename, idx + 1, entries_vec.len());
+                                }
+                                Err(_) => continue,
+                            }
+                        }
+                        Err(_) => continue,
+                    }
+                }
+            }
+            
+            // Send consolidated message after all patches are loaded
+            if patch_count > 0 {
+                let msg = format!("📦 Loaded {} patches to match...", patch_count);
+                let _ = tx.blocking_send(msg);
+            }
+        }
+        Err(_) => {
+            log::error!("Failed to read patch directory");
+            let _ = tx.blocking_send("⚠️ Failed to load patches".to_string());
+            return None;
+        }
+    }
+
+    if patch_count == 0 {
+        log::debug!("⚠️ No patches loaded");
+        let _ = tx.blocking_send("⚠️ No patches found".to_string());
+        return None;
+    }
+    
+    log::debug!("📊 Loaded {} patches, starting correlation matching", patch_count);
+    if let Err(e) = tx.blocking_send(format!("🔎 Matching {} patches...", patch_count)) {
+        log::error!("❌ Failed to send 'Matching patches' message: {}", e);
+    }
+
+    // Find the best match across all patches
+    let threshold = 0.85; // 85% correlation threshold
+    let mut best_match: Option<(String, f32)> = None;
+
+    log::info!("🔄 Starting matching loop with {} patches", matcher.patches().len());
+    
+    for (idx, patch) in matcher.patches().iter().enumerate() {
+        let patch_name = patch.display_name();
+        log::info!("🔄 Matching patch {} of {}: {}", idx + 1, matcher.patches().len(), patch_name);
+        
+        // Send message showing which patch we're checking
+        let progress_pct = ((idx + 1) as f32 / matcher.patches().len() as f32 * 100.0) as u32;
+        let msg = format!("🔎 Checking {}... ({}%)", patch_name, progress_pct);
+        if let Err(e) = tx.blocking_send(msg.clone()) {
+            log::error!("❌ Failed to send patch check message: {}", e);
+        } else {
+            log::info!("📤 Sent: {}", msg);
+        }
+        
+        let start = std::time::Instant::now();
+        let total_patches = matcher.patches().len();
+        let patches_completed = idx;
+        
+        // Spawn a thread to send periodic progress messages while matching
+        let tx_clone = tx.clone();
+        let patch_name_clone = patch_name.clone();
+        let progress_handle = std::thread::spawn(move || {
+            let mut counter = 0;
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(10));
+                counter += 1;
+                let elapsed_secs = counter * 10;
+                
+                // Estimate remaining time based on patches completed
+                let estimated_secs_per_patch = if patches_completed > 0 {
+                    // This will be updated with actual elapsed time later
+                    elapsed_secs / patches_completed as u32
+                } else {
+                    60 // Default estimate
+                };
+                
+                let remaining_patches = (total_patches - patches_completed - 1) as u32;
+                let estimated_remaining = estimated_secs_per_patch * remaining_patches;
+                
+                let msg = if estimated_remaining > 0 {
+                    format!("⏳ Still matching {}... ({} sec, ~{} min remaining)", 
+                            patch_name_clone, elapsed_secs, estimated_remaining / 60)
+                } else {
+                    format!("⏳ Still matching {}... ({} sec)", patch_name_clone, elapsed_secs)
+                };
+                
+                if tx_clone.blocking_send(msg).is_err() {
+                    break; // Channel closed, matching is done
+                }
+            }
+        });
+        
+        let matches = matcher.find_matches(&image_rgb, idx, threshold, 1, 50);
+        let elapsed = start.elapsed();
+        let _ = tx.blocking_send(format!("✓ Completed {} in {:.0}s", patch_name, elapsed.as_secs_f32()));
+        log::info!("✓ find_matches completed for {} in {:.2}s, found {} matches", patch_name, elapsed.as_secs_f32(), matches.len());
+        
+        // Progress handle thread will exit when channel is closed above
+        let _ = progress_handle.join();
+
+        if let Some(m) = matches.first() {
+            // Found a match
+            let patch_name = patch.display_name();
+            log::debug!("🎯 Found match: {} (correlation: {:.1}%)", patch_name, m.correlation * 100.0);
+            if best_match.is_none() || m.correlation > best_match.as_ref().unwrap().1 {
+                best_match = Some((patch_name, m.correlation));
+            }
+        }
+    }
+
+    match &best_match {
+        Some((name, correlation)) => {
+            log::debug!("✅ Best match: {} ({:.1}%)", name, correlation * 100.0);
+            if let Err(e) = tx.blocking_send(format!("✅ Matched: {}", name)) {
+                log::error!("❌ Failed to send final match message: {}", e);
+            }
+        }
+        None => {
+            log::debug!("❌ No matches found");
+            if let Err(e) = tx.blocking_send("❌ No matches found".to_string()) {
+                log::error!("❌ Failed to send no-match message: {}", e);
+            }
+        }
+    }
+
+    best_match.map(|(name, _)| name)
+}
+
+/// Helper function to match patches synchronously (runs in thread pool)
+///
+/// This is kept as a fallback for when progress reporting is not needed.
+/// Returns the best matching patch name, if any match is found above threshold
+#[allow(dead_code)]
+fn match_patches_blocking(screenshot_bytes: &[u8], image_rgb: Option<RgbImage>) -> Option<String> {
+    // Use pre-decoded image or decode if not provided
+    let image_rgb = match image_rgb {
+        Some(img) => img,
+        None => match decode_screenshot_to_rgb(screenshot_bytes) {
+            Ok(img) => img,
+            Err(_) => return None,
+        },
+    };
+
+    // Load patches from assets directory (blocking I/O)
+    let patch_dir = std::path::Path::new("assets/test_images");
+    
+    if !patch_dir.exists() {
+        log::debug!("Patch directory not found: {:?}", patch_dir);
+        return None;
+    }
+
+    let mut matcher = TemplateMatcher::new();
+    let mut patch_count = 0;
+    
+    log::debug!("🔍 Starting patch matching");
+
+    match std::fs::read_dir(patch_dir) {
+        Ok(entries) => {
+            let entries_vec: Vec<_> = entries.flatten().collect();
+            log::debug!("📂 Found {} files in patch directory", entries_vec.len());
+            
+            for (idx, entry) in entries_vec.iter().enumerate() {
+                let path = entry.path();
+                let filename = match path.file_name() {
+                    Some(name) => match name.to_str() {
+                        Some(s) => s.to_string(),
+                        None => continue,
+                    },
+                    None => continue,
+                };
+
+                // Look for patch-*.png files
+                if !filename.starts_with("patch-") || !filename.ends_with(".png") {
+                    continue;
+                }
+
+                // Parse patch filename to extract label and coordinates
+                if let Some((label, x, y, width, height)) = parse_patch_filename(&filename) {
+                    match std::fs::read(&path) {
+                        Ok(pixel_data) => {
+                            // Decode the patch image to get RGB pixels
+                            match decode_screenshot_to_rgb(&pixel_data) {
+                                Ok(img) => {
+                                    let pixels = img.into_raw();
+                                    let patch = PatchInfo::new(label, x, y, width, height, pixels);
+                                    matcher.add_patch(patch);
+                                    patch_count += 1;
+                                    log::debug!("✓ Loaded patch {} ({}/{})", filename, idx + 1, entries_vec.len());
+                                }
+                                Err(_) => continue,
+                            }
+                        }
+                        Err(_) => continue,
+                    }
+                }
+            }
+        }
+        Err(_) => {
+            log::error!("Failed to read patch directory");
+            return None;
+        }
+    }
+
+    if patch_count == 0 {
+        log::debug!("⚠️ No patches loaded");
+        return None;
+    }
+    
+    log::debug!("📊 Loaded {} patches, starting correlation matching", patch_count);
+
+    // Find the best match across all patches
+    let threshold = 0.85; // 85% correlation threshold
+    let mut best_match: Option<(String, f32)> = None;
+
+    for (idx, patch) in matcher.patches().iter().enumerate() {
+        let matches = matcher.find_matches(&image_rgb, idx, threshold, 1, 50);
+        
+        let progress_pct = ((idx + 1) as f32 / matcher.patches().len() as f32 * 100.0) as u32;
+        log::debug!("⏳ Matching progress: {}%", progress_pct);
+
+        if let Some(m) = matches.first() {
+            // Found a match
+            let patch_name = patch.display_name();
+            log::debug!("🎯 Found match: {} (correlation: {:.1}%)", patch_name, m.correlation * 100.0);
+            if best_match.is_none() || m.correlation > best_match.as_ref().unwrap().1 {
+                best_match = Some((patch_name, m.correlation));
+            }
+        }
+    }
+
+    match &best_match {
+        Some((name, correlation)) => {
+            log::debug!("✅ Best match: {} ({:.1}%)", name, correlation * 100.0);
+        }
+        None => {
+            log::debug!("❌ No matches found");
+        }
+    }
+
+    best_match.map(|(name, _)| name)
+}
+
+/// Helper function to match patches in screenshot bytes (async wrapper for compatibility)
+///
+/// Returns the best matching patch name, if any match is found above threshold
+#[allow(dead_code)]
+async fn match_patches(screenshot_bytes: &[u8]) -> Option<String> {
+    // Try to decode screenshot to RGB image
+    let image_rgb = match decode_screenshot_to_rgb(screenshot_bytes) {
+        Ok(img) => img,
+        Err(_) => return None,
+    };
+
+    match_patches_with_rgb(screenshot_bytes, Some(image_rgb)).await
+}
+
+/// Helper function to match patches using a pre-decoded RGB image (faster)
+///
+/// Returns the best matching patch name, if any match is found above threshold
+#[allow(dead_code)]
+async fn match_patches_with_rgb(screenshot_bytes: &[u8], image_rgb: Option<RgbImage>) -> Option<String> {
+    // Use pre-decoded image or decode if not provided
+    let image_rgb = match image_rgb {
+        Some(img) => img,
+        None => match decode_screenshot_to_rgb(screenshot_bytes) {
+            Ok(img) => img,
+            Err(_) => return None,
+        },
+    };
+
+    // Load patches from assets directory
+    let mut matcher = TemplateMatcher::new();
+    if !load_patches(&mut matcher).await {
+        // No patches available
+        return None;
+    }
+
+    // Find the best match across all patches
+    let threshold = 0.85; // 85% correlation threshold
+    let mut best_match: Option<(String, f32)> = None;
+
+    for (idx, patch) in matcher.patches().iter().enumerate() {
+        let matches = matcher.find_matches(&image_rgb, idx, threshold, 1, 50);
+
+        if let Some(m) = matches.first() {
+            // Found a match
+            let patch_name = patch.display_name();
+            if best_match.is_none() || m.correlation > best_match.as_ref().unwrap().1 {
+                best_match = Some((patch_name, m.correlation));
+            }
+        }
+    }
+
+    best_match.map(|(name, _)| name)
+}
+
+/// Decode screenshot bytes to RGB image
+pub fn decode_screenshot_to_rgb(bytes: &[u8]) -> Result<RgbImage, String> {
+    let reader = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| format!("Failed to guess format: {}", e))?;
+
+    let image = reader
+        .decode()
+        .map_err(|e| format!("Failed to decode image: {}", e))?;
+
+    let rgb = image.to_rgb8();
+    Ok(rgb)
+}
+
+/// Load all available patches from assets directory
+async fn load_patches(matcher: &mut TemplateMatcher) -> bool {
+    use std::path::Path;
+    use tokio::fs;
+
+    let patch_dir = Path::new("assets/test_images");
+    
+    if !patch_dir.exists() {
+        log::debug!("Patch directory not found: {:?}", patch_dir);
+        return false;
+    }
+
+    let mut entries = match fs::read_dir(patch_dir).await {
+        Ok(entries) => entries,
+        Err(e) => {
+            log::error!("Failed to read patch directory: {}", e);
+            return false;
+        }
+    };
+
+    let mut patch_count = 0;
+
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        let filename = match path.file_name() {
+            Some(name) => match name.to_str() {
+                Some(s) => s.to_string(),
+                None => continue,
+            },
+            None => continue,
+        };
+
+        // Look for patch-*.png files
+        if !filename.starts_with("patch-") || !filename.ends_with(".png") {
+            continue;
+        }
+
+        // Parse patch filename to extract label and coordinates
+        if let Some((label, x, y, width, height)) = parse_patch_filename(&filename) {
+            match fs::read(&path).await {
+                Ok(pixel_data) => {
+                    // Try to decode the patch image to get RGB pixels
+                    match decode_screenshot_to_rgb(&pixel_data) {
+                        Ok(img) => {
+                            let pixels = img.into_raw();
+                            let patch_info = PatchInfo::new(label, x, y, width, height, pixels);
+                            matcher.add_patch(patch_info);
+                            patch_count += 1;
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to decode patch {}: {}", filename, e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to read patch file {}: {}", filename, e);
+                }
+            }
+        }
+    }
+
+    log::debug!("Loaded {} patches for matching", patch_count);
+    patch_count > 0
+}
+
+/// Parse patch filename to extract label and coordinates
+/// Format: patch-[label-][x,y,width,height].png
+fn parse_patch_filename(filename: &str) -> Option<(Option<String>, u32, u32, u32, u32)> {
+    // Remove .png extension
+    let name = if filename.ends_with(".png") {
+        &filename[..filename.len() - 4]
+    } else {
+        return None;
+    };
+
+    // Remove "patch-" prefix
+    if !name.starts_with("patch-") {
+        return None;
+    }
+    let name = &name[6..];
+
+    // Find the last '[' to identify coordinates
+    let bracket_pos = name.rfind('[')?;
+    let label_part = &name[..bracket_pos];
+    let coords_part = &name[bracket_pos..];
+
+    // Parse coordinates [x,y,width,height]
+    if !coords_part.starts_with('[') || !coords_part.ends_with(']') {
+        return None;
+    }
+
+    let coords_str = &coords_part[1..coords_part.len() - 1];
+    let parts: Vec<&str> = coords_str.split(',').collect();
+    if parts.len() != 4 {
+        return None;
+    }
+
+    let x = parts[0].trim().parse::<u32>().ok()?;
+    let y = parts[1].trim().parse::<u32>().ok()?;
+    let width = parts[2].trim().parse::<u32>().ok()?;
+    let height = parts[3].trim().parse::<u32>().ok()?;
+
+    // Parse label (may be empty if no label)
+    let label = if label_part.is_empty() {
+        None
+    } else {
+        // Remove trailing dash if present
+        let label_str = if label_part.ends_with('-') {
+            &label_part[..label_part.len() - 1]
+        } else {
+            label_part
+        };
+        Some(label_str.to_string())
+    };
+
+    Some((label, x, y, width, height))
+}
+
