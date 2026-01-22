@@ -18,33 +18,33 @@ fn extract_region_and_label_from_filename(
     let path = Path::new(source_path);
     let filename = path.file_name()?.to_string_lossy();
 
-    if let Some(bracket_start) = filename.find('[') {
-        if let Some(bracket_end) = filename.find(']') {
-            let coords_str = &filename[bracket_start + 1..bracket_end];
-            let parts: Vec<&str> = coords_str.split(',').collect();
+    if let Some(bracket_start) = filename.find('[')
+        && let Some(bracket_end) = filename.find(']')
+    {
+        let coords_str = &filename[bracket_start + 1..bracket_end];
+        let parts: Vec<&str> = coords_str.split(',').collect();
 
-            if parts.len() == 4 {
-                if let (Ok(x), Ok(y), Ok(width), Ok(height)) = (
-                    parts[0].trim().parse::<u32>(),
-                    parts[1].trim().parse::<u32>(),
-                    parts[2].trim().parse::<u32>(),
-                    parts[3].trim().parse::<u32>(),
-                ) {
-                    let label = if bracket_start > 7 {
-                        // "patch-[" is 7 chars
-                        let label_part = &filename[6..bracket_start].trim_end_matches('-');
-                        if label_part.is_empty() {
-                            None
-                        } else {
-                            Some(label_part.to_string())
-                        }
-                    } else {
-                        None
-                    };
-
-                    return Some((label, x, y, width, height));
+        if parts.len() == 4
+            && let (Ok(x), Ok(y), Ok(width), Ok(height)) = (
+                parts[0].trim().parse::<u32>(),
+                parts[1].trim().parse::<u32>(),
+                parts[2].trim().parse::<u32>(),
+                parts[3].trim().parse::<u32>(),
+            )
+        {
+            let label = if bracket_start > 7 {
+                // "patch-[" is 7 chars
+                let label_part = &filename[6..bracket_start].trim_end_matches('-');
+                if label_part.is_empty() {
+                    None
+                } else {
+                    Some(label_part.to_string())
                 }
-            }
+            } else {
+                None
+            };
+
+            return Some((label, x, y, width, height));
         }
     }
 
@@ -61,9 +61,9 @@ fn calculate_correlation(patch: &image::RgbImage, region: &image::RgbImage) -> f
     // For same-size regions, compute SSD (sum of squared differences)
     let mut sum_sq_diff: f64 = 0.0;
     for (p_pixel, r_pixel) in patch.pixels().zip(region.pixels()) {
-        let r_diff = (p_pixel[0] as f64 - r_pixel[0] as f64);
-        let g_diff = (p_pixel[1] as f64 - r_pixel[1] as f64);
-        let b_diff = (p_pixel[2] as f64 - r_pixel[2] as f64);
+        let r_diff = p_pixel[0] as f64 - r_pixel[0] as f64;
+        let g_diff = p_pixel[1] as f64 - r_pixel[1] as f64;
+        let b_diff = p_pixel[2] as f64 - r_pixel[2] as f64;
         sum_sq_diff += r_diff * r_diff + g_diff * g_diff + b_diff * b_diff;
     }
 
@@ -75,7 +75,7 @@ fn calculate_correlation(patch: &image::RgbImage, region: &image::RgbImage) -> f
     }
 
     let correlation = 1.0 - (sum_sq_diff / max_sq_diff);
-    correlation.max(0.0).min(1.0) as f32
+    correlation.clamp(0.0, 1.0) as f32
 }
 
 /// Find matches using a hybrid approach: imageproc for full image, manual scan for local regions
@@ -115,7 +115,7 @@ fn find_matches(
             for x in x_min..=x_max {
                 if x + patch_width <= image_width && y + patch_height <= image_height {
                     let region = image::RgbImage::from_fn(patch_width, patch_height, |px, py| {
-                        image_rgb.get_pixel(x + px, y + py).clone()
+                        *image_rgb.get_pixel(x + px, y + py)
                     });
 
                     let correlation = calculate_correlation(patch, &region);
@@ -187,47 +187,44 @@ fn main() {
 
     if let Ok(entries) = fs::read_dir(test_images_dir) {
         for entry in entries.flatten() {
-            if let Ok(metadata) = entry.metadata() {
-                if metadata.is_file() {
-                    let path = entry.path();
-                    if let Some(filename) = path.file_name() {
-                        let filename_str = filename.to_string_lossy();
-                        if filename_str.starts_with("patch-") && filename_str.ends_with(".png") {
-                            let source_path = path.to_string_lossy().to_string();
-                            let patch_load_start = Instant::now();
+            if let Ok(metadata) = entry.metadata()
+                && metadata.is_file()
+            {
+                let path = entry.path();
+                if let Some(filename) = path.file_name() {
+                    let filename_str = filename.to_string_lossy();
+                    if filename_str.starts_with("patch-") && filename_str.ends_with(".png") {
+                        let source_path = path.to_string_lossy().to_string();
+                        let patch_load_start = Instant::now();
 
-                            if let Some((label, x, y, width, height)) =
-                                extract_region_and_label_from_filename(&source_path)
-                            {
-                                match image::open(&source_path) {
-                                    Ok(img) => {
-                                        let patch_load_duration = patch_load_start.elapsed();
-                                        let rgb = img.to_rgb8();
-                                        patches.push((
-                                            label.unwrap_or_else(|| "unlabeled".to_string()),
-                                            filename_str.to_string(),
-                                            rgb,
-                                            x,
-                                            y,
-                                        ));
-                                        stats.patches_loaded += 1;
-                                        println!(
-                                            "  ✓ [{}] {} ({}x{}, orig: ({},{}), {:.2}ms elapsed)",
-                                            stats.patches_loaded,
-                                            filename_str,
-                                            img.width(),
-                                            img.height(),
-                                            x,
-                                            y,
-                                            patch_load_duration.as_secs_f64() * 1000.0
-                                        );
-                                    }
-                                    Err(e) => {
-                                        eprintln!(
-                                            "  ✗ Failed to load patch {}: {}",
-                                            filename_str, e
-                                        );
-                                    }
+                        if let Some((label, x, y, _width, _height)) =
+                            extract_region_and_label_from_filename(&source_path)
+                        {
+                            match image::open(&source_path) {
+                                Ok(img) => {
+                                    let patch_load_duration = patch_load_start.elapsed();
+                                    let rgb = img.to_rgb8();
+                                    patches.push((
+                                        label.unwrap_or_else(|| "unlabeled".to_string()),
+                                        filename_str.to_string(),
+                                        rgb,
+                                        x,
+                                        y,
+                                    ));
+                                    stats.patches_loaded += 1;
+                                    println!(
+                                        "  ✓ [{}] {} ({}x{}, orig: ({},{}), {:.2}ms elapsed)",
+                                        stats.patches_loaded,
+                                        filename_str,
+                                        img.width(),
+                                        img.height(),
+                                        x,
+                                        y,
+                                        patch_load_duration.as_secs_f64() * 1000.0
+                                    );
+                                }
+                                Err(e) => {
+                                    eprintln!("  ✗ Failed to load patch {}: {}", filename_str, e);
                                 }
                             }
                         }
@@ -250,110 +247,108 @@ fn main() {
 
     if let Ok(entries) = fs::read_dir(test_images_dir) {
         for entry in entries.flatten() {
-            if let Ok(metadata) = entry.metadata() {
-                if metadata.is_file() {
-                    let path = entry.path();
-                    if let Some(filename) = path.file_name() {
-                        let filename_str = filename.to_string_lossy();
-                        if filename_str.starts_with("img-") && filename_str.ends_with(".png") {
-                            let source_path = path.to_string_lossy().to_string();
-                            let image_start = Instant::now();
+            if let Ok(metadata) = entry.metadata()
+                && metadata.is_file()
+            {
+                let path = entry.path();
+                if let Some(filename) = path.file_name() {
+                    let filename_str = filename.to_string_lossy();
+                    if filename_str.starts_with("img-") && filename_str.ends_with(".png") {
+                        let source_path = path.to_string_lossy().to_string();
+                        let image_start = Instant::now();
 
-                            match image::open(&source_path) {
-                                Ok(img) => {
-                                    let image_load_duration = image_start.elapsed();
-                                    stats.images_loaded += 1;
-                                    image_count += 1;
+                        match image::open(&source_path) {
+                            Ok(img) => {
+                                let image_load_duration = image_start.elapsed();
+                                stats.images_loaded += 1;
+                                image_count += 1;
+                                println!(
+                                    "\n  📷 [{}/] Image: {} ({}x{}, loaded {:.2}ms)",
+                                    image_count,
+                                    filename_str,
+                                    img.width(),
+                                    img.height(),
+                                    image_load_duration.as_secs_f64() * 1000.0
+                                );
+
+                                for (
+                                    patch_idx,
+                                    (
+                                        patch_label,
+                                        patch_filename,
+                                        patch_img,
+                                        patch_orig_x,
+                                        patch_orig_y,
+                                    ),
+                                ) in patches.iter().enumerate()
+                                {
+                                    let search_start = Instant::now();
+                                    stats.total_comparisons += 1;
+
+                                    let region_desc = format!(
+                                        "x:[{},{}] y:[{},{}]",
+                                        patch_orig_x.saturating_sub(search_margin),
+                                        (patch_orig_x + patch_img.width() + search_margin),
+                                        patch_orig_y.saturating_sub(search_margin),
+                                        (patch_orig_y + patch_img.height() + search_margin)
+                                    );
                                     println!(
-                                        "\n  📷 [{}/] Image: {} ({}x{}, loaded {:.2}ms)",
-                                        image_count,
-                                        filename_str,
-                                        img.width(),
-                                        img.height(),
-                                        image_load_duration.as_secs_f64() * 1000.0
+                                        "      🔍 Patch {}/{} '{}' - searching region {} ...",
+                                        patch_idx + 1,
+                                        patches.len(),
+                                        patch_label,
+                                        region_desc
                                     );
 
-                                    for (
-                                        patch_idx,
-                                        (
+                                    let matches = find_matches(
+                                        &img,
+                                        patch_img,
+                                        threshold,
+                                        max_matches_per_patch,
+                                        Some(*patch_orig_x),
+                                        Some(*patch_orig_y),
+                                        search_margin,
+                                    );
+                                    let search_duration = search_start.elapsed();
+
+                                    if !matches.is_empty() {
+                                        println!(
+                                            "      ✓ Patch {}/'{}' ({}): found {} matches in {:.2}ms",
+                                            patch_idx + 1,
                                             patch_label,
                                             patch_filename,
-                                            patch_img,
-                                            patch_orig_x,
-                                            patch_orig_y,
-                                        ),
-                                    ) in patches.iter().enumerate()
-                                    {
-                                        let search_start = Instant::now();
-                                        stats.total_comparisons += 1;
-
-                                        let region_desc = format!(
-                                            "x:[{},{}] y:[{},{}]",
-                                            patch_orig_x.saturating_sub(search_margin),
-                                            (patch_orig_x + patch_img.width() + search_margin),
-                                            patch_orig_y.saturating_sub(search_margin),
-                                            (patch_orig_y + patch_img.height() + search_margin)
+                                            matches.len(),
+                                            search_duration.as_secs_f64() * 1000.0
                                         );
-                                        println!(
-                                            "      🔍 Patch {}/{} '{}' - searching region {} ...",
-                                            patch_idx + 1,
-                                            patches.len(),
-                                            patch_label,
-                                            region_desc
-                                        );
-
-                                        let matches = find_matches(
-                                            &img,
-                                            patch_img,
-                                            threshold,
-                                            max_matches_per_patch,
-                                            Some(*patch_orig_x),
-                                            Some(*patch_orig_y),
-                                            search_margin,
-                                        );
-                                        let search_duration = search_start.elapsed();
-
-                                        if !matches.is_empty() {
+                                        for (i, (x, y, correlation)) in matches.iter().enumerate() {
                                             println!(
-                                                "      ✓ Patch {}/'{}' ({}): found {} matches in {:.2}ms",
-                                                patch_idx + 1,
-                                                patch_label,
-                                                patch_filename,
-                                                matches.len(),
-                                                search_duration.as_secs_f64() * 1000.0
+                                                "        [{}] Position: ({}, {}) - Correlation: {:.2}%",
+                                                i + 1,
+                                                x,
+                                                y,
+                                                correlation * 100.0
                                             );
-                                            for (i, (x, y, correlation)) in
-                                                matches.iter().enumerate()
-                                            {
-                                                println!(
-                                                    "        [{}] Position: ({}, {}) - Correlation: {:.2}%",
-                                                    i + 1,
-                                                    x,
-                                                    y,
-                                                    correlation * 100.0
-                                                );
-                                                stats.matches_found += 1;
-                                            }
-                                        } else {
-                                            println!(
-                                                "      ✗ Patch {}/'{}' - No matches above {:.0}% ({:.2}ms)",
-                                                patch_idx + 1,
-                                                patch_label,
-                                                threshold * 100.0,
-                                                search_duration.as_secs_f64() * 1000.0
-                                            );
+                                            stats.matches_found += 1;
                                         }
+                                    } else {
+                                        println!(
+                                            "      ✗ Patch {}/'{}' - No matches above {:.0}% ({:.2}ms)",
+                                            patch_idx + 1,
+                                            patch_label,
+                                            threshold * 100.0,
+                                            search_duration.as_secs_f64() * 1000.0
+                                        );
                                     }
+                                }
 
-                                    let image_total = image_start.elapsed();
-                                    println!(
-                                        "    ⏱️  Image processing time: {:.2}ms",
-                                        image_total.as_secs_f64() * 1000.0
-                                    );
-                                }
-                                Err(e) => {
-                                    eprintln!("  ✗ Failed to open image {}: {}", filename_str, e);
-                                }
+                                let image_total = image_start.elapsed();
+                                println!(
+                                    "    ⏱️  Image processing time: {:.2}ms",
+                                    image_total.as_secs_f64() * 1000.0
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!("  ✗ Failed to open image {}: {}", filename_str, e);
                             }
                         }
                     }

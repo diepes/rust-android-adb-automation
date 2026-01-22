@@ -411,10 +411,10 @@ mod hardware_access_tests {
         for line in output.lines() {
             if let Some(size_str) = line.strip_prefix("Physical size: ") {
                 let parts: Vec<&str> = size_str.trim().split('x').collect();
-                if parts.len() == 2 {
-                    if let (Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
-                        return Some((x, y));
-                    }
+                if parts.len() == 2
+                    && let (Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+                {
+                    return Some((x, y));
                 }
             }
         }
@@ -752,7 +752,7 @@ mod cross_platform_tests {
                 let data_clone = Arc::clone(&data);
                 tokio::spawn(async move {
                     let val = data_clone.read().await.clone();
-                    val.len() > 0
+                    !val.is_empty()
                 })
             })
             .collect();

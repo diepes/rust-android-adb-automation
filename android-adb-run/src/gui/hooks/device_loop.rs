@@ -8,6 +8,9 @@ use std::io::Cursor;
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 
+/// Type alias for error handling configuration
+type ErrorConfig = (Box<dyn Fn(&String) -> String>, &'static str, u32);
+
 /// Initializes device connection loop that discovers and connects to Android devices
 /// Uses grouped signal structs for cleaner function signature
 /// Also monitors connection and handles reconnection when device disconnects
@@ -113,8 +116,8 @@ pub fn use_device_loop(
                                 screenshot.is_loading.set(false);
 
                                 // Phase 3: Run template matching in dedicated thread (after image is displayed)
-                                let status_signal = screenshot.status.clone();
-                                let status_history_signal = screenshot.status_history.clone();
+                                let status_signal = screenshot.status;
+                                let status_history_signal = screenshot.status_history;
                                 start_template_matching_phase(
                                     bytes.clone(),
                                     rgb_image,
@@ -133,8 +136,8 @@ pub fn use_device_loop(
 
                     // === MONITORING PHASE ===
                     // Wait here while device is connected
-                    let monitor_shared_client = shared_adb_client.clone();
-                    let mut device_status = device.status.clone();
+                    let monitor_shared_client = shared_adb_client;
+                    let mut device_status = device.status;
 
                     // This future will complete when device disconnects
                     let disconnection_detected = async move {
@@ -177,11 +180,7 @@ pub fn use_device_loop(
                 }
                 Err(e) => {
                     // Use error helper methods for cleaner code
-                    let (get_status, tip_msg, retry_secs): (
-                        Box<dyn Fn(&String) -> String>,
-                        &str,
-                        u32,
-                    ) = if e.is_resource_busy() {
+                    let (get_status, tip_msg, retry_secs): ErrorConfig = if e.is_resource_busy() {
                         (
                             Box::new(|_e| {
                                 "⚠️ USB Already in Use - Close other ADB apps - Retrying in {}s..."
@@ -917,11 +916,7 @@ async fn load_patches(matcher: &mut TemplateMatcher) -> bool {
 /// Format: patch-[label-][x,y,width,height].png
 fn parse_patch_filename(filename: &str) -> Option<(Option<String>, u32, u32, u32, u32)> {
     // Remove .png extension
-    let name = if filename.ends_with(".png") {
-        &filename[..filename.len() - 4]
-    } else {
-        return None;
-    };
+    let name = filename.strip_suffix(".png")?;
 
     // Remove "patch-" prefix
     if !name.starts_with("patch-") {
@@ -955,8 +950,8 @@ fn parse_patch_filename(filename: &str) -> Option<(Option<String>, u32, u32, u32
         None
     } else {
         // Remove trailing dash if present
-        let label_str = if label_part.ends_with('-') {
-            &label_part[..label_part.len() - 1]
+        let label_str = if let Some(stripped) = label_part.strip_suffix('-') {
+            stripped
         } else {
             label_part
         };

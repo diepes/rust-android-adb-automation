@@ -562,9 +562,7 @@ impl AdbClient for UsbAdb {
                                             || fb_err_str.contains("no write endpoint")
                                         {
                                             Err(AdbError::ProtocolDesync {
-                                                description: format!(
-                                                    "Framebuffer and screencap both failed with protocol errors"
-                                                ),
+                                                description: "Framebuffer and screencap both failed with protocol errors".to_string(),
                                             })
                                         } else {
                                             Err(err)

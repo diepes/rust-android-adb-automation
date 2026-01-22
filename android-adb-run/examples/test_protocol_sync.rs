@@ -83,11 +83,11 @@ fn connect_with_retry(key_path: &std::path::Path, max_attempts: u32) -> Option<A
 }
 
 fn test_rapid_sequential_commands(device: &mut ADBUSBDevice) {
-    let test_values = vec!["test1", "test2", "test3", "test4", "test5"];
+    let test_values = ["test1", "test2", "test3", "test4", "test5"];
 
     let mut success_count = 0;
     let mut fail_count = 0;
-    let mut last_error = String::new();
+    let mut last_error;
 
     for (i, val) in test_values.iter().enumerate() {
         let start = Instant::now();

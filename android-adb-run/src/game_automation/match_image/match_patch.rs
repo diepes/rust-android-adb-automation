@@ -42,10 +42,10 @@ impl PatchMatcher {
         expected_x: Option<u32>,
         expected_y: Option<u32>,
     ) -> Vec<(u32, u32, f32)> {
-        let image_width = image.width() as u32;
-        let image_height = image.height() as u32;
-        let template_width = template.width() as u32;
-        let template_height = template.height() as u32;
+        let image_width = image.width();
+        let image_height = image.height();
+        let template_width = template.width();
+        let template_height = template.height();
 
         if template_width > image_width || template_height > image_height {
             if self.debug {
@@ -98,9 +98,8 @@ impl PatchMatcher {
             for (x_idx, x) in (x_min..=x_max).enumerate() {
                 let progress_idx = idx * ((x_max - x_min + 1) as usize) + x_idx;
 
-                if self.debug && progress_idx % report_interval == 0 {
-                    let progress_pct =
-                        (progress_idx as f32 / total_positions as f32 * 100.0) as u32;
+                if self.debug && progress_idx.is_multiple_of(report_interval) {
+                    let progress_pct = progress_idx as f32 / total_positions as f32 * 100.0;
                     print!("\r⏳ Search progress: {}%", progress_pct);
                     use std::io::{self, Write};
                     let _ = io::stdout().flush();
@@ -140,11 +139,11 @@ impl PatchMatcher {
         x: u32,
         y: u32,
     ) -> f32 {
-        let template_width = template.width() as u32;
-        let template_height = template.height() as u32;
-        let image_width = image.width() as u32;
+        let template_width = template.width();
+        let template_height = template.height();
+        let image_width = image.width();
 
-        if x + template_width > image_width || y + template_height > image.height() as u32 {
+        if x + template_width > image_width || y + template_height > image.height() {
             return 0.0;
         }
 
@@ -175,17 +174,18 @@ impl PatchMatcher {
 
                 // Early exit: if we can't possibly reach the threshold, stop
                 let check_idx = (py * template_width + px) as usize;
-                if check_idx > 0 && check_idx % check_interval == 0 {
-                    if max_possible_sum > 0.0 {
-                        let current_correlation = 1.0 - (sum_sq_diff / max_possible_sum).min(1.0);
-                        let pixels_remaining = pixels_to_check - check_idx;
-                        let worst_case_correlation = current_correlation
-                            * (1.0 - 0.1 * (pixels_remaining as f64 / pixels_to_check as f64));
-                        let threshold_f64 = self.threshold as f64;
+                if check_idx > 0
+                    && check_idx.is_multiple_of(check_interval)
+                    && max_possible_sum > 0.0
+                {
+                    let current_correlation = 1.0 - (sum_sq_diff / max_possible_sum).min(1.0);
+                    let pixels_remaining = pixels_to_check - check_idx;
+                    let worst_case_correlation = current_correlation
+                        * (1.0 - 0.1 * (pixels_remaining as f64 / pixels_to_check as f64));
+                    let threshold_f64 = self.threshold as f64;
 
-                        if worst_case_correlation < threshold_f64 {
-                            return 0.0; // Early exit
-                        }
+                    if worst_case_correlation < threshold_f64 {
+                        return 0.0; // Early exit
                     }
                 }
             }

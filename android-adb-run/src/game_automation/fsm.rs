@@ -13,20 +13,39 @@ use tokio::sync::{Mutex, mpsc};
 use tokio::time::{Duration, timeout};
 
 // Helper function to detect if an error indicates device disconnection
-// NOTE: This is careful to avoid false positives from normal cleanup operations
+// NOTE: This distinguishes between operational CLSE errors (need reconnect) and cleanup CLSE (harmless)
 pub fn is_disconnect_error(error: &str) -> bool {
     let error_lower = error.to_lowercase();
 
-    // IMPORTANT: "no write endpoint setup" during CLSE cleanup is NOT a disconnect
-    // Only treat it as disconnect if it happens during actual operations
-    // We filter out CLSE messages which are harmless cleanup operations
-    let is_clse_cleanup_error = error_lower.contains("clse")
-        || (error_lower.contains("no write endpoint")
-            && error_lower.contains("error while sending"));
+    // CRITICAL: Protocol desync errors (CLSE during operations) ARE disconnects
+    // These errors contain specific phrases indicating the ADB protocol is out of sync
+    // and the connection MUST be re-established
+    if error_lower.contains("protocol desync")
+        || error_lower.contains("reconnection needed")
+        || error_lower.contains("connection needs to be re-established")
+    {
+        return true;
+    }
 
-    if is_clse_cleanup_error {
-        // These are harmless cleanup errors from the USB transport layer
-        // They don't indicate actual device disconnection
+    // CLSE errors during actual command execution (tap/screenshot) need reconnection
+    // But standalone "CLSE" during cleanup (without "failed" or command context) is harmless
+    let is_operational_clse = error_lower.contains("clse")
+        && (error_lower.contains("failed")
+            || error_lower.contains("command")
+            || error_lower.contains("tap")
+            || error_lower.contains("screencap")
+            || error_lower.contains("input"));
+
+    if is_operational_clse {
+        return true;
+    }
+
+    // Harmless cleanup CLSE messages (no command context)
+    let is_harmless_clse = error_lower.contains("clse")
+        && !error_lower.contains("failed")
+        && !error_lower.contains("command");
+
+    if is_harmless_clse {
         return false;
     }
 
@@ -41,6 +60,7 @@ pub fn is_disconnect_error(error: &str) -> bool {
         || error_lower.contains("connection reset")
         || error_lower.contains("closed")
         || error_lower.contains("not connected")
+        || error_lower.contains("no write endpoint")   // USB write endpoint lost
         || (error_lower.contains("timed out") && error_lower.contains("usb")) // USB timeout = disconnect
         || error_lower.contains("operation timed out") // Only if consistent failures
         || (error_lower.contains("usb") && error_lower.contains("error") && !error_lower.contains("resource busy")) // Generic USB error but not resource busy
@@ -1568,5 +1588,62 @@ mod tests {
         // Check final value
         let final_value = *counter.lock().await;
         assert_eq!(final_value, 5, "Expected 5 increments, got {}", final_value);
+    }
+
+    #[test]
+    fn test_is_disconnect_error_clse_protocol_desync() {
+        // Test that CLSE protocol desync errors during operations ARE detected as disconnects
+        // This was the root cause of the GUI hung state bug
+
+        // These should be detected as disconnect errors (need reconnection)
+        let protocol_desync_errors = [
+            "ADB protocol desync (CLSE error) - connection needs to be re-established: Command 'input tap' failed with protocol error: ADB request failed - wrong command CLSE",
+            "ADB protocol desync (CLSE error) - connection needs to be re-established: Command 'screencap -p' failed with protocol error",
+            "PROTOCOL DESYNC - reconnection needed",
+            "❌ Tap failed (PROTOCOL DESYNC - reconnection needed): error at (350,628)",
+            "Command 'input tap' failed with CLSE error",
+            "screencap -p command failed: CLSE",
+        ];
+
+        for error in protocol_desync_errors {
+            assert!(
+                is_disconnect_error(error),
+                "Should detect protocol desync as disconnect: {}",
+                error
+            );
+        }
+
+        // These should NOT be detected as disconnect errors (harmless cleanup)
+        let harmless_clse_errors = [
+            "CLSE",                 // Just CLSE without context
+            "Received CLSE packet", // Protocol acknowledgment
+        ];
+
+        for error in harmless_clse_errors {
+            assert!(
+                !is_disconnect_error(error),
+                "Should NOT detect harmless CLSE as disconnect: {}",
+                error
+            );
+        }
+
+        // Standard disconnect errors should still work
+        let standard_disconnect_errors = [
+            "device offline",
+            "device not found",
+            "no devices",
+            "connection refused",
+            "broken pipe",
+            "connection reset",
+            "no write endpoint",
+        ];
+
+        for error in standard_disconnect_errors {
+            assert!(
+                is_disconnect_error(error),
+                "Should detect standard disconnect: {}",
+                error
+            );
+        }
     }
 }

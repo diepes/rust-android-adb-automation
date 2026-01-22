@@ -243,7 +243,7 @@ pub fn screenshot_panel() -> Element {
                                                             let rgb_decoded = tokio::task::spawn_blocking(move || {
                                                                 decode_screenshot_to_rgb(&bytes_for_matching).ok()
                                                             }).await.ok().flatten();
-                                                            start_template_matching_phase(bytes, rgb_decoded, screenshot_status, ctx.screenshot.status_history.clone());
+                                                            start_template_matching_phase(bytes, rgb_decoded, screenshot_status, ctx.screenshot.status_history);
                                                         } else {
                                                             screenshot_status.set("✅ Action successful".to_string());
                                                         }

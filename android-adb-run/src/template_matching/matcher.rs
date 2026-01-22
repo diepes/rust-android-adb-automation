@@ -59,8 +59,8 @@ impl TemplateMatcher {
         }
 
         let patch = &self.patches[patch_idx];
-        let image_width = image_rgb.width() as u32;
-        let image_height = image_rgb.height() as u32;
+        let image_width = image_rgb.width();
+        let image_height = image_rgb.height();
 
         // Convert patch pixels to RgbImage
         let patch_img = match RgbImage::from_raw(patch.width, patch.height, patch.pixels.clone()) {
@@ -186,7 +186,7 @@ impl TemplateMatcher {
 
         // Convert to 0.0-1.0 correlation score
         let correlation = 1.0 - (sum_sq_diff / max_sq_diff);
-        (correlation.max(0.0).min(1.0)) as f32
+        correlation.clamp(0.0, 1.0) as f32
     }
 }
 

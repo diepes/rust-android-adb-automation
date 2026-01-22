@@ -123,34 +123,31 @@ fn main() {
 
             // Get screen size to calculate bytes per pixel
             let mut out = Vec::new();
-            if let Ok(_) = device.shell_command(&["wm", "size"], &mut out) {
+            if device.shell_command(&["wm", "size"], &mut out).is_ok() {
                 let output = String::from_utf8_lossy(&out);
                 for line in output.lines() {
                     if let Some(size_str) = line.strip_prefix("Physical size: ") {
                         let parts: Vec<&str> = size_str.trim().split('x').collect();
-                        if parts.len() == 2 {
-                            if let (Ok(width), Ok(height)) =
+                        if parts.len() == 2
+                            && let (Ok(width), Ok(height)) =
                                 (parts[0].parse::<u32>(), parts[1].parse::<u32>())
-                            {
-                                let pixels = (width * height) as usize;
-                                let bpp = fb_data.len() as f64 / pixels as f64;
-                                println!(
-                                    "   📊 Screen: {}x{} ({} pixels), {:.2} bytes/pixel",
-                                    width, height, pixels, bpp
-                                );
+                        {
+                            let pixels = (width * height) as usize;
+                            let bpp = fb_data.len() as f64 / pixels as f64;
+                            println!(
+                                "   📊 Screen: {}x{} ({} pixels), {:.2} bytes/pixel",
+                                width, height, pixels, bpp
+                            );
 
-                                if format_detected == "RAW" {
-                                    if bpp < 1.0 {
-                                        println!(
-                                            "   ⚠️  Compressed/encoded format (< 1 byte/pixel)"
-                                        );
-                                    } else if (1.9..2.1).contains(&bpp) {
-                                        println!("   💡 Likely RGB565 format (2 bytes/pixel)");
-                                    } else if (2.9..3.1).contains(&bpp) {
-                                        println!("   💡 Likely RGB/BGR format (3 bytes/pixel)");
-                                    } else if (3.9..4.1).contains(&bpp) {
-                                        println!("   💡 Likely RGBA/BGRA format (4 bytes/pixel)");
-                                    }
+                            if format_detected == "RAW" {
+                                if bpp < 1.0 {
+                                    println!("   ⚠️  Compressed/encoded format (< 1 byte/pixel)");
+                                } else if (1.9..2.1).contains(&bpp) {
+                                    println!("   💡 Likely RGB565 format (2 bytes/pixel)");
+                                } else if (2.9..3.1).contains(&bpp) {
+                                    println!("   💡 Likely RGB/BGR format (3 bytes/pixel)");
+                                } else if (3.9..4.1).contains(&bpp) {
+                                    println!("   💡 Likely RGBA/BGRA format (4 bytes/pixel)");
                                 }
                             }
                         }

@@ -1,5 +1,4 @@
 /// Template matching data types
-
 /// Information about a single patch
 #[derive(Clone, Debug)]
 pub struct PatchInfo {
@@ -66,11 +65,7 @@ impl PatchInfo {
 impl Match {
     /// Format match as string with correlation percentage
     pub fn to_string(&self, patch: &PatchInfo) -> String {
-        let patch_name = &patch
-            .label
-            .as_ref()
-            .map(|s| s.as_str())
-            .unwrap_or("unnamed");
+        let patch_name = &patch.label.as_deref().unwrap_or("unnamed");
         let correlation_pct = (self.correlation * 100.0) as u32;
         format!(
             "{} at ({},{}) - {}%",

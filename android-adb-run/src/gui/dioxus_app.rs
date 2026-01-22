@@ -97,7 +97,7 @@ fn App() -> Element {
         data: use_signal(|| None::<String>),
         bytes: use_signal(|| None::<Vec<u8>>),
         status: use_signal(|| "".to_string()),
-        status_history: use_signal(|| Vec::new()),
+        status_history: use_signal(Vec::new),
         counter: use_signal(|| 0u64),
         is_loading: use_signal(|| false),
         matched_patch: use_signal(|| None::<String>),
