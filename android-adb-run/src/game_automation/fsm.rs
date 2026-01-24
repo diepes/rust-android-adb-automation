@@ -313,7 +313,10 @@ impl GameAutomation {
                     // Update screenshot signals directly
                     let bytes_for_encoding = bytes.clone();
                     let bytes_for_signal = bytes.clone();
-                    let mut screenshot_counter_clone = self.screenshot_counter;
+                    let counter_val = self.screenshot_counter.with_mut(|c| {
+                        *c += 1;
+                        *c
+                    });
                     let screenshot_data_clone = self.screenshot_data;
                     let screenshot_bytes_clone = self.screenshot_bytes;
                     let screenshot_status_clone = self.screenshot_status;
@@ -324,10 +327,6 @@ impl GameAutomation {
                     // Spawn base64 encoding in background to avoid blocking
                     dioxus::prelude::spawn(async move {
                         use crate::gui::util::base64_encode;
-                        let counter_val = screenshot_counter_clone.with_mut(|c| {
-                            *c += 1;
-                            *c
-                        });
                         let base64_string =
                             tokio::task::spawn_blocking(move || base64_encode(&bytes_for_encoding))
                                 .await
@@ -344,6 +343,7 @@ impl GameAutomation {
                     start_template_matching_phase(
                         matching_bytes,
                         None,
+                        counter_val as u32,
                         status_signal_for_matching,
                         status_history_for_matching,
                     );

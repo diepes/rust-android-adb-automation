@@ -121,6 +121,7 @@ pub fn use_device_loop(
                                 start_template_matching_phase(
                                     bytes.clone(),
                                     rgb_image,
+                                    counter_val as u32,
                                     status_signal,
                                     status_history_signal,
                                 );
@@ -284,6 +285,7 @@ fn add_history_message(
 pub fn start_template_matching_phase(
     bytes: Vec<u8>,
     rgb_image: Option<RgbImage>,
+    screenshot_counter: u32,
     mut status_signal: Signal<String>,
     mut status_history_signal: Signal<Vec<(String, bool)>>,
 ) {
@@ -296,10 +298,11 @@ pub fn start_template_matching_phase(
 
         // Create a channel for progress updates from the blocking task
         // Use larger buffer (500) to avoid blocking during high-frequency progress updates
-        let (tx, mut rx) = tokio::sync::mpsc::channel(500);
+        // Channel sends (message, is_result) tuples for robust filtering
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(String, bool)>(500);
 
         // Show that we're starting patch management
-        let init_msg = "🔍 Loading patches...".to_string();
+        let init_msg = format!("[#{}] 🔍 Loading patches...", screenshot_counter);
         log::info!("📝 Setting initial status: {}", init_msg);
         status_signal.set(init_msg.clone());
         log::info!("📊 Before adding init message - history about to get new message");
@@ -310,7 +313,7 @@ pub fn start_template_matching_phase(
         log::info!("🧵 Spawning blocking task for match_patches_blocking_with_progress");
         let mut result_handle = tokio::task::spawn_blocking(move || {
             log::info!("🔧 Inside spawn_blocking - calling match_patches_blocking_with_progress");
-            match_patches_blocking_with_progress(&bytes, rgb_image, tx)
+            match_patches_blocking_with_progress(&bytes, rgb_image, screenshot_counter, tx)
         });
 
         log::info!("⏳ Starting message receive loop");
@@ -320,18 +323,16 @@ pub fn start_template_matching_phase(
         loop {
             tokio::select! {
                 msg = rx.recv() => {
-                    if let Some(progress_msg) = msg {
-                        log::info!("📨 Received progress message: {}", progress_msg);
+                    if let Some((progress_msg, is_result)) = msg {
+                        log::info!("📨 Received progress message: {} (is_result: {})", progress_msg, is_result);
                         status_signal.set(progress_msg.clone());
-
-                        // Check if this is a result message
-                        let is_result = progress_msg.starts_with("✓") ||
-                                       progress_msg.starts_with("✗") ||
-                                       progress_msg.starts_with("🎯");
 
                         // Extract patch name if it's a result message
                         let patch_name = if is_result {
-                            progress_msg.split('[').next().and_then(|s| s.split_whitespace().last())
+                            // Extract patch name from message like "[#1] ✓ Matched patch_name in 1s (90%)"
+                            // Look for text between the emoji and " in"
+                            progress_msg.split(']').nth(1)
+                                .and_then(|s| s.split_whitespace().nth(2))
                         } else {
                             None
                         };
@@ -357,16 +358,13 @@ pub fn start_template_matching_phase(
                     log::info!("✅ Blocking task completed");
                     result = Some(res);
                     // Continue to drain remaining messages before exiting
-                    while let Ok(progress_msg) = rx.try_recv() {
-                        log::info!("🗑️ Draining queued message: {}", progress_msg);
+                    while let Ok((progress_msg, is_result)) = rx.try_recv() {
+                        log::info!("🗑️ Draining queued message: {} (is_result: {})", progress_msg, is_result);
                         status_signal.set(progress_msg.clone());
 
-                        let is_result = progress_msg.starts_with("✓") ||
-                                       progress_msg.starts_with("✗") ||
-                                       progress_msg.starts_with("🎯");
-
                         let patch_name = if is_result {
-                            progress_msg.split('[').next().and_then(|s| s.split_whitespace().last())
+                            progress_msg.split(']').nth(1)
+                                .and_then(|s| s.split_whitespace().nth(2))
                         } else {
                             None
                         };
@@ -400,7 +398,8 @@ pub fn start_template_matching_phase(
 fn match_patches_blocking_with_progress(
     screenshot_bytes: &[u8],
     image_rgb: Option<RgbImage>,
-    tx: tokio::sync::mpsc::Sender<String>,
+    screenshot_counter: u32,
+    tx: tokio::sync::mpsc::Sender<(String, bool)>,
 ) -> Option<String> {
     // Use pre-decoded image or decode if not provided
     let image_rgb = match image_rgb {
@@ -416,7 +415,7 @@ fn match_patches_blocking_with_progress(
 
     if !patch_dir.exists() {
         log::debug!("Patch directory not found: {:?}", patch_dir);
-        let _ = tx.blocking_send("⚠️ Patch directory not found".to_string());
+        let _ = tx.blocking_send((format!("[#{}] ⚠️ Patch directory not found", screenshot_counter), false));
         return None;
     }
 
@@ -424,7 +423,7 @@ fn match_patches_blocking_with_progress(
     let mut patch_count = 0;
 
     log::debug!("🔍 Starting patch matching");
-    let send_result = tx.blocking_send("🔍 Scanning patches...".to_string());
+    let send_result = tx.blocking_send((format!("[#{}] 🔍 Scanning patches...", screenshot_counter), false));
     log::debug!("📤 Sent 'Scanning patches' message: {:?}", send_result);
 
     match std::fs::read_dir(patch_dir) {
@@ -475,20 +474,20 @@ fn match_patches_blocking_with_progress(
 
             // Send consolidated message after all patches are loaded
             if patch_count > 0 {
-                let msg = format!("📦 Loaded {} patches to match...", patch_count);
-                let _ = tx.blocking_send(msg);
+                let msg = format!("[#{}] 📦 Loaded {} patches to match...", screenshot_counter, patch_count);
+                let _ = tx.blocking_send((msg, false));
             }
         }
         Err(_) => {
             log::error!("Failed to read patch directory");
-            let _ = tx.blocking_send("⚠️ Failed to load patches".to_string());
+            let _ = tx.blocking_send((format!("[#{}] ⚠️ Failed to load patches", screenshot_counter), false));
             return None;
         }
     }
 
     if patch_count == 0 {
         log::debug!("⚠️ No patches loaded");
-        let _ = tx.blocking_send("⚠️ No patches found".to_string());
+        let _ = tx.blocking_send((format!("[#{}] ⚠️ No patches found", screenshot_counter), false));
         return None;
     }
 
@@ -496,7 +495,7 @@ fn match_patches_blocking_with_progress(
         "📊 Loaded {} patches, starting correlation matching",
         patch_count
     );
-    if let Err(e) = tx.blocking_send(format!("🔎 Matching {} patches...", patch_count)) {
+    if let Err(e) = tx.blocking_send((format!("[#{}] 🔎 Matching {} patches...", screenshot_counter, patch_count), false)) {
         log::error!("❌ Failed to send 'Matching patches' message: {}", e);
     }
 
@@ -520,8 +519,8 @@ fn match_patches_blocking_with_progress(
 
         // Send message showing which patch we're checking
         let progress_pct = ((idx + 1) as f32 / matcher.patches().len() as f32 * 100.0) as u32;
-        let msg = format!("🔎 Checking {}... ({}%)", patch_name, progress_pct);
-        if let Err(e) = tx.blocking_send(msg.clone()) {
+        let msg = format!("[#{}] 🔎 Checking {}... ({}%)", screenshot_counter, patch_name, progress_pct);
+        if let Err(e) = tx.blocking_send((msg.clone(), false)) {
             log::error!("❌ Failed to send patch check message: {}", e);
         } else {
             log::info!("📤 Sent: {}", msg);
@@ -538,6 +537,7 @@ fn match_patches_blocking_with_progress(
         // Spawn a thread to send periodic progress messages while matching
         let tx_clone = tx.clone();
         let patch_name_clone = patch_name.clone();
+        let screenshot_counter_clone = screenshot_counter;
         let progress_handle = std::thread::spawn(move || {
             let mut counter = 0;
             loop {
@@ -565,19 +565,20 @@ fn match_patches_blocking_with_progress(
 
                 let msg = if estimated_remaining > 0 {
                     format!(
-                        "⏳ Still matching {}... ({} sec, ~{} min remaining)",
+                        "[#{}] ⏳ Still matching {}... ({} sec, ~{} min remaining)",
+                        screenshot_counter_clone,
                         patch_name_clone,
                         elapsed_secs,
                         estimated_remaining / 60
                     )
                 } else {
                     format!(
-                        "⏳ Still matching {}... ({} sec)",
-                        patch_name_clone, elapsed_secs
+                        "[#{}] ⏳ Still matching {}... ({} sec)",
+                        screenshot_counter_clone, patch_name_clone, elapsed_secs
                     )
                 };
 
-                if tx_clone.blocking_send(msg).is_err() {
+                if tx_clone.blocking_send((msg, false)).is_err() {
                     break; // Channel closed, matching is done
                 }
             }
@@ -593,19 +594,21 @@ fn match_patches_blocking_with_progress(
         let completion_msg = if let Some(m) = matches.first() {
             let accuracy_pct = (m.correlation * 100.0) as u32;
             format!(
-                "✓ Matched {} in {:.0}s ({}%)",
+                "[#{}] ✓ Matched {} in {:.0}s ({}%)",
+                screenshot_counter,
                 patch_name,
                 elapsed.as_secs_f32(),
                 accuracy_pct
             )
         } else {
             format!(
-                "✗ No match for {} ({:.0}s)",
+                "[#{}] ✗ No match for {} ({:.0}s)",
+                screenshot_counter,
                 patch_name,
                 elapsed.as_secs_f32()
             )
         };
-        let _ = tx.blocking_send(completion_msg);
+        let _ = tx.blocking_send((completion_msg, true)); // true = this is a result message
         log::info!(
             "✓ find_matches completed for {} in {:.2}s, found {} matches",
             patch_name,
@@ -634,14 +637,14 @@ fn match_patches_blocking_with_progress(
         Some((name, correlation)) => {
             log::debug!("✅ Best match: {} ({:.1}%)", name, correlation * 100.0);
             let accuracy_pct = (correlation * 100.0) as u32;
-            if let Err(e) = tx.blocking_send(format!("🎯 BEST MATCH: {} ({}%)", name, accuracy_pct))
+            if let Err(e) = tx.blocking_send((format!("[#{}] 🎯 BEST MATCH: {} ({}%)", screenshot_counter, name, accuracy_pct), true))
             {
                 log::error!("❌ Failed to send final match message: {}", e);
             }
         }
         None => {
             log::debug!("❌ No matches found");
-            if let Err(e) = tx.blocking_send("⚠️ No matches found in any patch".to_string()) {
+            if let Err(e) = tx.blocking_send((format!("[#{}] ⚠️ No matches found in any patch", screenshot_counter), true)) {
                 log::error!("❌ Failed to send no-match message: {}", e);
             }
         }
