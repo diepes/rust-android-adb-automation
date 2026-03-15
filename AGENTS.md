@@ -2,42 +2,75 @@
 
 ## Goal
 
-- Mobile phone automation library, that uses rust adb_client module to connect to Android phone that is in debug mode over usb
+Android phone automation over USB ADB using a pure-Rust `adb_client` crate — no ADB daemon required.
 
-## Coding guidance
+## Code Style
 
-- Keep the code modular and clean using rust structs where required
+- Rust edition 2024; keep modules focused and structs lean.
+- All errors use the `thiserror`-derived `AdbError` enum ([android-adb-run/src/adb/error.rs](android-adb-run/src/adb/error.rs)); use `AdbResult<T>` as the return type throughout `src/adb/`.
+- Use the `debug_print!` macro (defined in [android-adb-run/src/lib.rs](android-adb-run/src/lib.rs)) instead of `println!` for conditional debug output.
+- CLI flags are parsed manually in [android-adb-run/src/args.rs](android-adb-run/src/args.rs) — no `clap`. Follow the same pattern for new flags.
+- TDD: write the test first, then implement. Keep each change small and independently verifiable.
 
-- Prefer that will simplify changes
+## Architecture
 
-- Try to use TTD where we create a test before we implement the item.
-
-- Keep changes to small managable tasks that requires limited effort to achieve, trying to avoid big changes.
-
-- Check that tests pass after changes
-
-## Architecture / Design of the Rust App
-
-- The dioxus Gui is grouped under src/gui and used Dioxus Signals to receive events/changes from the backend
-- The usb connection to the mobile phone is under src/adb using rust crate implementation of adb
-- src/game_automation has the backend receiving messages from the frontend through mpsc::Receiver channel
-
-### Timeout Flag
-
-For testing automation timing without manual intervention:
-If you need to run the app with a timeout, dont use `timout x cargo run ...` rather use the timeout built into the app `cargo run -- --timeout=25`
-
-### Running Tests
-
-```bash
-# Unit tests
-cargo test --lib
-
-# Integration test with timeout
-cargo run --release -- --timeout=25 2>&1 | grep -E "claim_1d_tap|Loop alive"
+```
+android-adb-run/src/
+  adb/           USB ADB layer — AdbBackend (UsbAdb), AdbClient trait, UsbCommand queue
+  game_automation/ FSM event loop — GameAutomation, TimedEvent scheduler, match_image/
+  gui/           Dioxus desktop GUI — AppContext, Signal bundles, components/
+  template_matching/ Low-level template matching via imageproc (normalized cross-correlation)
+  args.rs        CLI arg parsing (Mode::Gui | Mode::Screenshot, --debug, --timeout=N)
 ```
 
-### Test Coverage
+**Key data-flow:**
+- All USB operations are serialized through a single `mpsc::Sender<UsbCommand>` inside `UsbAdb` to prevent concurrent USB access. See [android-adb-run/src/adb/types.rs](android-adb-run/src/adb/types.rs) for the `UsbCommand` enum.
+- GUI → FSM: `mpsc::Sender<AutomationCommand>` (see `AutomationCommand` in [android-adb-run/src/game_automation/types.rs](android-adb-run/src/game_automation/types.rs)).
+- FSM → GUI: Dioxus `Signal<T>` values bundled in `AutomationSignals`; GUI reads via `AppContext` in [android-adb-run/src/gui/dioxus_app.rs](android-adb-run/src/gui/dioxus_app.rs).
+- `TouchActivityMonitor = Arc<RwLock<TouchActivityState>>` — pauses automation while a human is touching the screen.
+- ADB protocol desyncs (CLSE errors) are detected by `AdbError::is_protocol_desync()` and trigger reconnect in the FSM.
+
+## Build and Test
+
+All commands run from `android-adb-run/`:
+
+```bash
+cd android-adb-run
+
+# Build
+cargo build
+
+# Unit tests (no device needed)
+cargo test --lib
+
+# Run with GUI (requires Android device over USB)
+cargo run
+
+# Run with auto-exit timeout (preferred over shell `timeout`)
+cargo run -- --timeout=25
+
+# Release integration test
+cargo run --release -- --timeout=25 2>&1 | grep -E "claim_1d_tap|Loop alive"
+
+# Screenshot mode
+cargo run -- --screenshot
+```
+
+## Project Conventions
+
+- `AdbBackend` is a type alias for `UsbAdb`. Do not add a second concrete implementation without also updating the `AdbClient` trait.
+- `TimedEvent` is the scheduling unit for all timed actions. Use `new_tap_seconds()` / `new_tap_hours()` constructors; tap interval is clamped to `[MIN_TAP_INTERVAL_SECONDS, MAX_TAP_INTERVAL_SECONDS]` (5 s … 6 h).
+- Template images live under `android-adb-run/assets/test_images/`. `TemplateManager` rescans on `RescanTemplates` command.
+- Framebuffer capture uses `framebuffer_bytes()` with fallback to `screencap -p` shell command.
+
+## Timeout Flag
+
+For testing automation timing without manual intervention — do NOT use shell `timeout`:
+```bash
+cargo run -- --timeout=25
+```
+
+## Test Coverage
 
 #### Hardware Access Layer (22 tests)
 
