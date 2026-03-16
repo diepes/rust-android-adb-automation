@@ -32,7 +32,7 @@ Completed migration items (event-channel → direct signal updates) were removed
    - Today: `type DeviceInfoTuple = (String, Option<u32>, u32, u32)` in `src/gui/hooks/types.rs`.
    - Replace with named fields to reduce index-order mistakes and improve readability.
 
-5. [ ] Remove legacy signal type aliases after migration completion
+5. [x] Remove legacy signal type aliases after migration completion
    - `src/gui/hooks/types.rs` still exposes backward-compatibility aliases.
    - Remove aliases not used by current code paths and keep only grouped signal structs.
 

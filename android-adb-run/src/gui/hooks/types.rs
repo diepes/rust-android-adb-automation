@@ -61,25 +61,3 @@ pub struct InteractionSignals {
     pub selection_end: Signal<Option<dioxus::html::geometry::ElementPoint>>,
     pub hover_tap_preview: Signal<Option<(u32, u32)>>,
 }
-
-// ============================================================================
-// LEGACY TYPE ALIASES - Kept for backward compatibility during migration
-// ============================================================================
-
-/// Device info signal (legacy alias)
-pub type DeviceInfoSignal = Signal<Option<DeviceInfo>>;
-
-/// Screenshot data (base64 encoded) - legacy alias
-pub type ScreenshotDataSignal = Signal<Option<String>>;
-
-/// Screenshot bytes - legacy alias
-pub type ScreenshotBytesSignal = Signal<Option<Vec<u8>>>;
-
-/// Timed event list - legacy alias
-pub type TimedEventsSignal = Signal<Vec<TimedEvent>>;
-
-/// Timed countdown - legacy alias
-pub type TimedCountdownSignal = Signal<Option<(String, u64)>>;
-
-/// Touch timeout remaining - legacy alias
-pub type TouchTimeoutSignal = Signal<Option<u64>>;
