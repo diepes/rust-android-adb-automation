@@ -61,12 +61,12 @@ pub fn use_device_loop(
             match AdbBackend::new_with_device(&device_name).await {
                 Ok(client) => {
                     let (sx, sy) = client.screen_dimensions();
-                    device.info.set(Some((
-                        client.device_name().to_string(),
-                        client.transport_id(),
-                        sx,
-                        sy,
-                    )));
+                    device.info.set(Some(DeviceInfo {
+                        name: client.device_name().to_string(),
+                        transport_id: client.transport_id(),
+                        screen_x: sx,
+                        screen_y: sy,
+                    }));
                     device.status.set("✅ Connected".to_string());
                     force_update.with_mut(|v| *v = v.wrapping_add(1));
 
@@ -415,7 +415,10 @@ fn match_patches_blocking_with_progress(
 
     if !patch_dir.exists() {
         log::debug!("Patch directory not found: {:?}", patch_dir);
-        let _ = tx.blocking_send((format!("[#{}] ⚠️ Patch directory not found", screenshot_counter), false));
+        let _ = tx.blocking_send((
+            format!("[#{}] ⚠️ Patch directory not found", screenshot_counter),
+            false,
+        ));
         return None;
     }
 
@@ -423,7 +426,10 @@ fn match_patches_blocking_with_progress(
     let mut patch_count = 0;
 
     log::debug!("🔍 Starting patch matching");
-    let send_result = tx.blocking_send((format!("[#{}] 🔍 Scanning patches...", screenshot_counter), false));
+    let send_result = tx.blocking_send((
+        format!("[#{}] 🔍 Scanning patches...", screenshot_counter),
+        false,
+    ));
     log::debug!("📤 Sent 'Scanning patches' message: {:?}", send_result);
 
     match std::fs::read_dir(patch_dir) {
@@ -474,20 +480,29 @@ fn match_patches_blocking_with_progress(
 
             // Send consolidated message after all patches are loaded
             if patch_count > 0 {
-                let msg = format!("[#{}] 📦 Loaded {} patches to match...", screenshot_counter, patch_count);
+                let msg = format!(
+                    "[#{}] 📦 Loaded {} patches to match...",
+                    screenshot_counter, patch_count
+                );
                 let _ = tx.blocking_send((msg, false));
             }
         }
         Err(_) => {
             log::error!("Failed to read patch directory");
-            let _ = tx.blocking_send((format!("[#{}] ⚠️ Failed to load patches", screenshot_counter), false));
+            let _ = tx.blocking_send((
+                format!("[#{}] ⚠️ Failed to load patches", screenshot_counter),
+                false,
+            ));
             return None;
         }
     }
 
     if patch_count == 0 {
         log::debug!("⚠️ No patches loaded");
-        let _ = tx.blocking_send((format!("[#{}] ⚠️ No patches found", screenshot_counter), false));
+        let _ = tx.blocking_send((
+            format!("[#{}] ⚠️ No patches found", screenshot_counter),
+            false,
+        ));
         return None;
     }
 
@@ -495,7 +510,13 @@ fn match_patches_blocking_with_progress(
         "📊 Loaded {} patches, starting correlation matching",
         patch_count
     );
-    if let Err(e) = tx.blocking_send((format!("[#{}] 🔎 Matching {} patches...", screenshot_counter, patch_count), false)) {
+    if let Err(e) = tx.blocking_send((
+        format!(
+            "[#{}] 🔎 Matching {} patches...",
+            screenshot_counter, patch_count
+        ),
+        false,
+    )) {
         log::error!("❌ Failed to send 'Matching patches' message: {}", e);
     }
 
@@ -519,7 +540,10 @@ fn match_patches_blocking_with_progress(
 
         // Send message showing which patch we're checking
         let progress_pct = ((idx + 1) as f32 / matcher.patches().len() as f32 * 100.0) as u32;
-        let msg = format!("[#{}] 🔎 Checking {}... ({}%)", screenshot_counter, patch_name, progress_pct);
+        let msg = format!(
+            "[#{}] 🔎 Checking {}... ({}%)",
+            screenshot_counter, patch_name, progress_pct
+        );
         if let Err(e) = tx.blocking_send((msg.clone(), false)) {
             log::error!("❌ Failed to send patch check message: {}", e);
         } else {
@@ -637,14 +661,22 @@ fn match_patches_blocking_with_progress(
         Some((name, correlation)) => {
             log::debug!("✅ Best match: {} ({:.1}%)", name, correlation * 100.0);
             let accuracy_pct = (correlation * 100.0) as u32;
-            if let Err(e) = tx.blocking_send((format!("[#{}] 🎯 BEST MATCH: {} ({}%)", screenshot_counter, name, accuracy_pct), true))
-            {
+            if let Err(e) = tx.blocking_send((
+                format!(
+                    "[#{}] 🎯 BEST MATCH: {} ({}%)",
+                    screenshot_counter, name, accuracy_pct
+                ),
+                true,
+            )) {
                 log::error!("❌ Failed to send final match message: {}", e);
             }
         }
         None => {
             log::debug!("❌ No matches found");
-            if let Err(e) = tx.blocking_send((format!("[#{}] ⚠️ No matches found in any patch", screenshot_counter), true)) {
+            if let Err(e) = tx.blocking_send((
+                format!("[#{}] ⚠️ No matches found in any patch", screenshot_counter),
+                true,
+            )) {
                 log::error!("❌ Failed to send no-match message: {}", e);
             }
         }

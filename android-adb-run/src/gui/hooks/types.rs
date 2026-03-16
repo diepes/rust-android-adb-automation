@@ -1,13 +1,11 @@
 use crate::adb::AdbBackend;
 use crate::game_automation::AutomationCommand;
 use crate::game_automation::GameState;
+pub use crate::game_automation::types::DeviceInfo;
 use crate::game_automation::types::TimedEvent;
 use dioxus::prelude::Signal;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-
-/// Device info tuple: (device_name, transport_id, screen_width, screen_height)
-pub type DeviceInfoTuple = (String, Option<u32>, u32, u32);
 
 /// Shared ADB client backend
 pub type SharedAdbClient = Signal<Option<Arc<Mutex<AdbBackend>>>>;
@@ -34,9 +32,9 @@ pub struct ScreenshotSignals {
 /// Device connection signals grouped together
 #[derive(Clone, Copy)]
 pub struct DeviceSignals {
-    pub info: Signal<Option<DeviceInfoTuple>>, // Device info tuple
-    pub status: Signal<String>,                // Connection status
-    pub coords: Signal<Option<(u32, u32)>>,    // Current device coordinates
+    pub info: Signal<Option<DeviceInfo>>,   // Device metadata
+    pub status: Signal<String>,             // Connection status
+    pub coords: Signal<Option<(u32, u32)>>, // Current device coordinates
 }
 
 /// Automation state signals grouped together
@@ -69,7 +67,7 @@ pub struct InteractionSignals {
 // ============================================================================
 
 /// Device info signal (legacy alias)
-pub type DeviceInfoSignal = Signal<Option<DeviceInfoTuple>>;
+pub type DeviceInfoSignal = Signal<Option<DeviceInfo>>;
 
 /// Screenshot data (base64 encoded) - legacy alias
 pub type ScreenshotDataSignal = Signal<Option<String>>;

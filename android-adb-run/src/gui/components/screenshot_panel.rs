@@ -112,8 +112,8 @@ pub fn screenshot_panel() -> Element {
         let preview_opt = *hover_tap_preview.read();
         let device_opt = device_info.read().clone();
         match (preview_opt, device_opt) {
-            (Some((px, py)), Some((_, _, sx, sy))) if sx > 0 && sy > 0 => {
-                let (disp_x, disp_y) = device_to_display(px, py, sx, sy);
+            (Some((px, py)), Some(info)) if info.screen_x > 0 && info.screen_y > 0 => {
+                let (disp_x, disp_y) = device_to_display(px, py, info.screen_x, info.screen_y);
                 Some((disp_x, disp_y))
             }
             _ => None,
@@ -143,8 +143,8 @@ pub fn screenshot_panel() -> Element {
                             onmousemove: move |evt| {
                                 let r = evt.element_coordinates();
                                 mouse_coords.set(Some((r.x as i32, r.y as i32)));
-                                if let Some((_, _, sx, sy)) = device_info.read().as_ref() {
-                                    let (cx, cy) = calculate_device_coords(r, *sx, *sy);
+                                if let Some(info) = device_info.read().as_ref() {
+                                    let (cx, cy) = calculate_device_coords(r, info.screen_x, info.screen_y);
                                     device_coords.set(Some((cx, cy)));
                                 }
                                 if *select_box.read() && selection_start.read().is_some() { let adj = ElementPoint { x: r.x - CURSOR_OFFSET, y: r.y - CURSOR_OFFSET, ..r }; selection_end.set(Some(adj)); }
@@ -156,20 +156,20 @@ pub fn screenshot_panel() -> Element {
                             onmousedown: move |evt| {
                                 if *select_box.read() {
                                     let r = evt.element_coordinates(); let adj = ElementPoint { x: r.x - CURSOR_OFFSET, y: r.y - CURSOR_OFFSET, ..r }; selection_start.set(Some(adj)); selection_end.set(None);
-                                } else if let Some((_, _, sx, sy)) = device_info.read().as_ref() {
-                                    let r = evt.element_coordinates(); let (sx0, sy0) = calculate_device_coords(r, *sx, *sy);
+                                } else if let Some(info) = device_info.read().as_ref() {
+                                    let r = evt.element_coordinates(); let (sx0, sy0) = calculate_device_coords(r, info.screen_x, info.screen_y);
                                     is_swiping.set(true); swipe_start.set(Some((sx0, sy0))); swipe_end.set(None);
                                 }
                             },
                             onmouseup: move |evt| {
                                 if *select_box.read() {
                                     if let (Some(start), Some(end)) = (*selection_start.read(), *selection_end.read())
-                                        && let Some((_, _, screen_x, screen_y)) = device_info.read().as_ref() {
+                                        && let Some(info) = device_info.read().as_ref() {
                                         let (left, top, width, height) = adjust_overlay(start, end);
                                         let tl = ElementPoint { x: left, y: top, ..start };
                                         let br = ElementPoint { x: left + width, y: top + height, ..start };
-                                        let (d_tl_x, d_tl_y) = calculate_device_coords(tl, *screen_x, *screen_y);
-                                        let (d_br_x, d_br_y) = calculate_device_coords(br, *screen_x, *screen_y);
+                                        let (d_tl_x, d_tl_y) = calculate_device_coords(tl, info.screen_x, info.screen_y);
+                                        let (d_br_x, d_br_y) = calculate_device_coords(br, info.screen_x, info.screen_y);
                                         screenshot_status.set(format!("🟦 Selected: ({},{}) to ({},{}) size {}x{}", d_tl_x, d_tl_y, d_br_x, d_br_y, (d_br_x - d_tl_x).max(1), (d_br_y - d_tl_y).max(1)));
                                     }
                                     return;
@@ -178,8 +178,8 @@ pub fn screenshot_panel() -> Element {
                                 if *is_swiping.read() {
                                     if let Some((sx0, sy0)) = *swipe_start.read() {
                                         let r = evt.element_coordinates();
-                                        if let Some((_, _, sx, sy)) = device_info.read().as_ref() {
-                                            let (ex, ey) = calculate_device_coords(r, *sx, *sy);
+                                        if let Some(info) = device_info.read().as_ref() {
+                                            let (ex, ey) = calculate_device_coords(r, info.screen_x, info.screen_y);
                                             let distance = ((ex as i32 - sx0 as i32).pow(2) as f32 + (ey as i32 - sy0 as i32).pow(2) as f32).sqrt();
                                             let auto = *auto_update_on_touch.read();
                                             let already_loading = *is_loading_screenshot.read();

@@ -4,8 +4,13 @@ use std::time::{Duration, Instant};
 pub const MIN_TAP_INTERVAL_SECONDS: u64 = 5;
 pub const MAX_TAP_INTERVAL_SECONDS: u64 = 6 * 60 * 60; // 6 hours upper bound for GUI adjustments
 
-// Type alias to reduce complexity warnings
-pub type DeviceInfo = (String, Option<u32>, u32, u32);
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeviceInfo {
+    pub name: String,
+    pub transport_id: Option<u32>,
+    pub screen_x: u32,
+    pub screen_y: u32,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameState {

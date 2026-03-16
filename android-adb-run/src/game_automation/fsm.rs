@@ -1459,12 +1459,12 @@ impl GameAutomation {
                 if let Some(client_arc) = &self.adb_client {
                     let client_guard = client_arc.lock().await;
                     let (sx, sy) = client_guard.screen_dimensions();
-                    *self.device_info.write_unchecked() = Some((
-                        client_guard.device_name().to_string(),
-                        client_guard.transport_id(),
-                        sx,
-                        sy,
-                    ));
+                    *self.device_info.write_unchecked() = Some(DeviceInfo {
+                        name: client_guard.device_name().to_string(),
+                        transport_id: client_guard.transport_id(),
+                        screen_x: sx,
+                        screen_y: sy,
+                    });
                 }
                 *self.screenshot_status.write_unchecked() =
                     "✅ Reconnected! Automation ready.".to_string();

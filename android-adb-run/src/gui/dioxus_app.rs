@@ -1,5 +1,6 @@
 use crate::adb::AdbBackend;
 use crate::game_automation::GameState;
+use crate::game_automation::types::DeviceInfo as AutomationDeviceInfo;
 use crate::game_automation::types::TimedEvent;
 use crate::gui::components::{
     actions::Actions,
@@ -104,7 +105,7 @@ fn App() -> Element {
     };
 
     let device = DeviceSignals {
-        info: use_signal(|| None::<(String, Option<u32>, u32, u32)>),
+        info: use_signal(|| None::<AutomationDeviceInfo>),
         status: use_signal(|| "Initializing...".to_string()),
         coords: use_signal(|| None::<(u32, u32)>),
     };
@@ -184,8 +185,8 @@ fn App() -> Element {
                 style: "flex:1; overflow:auto; padding:8px;",
                 div { style: "display:flex; gap:14px; align-items:flex-start;",
                     div { style: "flex:1; min-width:0; display:flex; flex-direction:column; gap:10px;",
-                        if let Some((name, transport_id_opt, screen_x, screen_y)) = device.info.read().clone() {
-                            DeviceInfo { name: name, transport_id: transport_id_opt, screen_x: screen_x, screen_y: screen_y, status_style: status_style.to_string(), status_label: status_label.to_string(), runtime_days: runtime_days_value }
+                        if let Some(device_info) = device.info.read().clone() {
+                            DeviceInfo { name: device_info.name, transport_id: device_info.transport_id, screen_x: device_info.screen_x, screen_y: device_info.screen_y, status_style: status_style.to_string(), status_label: status_label.to_string(), runtime_days: runtime_days_value }
                             Actions {}
                         } else {
                             div { style: "background:rgba(255,255,255,0.1); backdrop-filter:blur(10px); padding:20px; border-radius:15px; margin-bottom:20px; border:1px solid rgba(255,255,255,0.2);",

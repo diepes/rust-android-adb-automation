@@ -1,145 +1,61 @@
-# Architecture Refactor: Hybrid Signal/Channel Design
+# Architecture Refactor TODO (Current)
 
-## Status: ✅ COMPLETE
+This file tracks **remaining architecture work** only.
+Completed migration items (event-channel → direct signal updates) were removed.
 
-The refactor from event channels to direct signal updates has been successfully completed. The codebase now uses Dioxus signals for all backend-to-GUI communication.
+## Snapshot (2026-03)
 
-## What Was Accomplished
+- Signal/channel hybrid is in place and working.
+- Main remaining debt is **module size**, **separation of concerns**, and **legacy compatibility scaffolding**.
+- Refactor priorities below are based on current code under `src/`.
 
-### ✅ Phase 1: Preparation
-- ✅ Documented original architecture
-- ✅ Created implementation plan
-- ✅ Identified all signal requirements
+## Priority A (do next)
 
-### ✅ Phase 2: Modified GameAutomation struct
-- ✅ Added Signal fields to GameAutomation struct (11 signals)
-- ✅ Removed event_tx: mpsc::Sender<AutomationEvent> field
-- ✅ Updated GameAutomation::new() signature to accept signals
+1. [ ] Split `src/game_automation/fsm.rs` into focused modules
+   - Problem: file is very large and mixes command handling, scheduling, reconnect logic, and screenshot/matching flow.
+   - Create `fsm/commands.rs`, `fsm/scheduler.rs`, `fsm/reconnect.rs`, `fsm/run_loop.rs` (or equivalent).
+   - Keep `GameAutomation` as orchestrator and preserve public API.
 
-### ✅ Phase 3: Updated fsm.rs
-- ✅ Replaced ALL event_tx.send() calls with direct signal.set() calls (26 replacements)
-- ✅ Replaced TemplatesUpdated (removed - not needed)
-- ✅ Replaced StateChanged with automation_state.set()
-- ✅ Replaced Error events with screenshot_status.set()
-- ✅ Replaced ScreenshotTaken with screenshot_bytes + screenshot_data signals
-- ✅ Replaced DeviceDisconnected with device_info + status signals
-- ✅ Replaced ManualActivityDetected with is_paused_by_touch + touch_timeout_remaining
-- ✅ Replaced TimedEventsListed with timed_events_list
-- ✅ Replaced TimedTapCountdown with timed_tap_countdown
-- ✅ Replaced DeviceReconnected with device_info + status signals
-- ✅ Removed event channel imports
+2. [ ] Split `src/gui/hooks/device_loop.rs` by responsibility
+   - Problem: discovery, reconnect polling, screenshot pipeline, and template matching all live in one hook.
+   - Extract: `device_discovery`, `connection_monitor`, `initial_screenshot`, `template_matching_pipeline`.
+   - Keep `use_device_loop(...)` as stable entry point.
 
-### ✅ Phase 4: Updated dioxus_app.rs
-- ✅ Removed create_automation_channels() event channel creation
-- ✅ Removed event_rx receiver
-- ✅ Removed event receiver spawn task (previously ~70 lines)
-- ✅ Pass signals directly to GameAutomation::new()
-- ✅ Simplified automation initialization
+3. [ ] Move hardcoded timed tap definitions to config
+   - Current defaults are embedded in `GameAutomation::new()`.
+   - Introduce a loadable config source (file/env) with safe fallback defaults.
+   - Ensure interval clamping rules remain enforced.
 
-### ✅ Phase 5: Updated game_automation module
-- ✅ Removed channels.rs file (no longer needed)
-- ✅ Updated mod.rs exports
-- ✅ Removed AutomationEvent enum from types.rs
+## Priority B (high value cleanup)
 
-### ✅ Phase 6: Testing & Cleanup
-- ✅ Test basic connection and screenshot
-- ✅ Test automation start/stop
-- ✅ Test timed events
-- ✅ Test touch monitoring pause/resume
-- ✅ Test device disconnect/reconnect
-- ✅ All 45 unit tests pass
-- ✅ Removed unused imports
-- ✅ Code compiles without warnings
+4. [x] Replace tuple device metadata with a struct in GUI layer
+   - Today: `type DeviceInfoTuple = (String, Option<u32>, u32, u32)` in `src/gui/hooks/types.rs`.
+   - Replace with named fields to reduce index-order mistakes and improve readability.
 
-## Final Architecture
+5. [ ] Remove legacy signal type aliases after migration completion
+   - `src/gui/hooks/types.rs` still exposes backward-compatibility aliases.
+   - Remove aliases not used by current code paths and keep only grouped signal structs.
 
-### Signal Flow (Backend → GUI)
-```
-GameAutomation struct
-├─ screenshot_data: Signal<Option<String>>          [Base64 encoded screenshots]
-├─ screenshot_bytes: Signal<Option<Vec<u8>>>        [Raw screenshot bytes]
-├─ screenshot_status: Signal<String>                [Status messages]
-├─ automation_state: Signal<GameState>              [Running/Paused/Idle]
-├─ is_paused_by_touch: Signal<bool>                 [Touch activity flag]
-├─ touch_timeout_remaining: Signal<Option<u64>>     [Touch pause countdown]
-├─ timed_tap_countdown: Signal<Option<(String, u64)>> [Tap countdown]
-├─ timed_events_list: Signal<Vec<TimedEvent>>       [All timed events]
-├─ device_info: Signal<Option<DeviceInfo>>          [Device name, ID, screen size]
-├─ status: Signal<String>                           [Device connection status]
-└─ screenshot_counter: Signal<u64>                  [Screenshot count]
-```
+6. [ ] Reconcile build metadata usage in GUI header
+   - `src/gui/dioxus_app.rs` uses a placeholder for build year.
+   - Consume build-script env vars (`APP_BUILD_YEAR`, `APP_VERSION_DISPLAY`) consistently.
 
-### Command Flow (GUI → Backend)
-```
-AutomationCommand enum (mpsc channel)
-├─ Start
-├─ Stop
-├─ Pause
-├─ Resume
-├─ ClearTouchActivity
-├─ RegisterTouchActivity
-├─ TakeScreenshot
-├─ TestImageRecognition
-├─ RescanTemplates
-├─ AddTimedEvent
-├─ RemoveTimedEvent
-├─ EnableTimedEvent
-├─ DisableTimedEvent
-├─ AdjustTimedEventInterval
-├─ TriggerTimedEvent
-├─ ListTimedEvents
-└─ Shutdown
-```
+7. [ ] Reduce `#[allow(dead_code)]` footprint in ADB/GUI paths
+   - Audit unused helpers in `src/adb/usb_impl.rs` and `src/gui/hooks/device_loop.rs`.
+   - Either remove dead code or move to explicitly feature-gated modules.
 
-## Benefits Achieved
+## Priority C (after A/B)
 
-✅ **Simpler code flow** - Direct signal updates instead of event serialization
-✅ **Less overhead** - No event receiver task or channel communication
-✅ **Fewer async tasks** - Removed ~70 lines of event receiver task code
-✅ **Better Dioxus integration** - Proper signal usage throughout
-✅ **Easier to debug** - Direct signal flow visible in code
-✅ **Maintained separation** - Command channel still handles GUI → Backend communication
-✅ **Cleaner codebase** - Removed channels.rs and event enum
-✅ **Better performance** - No unnecessary signal cloning or event overhead
+8. [ ] Isolate template matching execution service
+   - Create a dedicated service boundary between GUI hooks and matching engine.
+   - Goal: clearer ownership for decode/match/result-history logic and easier testing.
 
-## Files Modified
-1. ✅ `src/game_automation/fsm.rs` - Updated all signal updates
-2. ✅ `src/game_automation/types.rs` - Removed AutomationEvent, kept AutomationCommand
-3. ✅ `src/game_automation/channels.rs` - **DELETED** (no longer needed)
-4. ✅ `src/gui/dioxus_app.rs` - Removed event receiver, pass signals directly
-5. ✅ `src/game_automation/mod.rs` - Updated exports
+9. [ ] Add architecture-level tests around boundaries
+   - Focus on: reconnect behavior, timed event scheduler behavior, and device loop phase transitions.
+   - Keep tests device-independent where possible.
 
-## Remaining Opportunities (Future Enhancements)
+## Done / removed from backlog
 
-These are optional improvements, not required for the refactor to be considered complete:
-
-1. **Error Handling Improvements**
-   - [ ] Create custom error types for different failure scenarios
-   - [ ] Use dedicated error display component in GUI
-   - [ ] Add error history/log view
-
-2. **Performance Optimizations**
-   - [ ] Memoize signal updates to reduce unnecessary re-renders
-   - [ ] Profile GUI rendering performance
-   - [ ] Optimize screenshot update frequency
-
-3. **Code Organization**
-   - [ ] Extract device loop into separate module (device_manager)
-   - [ ] Extract FSM timed event logic into separate module
-   - [ ] Create separate module for error handling utilities
-
-4. **Testing Enhancements**
-   - [ ] Add integration tests for FSM state transitions
-   - [ ] Add GUI component tests
-   - [ ] Test signal update patterns
-
-5. **Documentation**
-   - [ ] Add architecture diagrams
-   - [ ] Document signal flow patterns
-   - [ ] Add contributing guidelines for signal updates
-
-## Conclusion
-
-The hybrid signal/channel architecture refactor is **complete and production-ready**. The codebase is now cleaner, more maintainable, and better integrated with Dioxus's signal system.
-
-All original functionality is preserved while significantly improving code quality and reducing complexity.
+- Event channel removal and direct signal updates.
+- `channels.rs` removal and `AutomationEvent` cleanup.
+- Basic signal flow wiring between GUI hooks and `GameAutomation`.
