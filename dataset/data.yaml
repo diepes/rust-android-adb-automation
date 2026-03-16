@@ -1,0 +1,17 @@
+# data.yaml
+path: /path/to/dataset          # absolute or relative path to dataset root
+train: images/train
+val: images/val
+test: images/test               # optional
+
+# Number of classes
+nc: 5                           # e.g., 5 classes: Attack, Tournament, Start, HealthBar, etc.
+
+# Class names (must match order of class_id in labels)
+names:
+  0: AttackButton
+  1: StartButton
+  2: TournamentScreen
+  3: HealthBar
+  4: EnemyIcon
+  
