@@ -17,8 +17,8 @@ use dioxus::prelude::*;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::Mutex;
 
-const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
-const BUILD_YEAR: &str = env!("CARGO_PKG_VERSION"); // Placeholder, consider a build script for this
+const APP_VERSION: &str = env!("APP_VERSION_DISPLAY");
+const BUILD_YEAR: &str = env!("APP_BUILD_YEAR");
 
 // Global state to store the debug mode choice
 static DEBUG_MODE: OnceLock<bool> = OnceLock::new();

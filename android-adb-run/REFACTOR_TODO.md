@@ -36,7 +36,7 @@ Completed migration items (event-channel → direct signal updates) were removed
    - `src/gui/hooks/types.rs` still exposes backward-compatibility aliases.
    - Remove aliases not used by current code paths and keep only grouped signal structs.
 
-6. [ ] Reconcile build metadata usage in GUI header
+6. [x] Reconcile build metadata usage in GUI header
    - `src/gui/dioxus_app.rs` uses a placeholder for build year.
    - Consume build-script env vars (`APP_BUILD_YEAR`, `APP_VERSION_DISPLAY`) consistently.
 
