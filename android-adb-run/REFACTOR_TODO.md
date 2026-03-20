@@ -11,7 +11,7 @@ Completed migration items (event-channel → direct signal updates) were removed
 
 ## Priority A (do next)
 
-1. [ ] Split `src/game_automation/fsm.rs` into focused modules
+1. [x] Split `src/game_automation/fsm.rs` into focused modules
    - Problem: file is very large and mixes command handling, scheduling, reconnect logic, and screenshot/matching flow.
    - Create `fsm/commands.rs`, `fsm/scheduler.rs`, `fsm/reconnect.rs`, `fsm/run_loop.rs` (or equivalent).
    - Keep `GameAutomation` as orchestrator and preserve public API.
