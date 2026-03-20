@@ -1,4 +1,5 @@
 // Finite State Machine implementation for game automation - Event Driven Architecture
+use super::config::load_or_create_timed_events;
 use super::match_image::{GameStateDetector, MatchConfig, create_default_config};
 use super::types::{
     AutomationCommand, DeviceInfo, GameState, MAX_TAP_INTERVAL_SECONDS, MIN_TAP_INTERVAL_SECONDS,
@@ -111,44 +112,7 @@ impl GameAutomation {
         let config = create_default_config();
         let game_detector = GameStateDetector::new(1080, 2400, config); // Default dimensions
 
-        let mut timed_events = HashMap::new();
-
-        // Create core system events
-        timed_events.insert(
-            "screenshot".to_string(),
-            TimedEvent::new_screenshot_minutes(10), // 10 minutes between screenshots
-        );
-        timed_events.insert(
-            "countdown_update".to_string(),
-            TimedEvent::new_countdown_update(1), // Every 1 second for countdown updates
-        );
-
-        // Define timed taps with flexible intervals
-        // Format: (id, x, y, interval_type, interval_value)
-        let tap_definitions = vec![
-            ("claim_5d_tap", 120, 1250, "minutes", 1), // Every 2 minutes
-            ("restart_tap", 110, 1600, "minutes", 2),  // Every 9 minutes
-            ("claim_1d_tap", 350, 628, "seconds", 15), // Every 15sec
-                                                       // Add more taps here as needed with seconds or minutes
-        ];
-
-        // Create and insert all timed tap events with flexible intervals
-        for (id, x, y, interval_type, interval_value) in tap_definitions {
-            let event = match interval_type {
-                "seconds" => TimedEvent::new_tap_seconds(id.to_string(), x, y, interval_value),
-                "minutes" => TimedEvent::new_tap_minutes(id.to_string(), x, y, interval_value),
-                _ => TimedEvent::new_tap_minutes(id.to_string(), x, y, interval_value), // Default to minutes
-            };
-            timed_events.insert(id.to_string(), event);
-        }
-
-        // Example: Create a custom event with precise Duration (e.g., 2.5 minutes)
-        // let custom_event = TimedEvent::new(
-        //     "custom_tap".to_string(),
-        //     TimedEventType::Tap { x: 500, y: 500 },
-        //     Duration::from_secs(150), // 2.5 minutes = 150 seconds
-        // );
-        // timed_events.insert("custom_tap".to_string(), custom_event);
+        let timed_events = load_or_create_timed_events(debug_enabled);
 
         if debug_enabled {
             println!("🕒 Initialized {} timed events:", timed_events.len());

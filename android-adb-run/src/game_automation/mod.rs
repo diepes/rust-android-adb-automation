@@ -2,6 +2,7 @@
 // This module provides a finite state machine for automating game interactions
 // with Android devices via ADB.
 
+pub mod config;
 pub mod fsm;
 pub mod match_image;
 pub mod types;

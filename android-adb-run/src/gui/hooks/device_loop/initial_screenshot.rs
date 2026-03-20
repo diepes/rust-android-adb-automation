@@ -2,7 +2,7 @@ use super::template_matching_pipeline::{decode_screenshot_to_rgb, start_template
 use crate::adb::AdbClient;
 use crate::gui::hooks::types::ScreenshotSignals;
 use crate::gui::util::base64_encode;
-use dioxus::prelude::*;
+use dioxus::prelude::WritableExt;
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 

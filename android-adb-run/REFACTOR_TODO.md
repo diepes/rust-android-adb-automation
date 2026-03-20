@@ -21,7 +21,7 @@ Completed migration items (event-channel → direct signal updates) were removed
    - Extract: `device_discovery`, `connection_monitor`, `initial_screenshot`, `template_matching_pipeline`.
    - Keep `use_device_loop(...)` as stable entry point.
 
-3. [ ] Move hardcoded timed tap definitions to config
+3. [x] Move hardcoded timed tap definitions to config
    - Current defaults are embedded in `GameAutomation::new()`.
    - Introduce a loadable config source (file/env) with safe fallback defaults.
    - Ensure interval clamping rules remain enforced.
