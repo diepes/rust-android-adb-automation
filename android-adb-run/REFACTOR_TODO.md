@@ -16,7 +16,7 @@ Completed migration items (event-channel → direct signal updates) were removed
    - Create `fsm/commands.rs`, `fsm/scheduler.rs`, `fsm/reconnect.rs`, `fsm/run_loop.rs` (or equivalent).
    - Keep `GameAutomation` as orchestrator and preserve public API.
 
-2. [ ] Split `src/gui/hooks/device_loop.rs` by responsibility
+2. [x] Split `src/gui/hooks/device_loop.rs` by responsibility
    - Problem: discovery, reconnect polling, screenshot pipeline, and template matching all live in one hook.
    - Extract: `device_discovery`, `connection_monitor`, `initial_screenshot`, `template_matching_pipeline`.
    - Keep `use_device_loop(...)` as stable entry point.
