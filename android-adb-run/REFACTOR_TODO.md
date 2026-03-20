@@ -40,7 +40,7 @@ Completed migration items (event-channel → direct signal updates) were removed
    - `src/gui/dioxus_app.rs` uses a placeholder for build year.
    - Consume build-script env vars (`APP_BUILD_YEAR`, `APP_VERSION_DISPLAY`) consistently.
 
-7. [ ] Reduce `#[allow(dead_code)]` footprint in ADB/GUI paths
+7. [x] Reduce `#[allow(dead_code)]` footprint in ADB/GUI paths
    - Audit unused helpers in `src/adb/usb_impl.rs` and `src/gui/hooks/device_loop.rs`.
    - Either remove dead code or move to explicitly feature-gated modules.
 

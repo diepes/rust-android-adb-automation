@@ -54,164 +54,21 @@ impl UsbAdb {
             })?
     }
 
-    #[allow(dead_code)]
-    async fn capture_screen_bytes_internal(&self) -> AdbResult<Vec<u8>> {
-        let mut dev = self.usb_device.lock().await;
-
-        // Try the faster framebuffer_bytes() method first
-        match dev.framebuffer_bytes() {
-            Ok(framebuffer_data) => {
-                drop(dev); // Release the lock early
-                match self.framebuffer_to_png(framebuffer_data).await {
-                    Ok(png_data) => return Ok(png_data),
-                    Err(e) => {
-                        log::warn!(
-                            "Framebuffer conversion failed, falling back to screencap: {}",
-                            e
-                        );
-                        // Continue to fallback method below
-                    }
-                }
-            }
-            Err(e) => {
-                log::warn!(
-                    "Framebuffer capture failed, falling back to screencap: {}",
-                    e
-                );
-                // Continue to fallback method below
-            }
-        }
-
-        // Fallback to shell screencap method
-        let mut dev = self.usb_device.lock().await;
-        let mut out: Vec<u8> = Vec::new();
-        dev.shell_command(&["screencap", "-p"], &mut out)
-            .map_err(|e| AdbError::ShellCommandFailed {
-                command: "screencap -p".into(),
-                source: e,
-            })?;
-        Ok(out)
-    }
-
-    #[allow(dead_code)]
-    async fn framebuffer_to_png(&self, framebuffer_data: Vec<u8>) -> AdbResult<Vec<u8>> {
-        use image::{ImageBuffer, codecs::png::PngEncoder};
-        use std::io::Cursor;
-
-        let pixel_count = (self.screen_x * self.screen_y) as usize;
-        let data_len = framebuffer_data.len();
-
-        if data_len < pixel_count {
-            if framebuffer_data.len() >= 8 && &framebuffer_data[0..8] == b"\x89PNG\r\n\x1a\n" {
-                return Ok(framebuffer_data);
-            }
-
-            if framebuffer_data.len() >= 2
-                && framebuffer_data[0] == 0xFF
-                && framebuffer_data[1] == 0xD8
-            {
-                return self.jpeg_to_png(framebuffer_data).await;
-            }
-
-            return Err(AdbError::FramebufferToPngFailed {
-                description: format!(
-                    "Data appears to be compressed or in unsupported format: {} bytes for {} pixels",
-                    data_len, pixel_count
-                ),
-            });
-        }
-
-        if data_len < pixel_count * 2 {
-            return Err(AdbError::FramebufferToPngFailed {
-                description: format!(
-                    "Data too small for raw format: {} bytes for {} pixels (minimum {} for RGB565)",
-                    data_len,
-                    pixel_count,
-                    pixel_count * 2
-                ),
-            });
-        }
-
-        let (header_size, _actual_data_len, bytes_per_pixel) = {
-            let mut best_match = (0, 0, 0);
-            for header in [0, 12, 16, 20, 24] {
-                if header >= data_len {
-                    break;
-                }
-                let test_data_len = data_len - header;
-                let bpp = if test_data_len >= pixel_count * 4 {
-                    4
-                } else {
-                    0
-                };
-                if bpp > 0 {
-                    best_match = (header, test_data_len, bpp);
-                    break;
-                }
-            }
-            best_match
-        };
-
-        let actual_data = &framebuffer_data[header_size..];
-
-        let png_data = match bytes_per_pixel {
-            4 => {
-                let img = ImageBuffer::<image::Rgba<u8>, _>::from_raw(
-                    self.screen_x,
-                    self.screen_y,
-                    actual_data.to_vec(),
-                )
-                .ok_or(AdbError::FramebufferToPngFailed {
-                    description: "Failed to create RGBA image from data".into(),
-                })?;
-                let mut data = Vec::new();
-                img.write_with_encoder(PngEncoder::new(Cursor::new(&mut data)))
-                    .map_err(|e| AdbError::FramebufferToPngFailed {
-                        description: format!("Failed to encode RGBA PNG: {}", e),
-                    })?;
-                data
-            }
-            _ => {
-                return Err(AdbError::FramebufferToPngFailed {
-                    description: format!(
-                        "Unsupported framebuffer format: {} bytes per pixel",
-                        bytes_per_pixel
-                    ),
-                });
-            }
-        };
-
-        Ok(png_data)
-    }
-
-    #[allow(dead_code)]
-    async fn jpeg_to_png(&self, jpeg_data: Vec<u8>) -> AdbResult<Vec<u8>> {
-        use image::{ImageFormat, codecs::png::PngEncoder};
-        use std::io::Cursor;
-
-        let img =
-            image::load_from_memory_with_format(&jpeg_data, ImageFormat::Jpeg).map_err(|e| {
-                AdbError::JpegToPngFailed {
-                    description: format!("Failed to decode JPEG: {}", e),
-                }
-            })?;
-
-        let mut data = Vec::new();
-        img.write_with_encoder(PngEncoder::new(Cursor::new(&mut data)))
-            .map_err(|e| AdbError::JpegToPngFailed {
-                description: format!("Failed to encode JPEG as PNG: {}", e),
-            })?;
-        Ok(data)
-    }
-
     async fn monitor_touch_activity_loop(
         touch_monitor: TouchActivityMonitor,
-        _usb_device: Arc<Mutex<ADBUSBDevice>>,
+        usb_device: Arc<Mutex<ADBUSBDevice>>,
         usb_queue_tx: mpsc::Sender<UsbCommand>,
     ) -> AdbResult<()> {
-        // Note: We don't need usb_device anymore since we use the queue for touch polling
-        // The touch device path is determined once at startup
-        let event_device = "/dev/input/event2".to_string(); // Default, most devices use event2
+        let event_device = match Self::find_touch_event_device(usb_device).await {
+            Ok(device) => device,
+            Err(e) => {
+                log::warn!(
+                    "Falling back to default touch device /dev/input/event2: {}",
+                    e
+                );
+                "/dev/input/event2".to_string()
+            }
+        };
         Self::stream_touch_events_polling(usb_queue_tx, &event_device, touch_monitor).await
     }
 
@@ -282,7 +139,6 @@ impl UsbAdb {
         Ok(())
     }
 
-    #[allow(dead_code)]
     fn is_touch_event_line(line: &str) -> bool {
         line.contains("ABS_MT")
             || line.contains("BTN_TOUCH")
@@ -292,7 +148,6 @@ impl UsbAdb {
             || (line.contains("0003") && (line.contains("0035") || line.contains("0036")))
     }
 
-    #[allow(dead_code)] // May be used in future for dynamic device detection
     async fn find_touch_event_device(usb_device: Arc<Mutex<ADBUSBDevice>>) -> AdbResult<String> {
         let mut out = Vec::new();
         usb_device
@@ -588,9 +443,8 @@ impl AdbClient for UsbAdb {
                                 &mut out,
                             )
                             .map(|_| {
-                                // Touch detected if we got any output
                                 let output = String::from_utf8_lossy(&out);
-                                let has_event = !output.trim().is_empty();
+                                let has_event = output.lines().any(Self::is_touch_event_line);
                                 if has_event {
                                     log::debug!("Touch event detected: {}", output.trim());
                                 }
