@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use time::OffsetDateTime;
 
-pub const TIMED_EVENTS_CONFIG_PATH: &str = "timed_events.toml";
+pub const TIMED_EVENTS_CONFIG_PATH: &str = "conf_timed_events.toml";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TapEventConfig {
@@ -58,6 +59,10 @@ pub fn load_or_create_timed_events(debug_enabled: bool) -> HashMap<String, Timed
     let path = Path::new(TIMED_EVENTS_CONFIG_PATH);
     match load_or_create_config(path) {
         Ok(config) => build_timed_events(config),
+        Err(ConfigLoadError::InvalidConfig(error)) => {
+            eprintln!("❌ Invalid timed events config ({}). Please fix {} and restart.", error, path.display());
+            std::process::exit(1);
+        }
         Err(error) => {
             debug_print!(
                 debug_enabled,
@@ -69,36 +74,59 @@ pub fn load_or_create_timed_events(debug_enabled: bool) -> HashMap<String, Timed
     }
 }
 
-fn load_or_create_config(path: &Path) -> Result<TimedEventsConfig, String> {
+enum ConfigLoadError {
+    InvalidConfig(String),
+    Other(String),
+}
+
+impl std::fmt::Display for ConfigLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidConfig(message) => write!(f, "{}", message),
+            Self::Other(message) => write!(f, "{}", message),
+        }
+    }
+}
+
+fn load_or_create_config(path: &Path) -> Result<TimedEventsConfig, ConfigLoadError> {
     if !path.exists() {
         let default_config = TimedEventsConfig::default();
         let serialized = toml::to_string_pretty(&default_config)
-            .map_err(|e| format!("Failed to serialize default timed events config: {}", e))?;
+            .map_err(|e| ConfigLoadError::Other(format!("Failed to serialize default timed events config: {}", e)))?;
+        let header = format!(
+            "# Default config created {} feel free to edit\n\n",
+            OffsetDateTime::now_utc().date()
+        );
 
         if let Some(parent) = path.parent()
             && !parent.as_os_str().is_empty()
         {
             fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create config directory: {}", e))?;
+                .map_err(|e| ConfigLoadError::Other(format!("Failed to create config directory: {}", e)))?;
         }
 
-        fs::write(path, serialized)
-            .map_err(|e| format!("Failed to write timed events config file: {}", e))?;
+        fs::write(path, format!("{}{}", header, serialized))
+            .map_err(|e| ConfigLoadError::Other(format!("Failed to write timed events config file: {}", e)))?;
 
         println!(
-            "🆕 Created timed events config: {}",
-            path.display()
+            "🆕 Created {} with {} timed events",
+            path.display(),
+            default_config.taps.len()
         );
 
         return Ok(default_config);
     }
 
     let content = fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read timed events config file: {}", e))?;
+        .map_err(|e| ConfigLoadError::Other(format!("Failed to read timed events config file: {}", e)))?;
     let config = toml::from_str::<TimedEventsConfig>(&content)
-        .map_err(|e| format!("Failed to parse timed events config file: {}", e))?;
+        .map_err(|e| ConfigLoadError::InvalidConfig(format!("Failed to parse timed events config file: {}", e)))?;
 
-    println!("📥 Loaded timed events config: {}", path.display());
+    println!(
+        "📥 Loaded {} timed events from {}",
+        config.taps.len(),
+        path.display()
+    );
 
     Ok(config)
 }

@@ -26,3 +26,6 @@ target
 
 # Editor
 .vscode/
+
+# Runtime-generated timed events config
+android-adb-run/conf_timed_events.toml
