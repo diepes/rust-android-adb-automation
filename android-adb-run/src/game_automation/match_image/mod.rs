@@ -7,6 +7,7 @@ pub mod config;
 pub mod detector;
 pub mod match_patch;
 pub mod region;
+pub mod sidecar;
 pub mod template;
 
 #[cfg(test)]
@@ -17,4 +18,5 @@ pub use config::{MatchConfig, create_default_config, create_game_object_config, 
 pub use detector::{DetectionResult, GameStateDetector};
 pub use match_patch::PatchMatcher;
 pub use region::{RegionManager, SearchRegion};
+pub use sidecar::{CropRect, MatchTargetDef, TemplateSidecar};
 pub use template::{Template, TemplateCategory, TemplateManager, TemplateMatch};

@@ -471,108 +471,55 @@ impl GameStateDetector {
         (self.screen_width, self.screen_height)
     }
 
-    /// Load template image and crop it to the region specified in the filename
-    /// For files like "img-[300,1682,50,50].png", this extracts the 50x50 region
-    /// at coordinates (300,1682) from the full screenshot stored in the file
+    /// Load template image and crop it to the region defined in the sidecar MatchTarget.
     fn load_and_crop_template(
         &self,
         template: &Template,
     ) -> Result<ImageBuffer<Luma<u8>, Vec<u8>>, String> {
-        // Load the full template image (which may be a full screenshot)
         let template_image = image::open(&template.path)
             .map_err(|e| format!("Failed to load template {}: {e}", template.path))?;
 
-        // Check if filename contains region coordinates [x,y,width,height]
-        if let Some(region_coords) = self.extract_template_region_from_filename(&template.name) {
-            if self.config.debug_enabled {
-                println!(
-                    "📐 Cropping template '{}' from full image ({}x{}) to region: [{},{},{},{}]",
-                    template.name,
-                    template_image.width(),
-                    template_image.height(),
-                    region_coords.0,
-                    region_coords.1,
-                    region_coords.2,
-                    region_coords.3
-                );
-            }
+        let (crop_x, crop_y, crop_w, crop_h) =
+            (template.crop_x, template.crop_y, template.width, template.height);
 
-            // Validate crop region bounds
-            let (crop_x, crop_y, crop_w, crop_h) = region_coords;
-            if crop_x + crop_w > template_image.width() || crop_y + crop_h > template_image.height()
-            {
-                return Err(format!(
-                    "Template crop region [{},{},{},{}] exceeds image bounds ({}x{})",
-                    crop_x,
-                    crop_y,
-                    crop_w,
-                    crop_h,
-                    template_image.width(),
-                    template_image.height()
-                ));
-            }
-
-            // Crop the template to the specified region
-            let cropped =
-                image::imageops::crop_imm(&template_image, crop_x, crop_y, crop_w, crop_h);
-            let cropped_dynamic = image::DynamicImage::ImageRgba8(cropped.to_image());
-            let cropped_gray = cropped_dynamic.to_luma8();
-
-            if self.config.debug_enabled {
-                println!(
-                    "✂️ Template '{}' cropped to {}x{} (was {}x{})",
-                    template.name,
-                    cropped_gray.width(),
-                    cropped_gray.height(),
-                    template_image.width(),
-                    template_image.height()
-                );
-            }
-
-            Ok(cropped_gray)
-        } else {
-            // No region specified in filename, use full image
-            let template_gray = template_image.to_luma8();
-
-            // Still warn if template is very large
-            if (template_gray.width() > 500 || template_gray.height() > 500)
-                && self.config.debug_enabled
-            {
-                println!(
-                    "⚠️ Large template detected: {}x{} - this may be slow!",
-                    template_gray.width(),
-                    template_gray.height()
-                );
-            }
-
-            Ok(template_gray)
+        if self.config.debug_enabled {
+            println!(
+                "📐 Cropping template '{}' / '{}' from full image ({}x{}) to [{},{},{},{}]",
+                template.name,
+                template.match_target_name,
+                template_image.width(),
+                template_image.height(),
+                crop_x,
+                crop_y,
+                crop_w,
+                crop_h,
+            );
         }
-    }
 
-    /// Extract template region coordinates from filename
-    /// Returns (x, y, width, height) if found, None otherwise
-    fn extract_template_region_from_filename(
-        &self,
-        filename: &str,
-    ) -> Option<(u32, u32, u32, u32)> {
-        // Look for pattern [x,y,width,height] in filename
-        if let Some(start) = filename.find('[')
-            && let Some(end) = filename.find(']')
-            && end > start
+        if crop_x + crop_w > template_image.width() || crop_y + crop_h > template_image.height() {
+            return Err(format!(
+                "MatchTarget '{}' crop [{},{},{},{}] exceeds image bounds ({}x{})",
+                template.match_target_name,
+                crop_x,
+                crop_y,
+                crop_w,
+                crop_h,
+                template_image.width(),
+                template_image.height()
+            ));
+        }
+
+        let cropped = image::imageops::crop_imm(&template_image, crop_x, crop_y, crop_w, crop_h);
+        let cropped_gray = image::DynamicImage::ImageRgba8(cropped.to_image()).to_luma8();
+
+        if (cropped_gray.width() > 500 || cropped_gray.height() > 500) && self.config.debug_enabled
         {
-            let region_str = &filename[start + 1..end];
-            let parts: Vec<&str> = region_str.split(',').collect();
-            if parts.len() == 4
-                && let (Ok(x), Ok(y), Ok(width), Ok(height)) = (
-                    parts[0].trim().parse::<u32>(),
-                    parts[1].trim().parse::<u32>(),
-                    parts[2].trim().parse::<u32>(),
-                    parts[3].trim().parse::<u32>(),
-                )
-            {
-                return Some((x, y, width, height));
-            }
+            println!(
+                "⚠️ Large template detected: {}x{} - this may be slow!",
+                cropped_gray.width(),
+                cropped_gray.height()
+            );
         }
-        None
+
+        Ok(cropped_gray)
     }
-}

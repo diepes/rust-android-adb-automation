@@ -1,6 +1,7 @@
 //! Template management and matching functionality
 
 use super::region::SearchRegion;
+use super::sidecar::{MatchTargetDef, TemplateSidecar};
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
@@ -16,18 +17,46 @@ pub enum TemplateCategory {
 #[derive(Debug, Clone)]
 pub struct Template {
     pub path: String,
+    /// Stem of the PNG file, e.g. `login` for `login.png`.
     pub name: String,
+    /// Name of the specific MatchTarget within the sidecar, e.g. `login_button`.
+    pub match_target_name: String,
     pub search_region: SearchRegion,
+    /// Top-left x coordinate of the crop within the Template image.
+    pub crop_x: u32,
+    /// Top-left y coordinate of the crop within the Template image.
+    pub crop_y: u32,
+    /// Width of the crop region used for matching (from sidecar crop).
     pub width: u32,
+    /// Height of the crop region used for matching (from sidecar crop).
     pub height: u32,
     pub category: TemplateCategory,
 }
 
 impl Template {
-    pub fn new(path: String, search_region: SearchRegion) -> Result<Self, String> {
-        // Load image to get dimensions
-        let image =
-            image::open(&path).map_err(|e| format!("Failed to load template {}: {}", path, e))?;
+    /// Create a Template from a PNG path and a `MatchTargetDef` sourced from the sidecar.
+    pub fn from_match_target(
+        path: String,
+        search_region: SearchRegion,
+        target: &MatchTargetDef,
+    ) -> Result<Self, String> {
+        let image = image::open(&path)
+            .map_err(|e| format!("Failed to load template {}: {}", path, e))?;
+
+        let crop = &target.crop;
+
+        if crop.x + crop.width > image.width() || crop.y + crop.height > image.height() {
+            return Err(format!(
+                "MatchTarget '{}' crop [{},{},{},{}] exceeds image bounds ({}x{})",
+                target.name,
+                crop.x,
+                crop.y,
+                crop.width,
+                crop.height,
+                image.width(),
+                image.height()
+            ));
+        }
 
         let name = Path::new(&path)
             .file_stem()
@@ -35,71 +64,19 @@ impl Template {
             .unwrap_or("unknown")
             .to_string();
 
-        let category = Self::determine_category(&name);
-
-        // Calculate actual template dimensions (cropped if region is specified in filename)
-        let (width, height) = Self::calculate_template_dimensions(&name, &image)?;
+        let category = Self::determine_category(&target.name);
 
         Ok(Self {
             path,
             name,
+            match_target_name: target.name.clone(),
             search_region,
-            width,
-            height,
+            crop_x: crop.x,
+            crop_y: crop.y,
+            width: crop.width,
+            height: crop.height,
             category,
         })
-    }
-
-    /// Calculate the actual template dimensions after cropping (if applicable)
-    fn calculate_template_dimensions(
-        filename: &str,
-        image: &image::DynamicImage,
-    ) -> Result<(u32, u32), String> {
-        // Check if filename contains region coordinates [x,y,width,height]
-        if let Some(region_coords) = Self::extract_region_from_filename(filename) {
-            let (crop_x, crop_y, crop_w, crop_h) = region_coords;
-
-            // Validate crop region bounds
-            if crop_x + crop_w > image.width() || crop_y + crop_h > image.height() {
-                return Err(format!(
-                    "Template crop region [{},{},{},{}] exceeds image bounds ({}x{})",
-                    crop_x,
-                    crop_y,
-                    crop_w,
-                    crop_h,
-                    image.width(),
-                    image.height()
-                ));
-            }
-
-            // Return cropped dimensions
-            Ok((crop_w, crop_h))
-        } else {
-            // No region specified, use full image dimensions
-            Ok((image.width(), image.height()))
-        }
-    }
-
-    /// Extract region coordinates from filename
-    fn extract_region_from_filename(filename: &str) -> Option<(u32, u32, u32, u32)> {
-        if let Some(start) = filename.find('[')
-            && let Some(end) = filename.find(']')
-            && end > start
-        {
-            let region_str = &filename[start + 1..end];
-            let parts: Vec<&str> = region_str.split(',').collect();
-            if parts.len() == 4
-                && let (Ok(x), Ok(y), Ok(width), Ok(height)) = (
-                    parts[0].trim().parse::<u32>(),
-                    parts[1].trim().parse::<u32>(),
-                    parts[2].trim().parse::<u32>(),
-                    parts[3].trim().parse::<u32>(),
-                )
-            {
-                return Some((x, y, width, height));
-            }
-        }
-        None
     }
 
     fn determine_category(name: &str) -> TemplateCategory {
@@ -182,7 +159,11 @@ impl TemplateManager {
         }
     }
 
-    /// Scan directory for PNG template files and load them
+    /// Scan directory for PNG files that have a companion sidecar JSON and load
+    /// one `Template` per `MatchTargetDef` declared in the sidecar.
+    ///
+    /// PNG files without a sidecar are skipped — they are saved Screenshots,
+    /// not yet Templates.
     pub fn load_templates_from_directory(&mut self, directory: &str) -> Result<usize, String> {
         use super::region::RegionManager;
 
@@ -199,38 +180,61 @@ impl TemplateManager {
             .map_err(|e| format!("Failed to read directory {}: {}", directory, e))?;
 
         for entry in entries {
-            if let Ok(entry) = entry
-                && let Some(file_name) = entry.file_name().to_str()
-                && file_name.ends_with(".png")
-                && entry.path().is_file()
-            {
-                let file_path = entry.path().to_string_lossy().to_string();
+            let Ok(entry) = entry else { continue };
+            let Some(file_name) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            if !file_name.ends_with(".png") || !entry.path().is_file() {
+                continue;
+            }
 
-                // Determine search region from filename or use full screen
-                let search_region = region_manager.resolve_region(file_name);
+            let png_path = entry.path();
 
-                match Template::new(file_path, search_region) {
-                    Ok(template) => {
-                        if template.is_valid() {
-                            self.templates.push(template);
-                            loaded_count += 1;
-                        } else {
-                            eprintln!("⚠️ Invalid template skipped: {}", file_name);
-                        }
+            // Skip PNGs that have no sidecar — they are saved Screenshots, not Templates.
+            if !TemplateSidecar::has_sidecar(&png_path) {
+                continue;
+            }
+
+            let sidecar = match TemplateSidecar::load_for(&png_path) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("⚠️ Failed to load sidecar for {}: {}", file_name, e);
+                    continue;
+                }
+            };
+
+            let file_path = png_path.to_string_lossy().to_string();
+            let search_region = region_manager.resolve_region(&file_name);
+
+            for target in &sidecar.match_targets {
+                match Template::from_match_target(file_path.clone(), search_region.clone(), target)
+                {
+                    Ok(template) if template.is_valid() => {
+                        self.templates.push(template);
+                        loaded_count += 1;
+                    }
+                    Ok(_) => {
+                        eprintln!(
+                            "⚠️ Invalid template skipped: {} / {}",
+                            file_name, target.name
+                        );
                     }
                     Err(e) => {
-                        eprintln!("⚠️ Failed to load template {}: {}", file_name, e);
+                        eprintln!(
+                            "⚠️ Failed to load template {} / {}: {}",
+                            file_name, target.name, e
+                        );
                     }
                 }
             }
         }
 
-        // Sort templates by category and name for consistent processing
+        // Sort templates by category and match_target_name for consistent processing
         self.templates.sort_by(|a, b| {
             a.category
                 .partial_cmp(&b.category)
                 .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.name.cmp(&b.name))
+                .then_with(|| a.match_target_name.cmp(&b.match_target_name))
         });
 
         Ok(loaded_count)
@@ -249,9 +253,11 @@ impl TemplateManager {
             .collect()
     }
 
-    /// Get template by name
-    pub fn get_template_by_name(&self, name: &str) -> Option<&Template> {
-        self.templates.iter().find(|t| t.name == name)
+    /// Get template by its MatchTarget name
+    pub fn get_template_by_target_name(&self, name: &str) -> Option<&Template> {
+        self.templates
+            .iter()
+            .find(|t| t.match_target_name == name)
     }
 
     /// Clear all loaded templates
@@ -270,3 +276,5 @@ impl TemplateManager {
         self.load_templates_from_directory(directory)
     }
 }
+
+

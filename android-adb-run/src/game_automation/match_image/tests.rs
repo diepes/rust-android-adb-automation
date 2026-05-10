@@ -68,7 +68,10 @@ fn test_detection_result_has_matches() {
     let template = Template {
         path: "test.png".to_string(),
         name: "test".to_string(),
+        match_target_name: "test_target".to_string(),
         search_region: region,
+        crop_x: 0,
+        crop_y: 0,
         width: 50,
         height: 50,
         category: TemplateCategory::Unknown,
@@ -90,7 +93,10 @@ fn test_detection_result_best_match() {
         let template = Template {
             path: format!("test{i}.png"),
             name: format!("test{i}"),
+            match_target_name: format!("target{i}"),
             search_region: region.clone(),
+            crop_x: 0,
+            crop_y: 0,
             width: 50,
             height: 50,
             category: TemplateCategory::Unknown,
@@ -111,7 +117,10 @@ fn test_template_match_tap_coordinates() {
     let template = Template {
         path: "test.png".to_string(),
         name: "test".to_string(),
+        match_target_name: "test_target".to_string(),
         search_region: region,
+        crop_x: 0,
+        crop_y: 0,
         width: 50,
         height: 50,
         category: TemplateCategory::Unknown,
@@ -132,7 +141,10 @@ fn test_template_match_within_bounds() {
     let template = Template {
         path: "test.png".to_string(),
         name: "test".to_string(),
+        match_target_name: "test_target".to_string(),
         search_region: region,
+        crop_x: 0,
+        crop_y: 0,
         width: 50,
         height: 50,
         category: TemplateCategory::Unknown,
